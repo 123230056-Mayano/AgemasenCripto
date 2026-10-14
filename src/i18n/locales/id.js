@@ -17,7 +17,7 @@ module.exports = {
   "lang.notConfigured":
     "⚠️ Gak bisa nyimpen pengaturan: SUPABASE_URL / SUPABASE_SERVICE_KEY belum diisi di bot.",
   "lang.adminCheckFailed": "⚠️ Gagal ngecek apakah kamu admin grup. Coba lagi bentar ya.",
-  "lang.adminOnly": "🚫 Cuma admin grup yang boleh ganti bahasa bot di sini, dasar.",
+  "lang.adminOnly": "🚫 Hanya admin grup yang boleh mengganti bahasa bot di sini.",
   "lang.already": "ℹ️ Bahasanya udah *{language}* kok.",
   "lang.saveFailed": "⚠️ Gagal nyimpen bahasa ke database. Coba lagi bentar ya.",
   "lang.changed": "✅ Oke, bahasa untuk {scope} sekarang: *{language}*.",
@@ -35,19 +35,19 @@ module.exports = {
 
   // ---------- chat AI ----------
   "forget.had":
-    "Hmph, oke... sudah aku lupain semua obrolan kita. Mulai dari nol lagi ya. 😤",
+    "Oke, semua obrolan kita sudah dilupakan. Kita mulai dari awal lagi ya.",
   "forget.none":
-    "Lho, kita kan belum pernah ngobrol apa-apa. Gak ada yang perlu dilupain, dasar. 🙄",
+    "Kita belum punya obrolan apa pun, jadi tidak ada yang perlu dilupakan.",
 
   // ---------- !ringkas ----------
-  "ringkas.reading": "Hmph, tunggu bentar, aku bacain dulu dokumennya... 📄",
+  "ringkas.reading": "Sebentar ya, dokumennya sedang aku baca... 📄",
   "ringkas.long":
-    "Dokumennya lumayan panjang (kira-kira {chunks} bagian yang aku baca satu-satu), jadi agak lama dikit ya, sabar! Bukan berarti aku males, cuma... yah, gitu deh. 😤",
+    "Dokumennya lumayan panjang (kira-kira {chunks} bagian yang aku baca satu-satu), jadi prosesnya agak lebih lama. Mohon ditunggu ya.",
   "ringkas.tip":
     "💡 Kalau mau nanya-nanya lebih detail soal isi dokumen ini, tinggal tag aku (@AgemasenBot) atau reply pesanku -- masih inget isinya kok, sekitar {hours} jam ke depan. ...B-bukan berarti aku niat bantuin lama-lama, ya!",
-  "ringkas.noGroq": "Hmph, aku belum dikasih GROQ_API_KEY sama pemilikku. Bukan salahku ya! 😤",
+  "ringkas.noGroq": "GROQ_API_KEY belum diatur oleh pemilik bot, jadi fitur ini belum bisa dipakai.",
   "ringkas.fail":
-    "Duh, aku gagal bacain/ringkas dokumennya. Coba cek lagi filenya bener PDF & gak rusak, terus coba lagi. 💢",
+    "Maaf, aku gagal membaca/meringkas dokumennya. Cek lagi apakah filenya benar-benar PDF dan tidak rusak, lalu coba lagi.",
 
   // ---------- !hd ----------
   "hd.badScale": "❌ Scale tidak tersedia.\n\nGunakan:\n!hd\n!hd 2x\n!hd 4x",
@@ -143,16 +143,16 @@ module.exports = {
     "✅ Gak lagi kena backoff. !dl YouTube seharusnya bisa dicoba normal.\n(Catatan: ini status TERAKHIR YANG TERCATAT dari percobaan sebelumnya -- kalau dari deploy terakhir belum ada yang pernah nyoba !dl sama sekali, status ini belum tentu mencerminkan kondisi IP yang sebenarnya.)",
 
   // ---------- owner / ngambek ----------
-  "ngambek.1": "Hmph! Aku lagi gak mau aktif, dasar. 😤",
-  "ngambek.2": "Males ah, aku lagi dimatiin. Gak mau kerja dulu sekarang. 🙄",
+  "ngambek.1": "Bot sedang dinonaktifkan.",
+  "ngambek.2": "Bot sedang dimatikan, jadi belum bisa merespons sekarang.",
   "ngambek.3": "Ish, jangan suruh-suruh aku, aku lagi nonaktif tau!",
-  "ngambek.contact": "Kalau mau aku aktif lagi, hubungin @{owner} ya, bukan aku yang nentuin. 💢",
-  "owner.denied.bot": "🚫 Cuma owner yang boleh atur aktif/nonaktifin aku, dasar.",
-  "owner.denied.listgrup": "🚫 Cuma owner yang boleh liat daftar grup, dasar.",
-  "owner.denied.user": "🚫 Cuma owner yang boleh atur blokir per nomor, dasar.",
-  "owner.denied.listuser": "🚫 Cuma owner yang boleh liat daftar nomor, dasar.",
+  "ngambek.contact": "Kalau ingin bot diaktifkan lagi, silakan hubungi @{owner}.",
+  "owner.denied.bot": "🚫 Hanya owner yang boleh mengatur aktif/nonaktifnya bot.",
+  "owner.denied.listgrup": "🚫 Hanya owner yang boleh melihat daftar grup.",
+  "owner.denied.user": "🚫 Hanya owner yang boleh mengatur blokir per nomor.",
+  "owner.denied.listuser": "🚫 Hanya owner yang boleh melihat daftar nomor.",
   "owner.denied.sub":
-    "🚫 Cuma owner yang boleh atur langganan, dasar. (Cek sisa langganan: *!langganan*)",
+    "🚫 Hanya owner yang boleh mengatur langganan. (Cek sisa langganan: *!langganan*)",
 
   // ---------- langganan ----------
   "sub.notEnabled": "ℹ️ Fitur langganan belum diaktifkan.",
@@ -168,7 +168,7 @@ module.exports = {
   "sub.blocked.expired.user": "⏳ Langganan nomor kamu sudah habis sejak {date}.",
   "sub.blocked.none.group": "🔒 Grup ini belum berlangganan.",
   "sub.blocked.none.user": "🔒 Nomor kamu belum berlangganan.",
-  "sub.contactOwner": "Mau lanjut pakai aku? Hubungi @{owner} buat perpanjang ya. 💢",
+  "sub.contactOwner": "Ingin lanjut memakai bot? Hubungi @{owner} untuk perpanjangan.",
   "time.expired": "habis",
   "time.dhm.days": "{d} hari {h} jam",
   "time.dhm.hours": "{h} jam {m} menit",
@@ -212,7 +212,7 @@ module.exports = {
   "dur.m": "{n} menit",
 
   // ---------- chat AI (error & label) ----------
-  "ai.fail": "H-hmph! Otakku lagi ngambek gara-gara lagi malas mikir. Coba tag aku lagi nanti. 💢",
+  "ai.fail": "Maaf, saat ini aku sedang tidak bisa memproses permintaan. Coba tag aku lagi sebentar lagi.",
   "ai.tagOnly": "(cuma nge-tag doang, gak nulis apa-apa)",
   "ai.sources": "Sumber:",
 

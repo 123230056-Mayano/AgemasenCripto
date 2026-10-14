@@ -3,7 +3,7 @@ module.exports = {
   "menu.text": `
 ✨ *AGEMASEN BOT* ✨
 
-Hmph... don't get the wrong idea. I'm just showing you the command list, it doesn't mean I actually want to help you that much.
+Fufu... welcome, Trainer-san. Here's the list of available commands. For crypto analysis, just tag me or reply to my messages~
 
 ┏━━━━━━━━━━━━━━━┓
 ┃ 🔎 *IMAGE SEARCH*
@@ -405,7 +405,7 @@ Search scholarly publications right from WhatsApp: title, authors, year, journal
 
   "cmd.lupain": `🧠 *!forget*
 
-Clear the AI (tsundere) chat memory between you and the bot -- including the PDF document memory from !summarize if there is one -- the bot will "forget" everything and start from scratch.
+Clear the AI chat memory between you and the bot -- including the PDF document memory from !summarize if there is one -- the bot will "forget" everything and start from scratch.
 
 Image search commands (!img/!next/!id) are NOT affected, this only clears the AI chat memory.`,
 

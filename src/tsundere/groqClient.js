@@ -99,7 +99,7 @@ const GROQ_TIMEOUT_MS = 20000;
 // longgar khusus buat request yang ada gambarnya.
 const GROQ_VISION_TIMEOUT_MS = Number(process.env.GROQ_VISION_TIMEOUT_MS) || 45000;
 
-const GROQ_MAX_TOKENS = Number(process.env.GROQ_MAX_TOKENS) || 800;
+const GROQ_MAX_TOKENS = Number(process.env.GROQ_MAX_TOKENS) || 1500;
 // GROQ_VISION_MODEL (qwen/qwen3.6-27b) itu REASONING model -- sebelum
 // nulis jawaban akhir, dia "mikir" dulu pakai reasoning tokens yang
 // SAMA-SAMA motong dari max_completion_tokens (walau hasil mikirnya

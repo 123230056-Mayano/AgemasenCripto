@@ -1,6 +1,6 @@
 // =====================================================
 // English. Same keys as id.js (check with: npm run check:i18n).
-// The tsundere personality is kept on purpose -- it's part of the bot.
+// Tone: calm, neutral, and professional (CryptoQuant Analyst persona).
 // =====================================================
 module.exports = {
   ...require("./en.menu"),
@@ -16,7 +16,7 @@ module.exports = {
   "lang.notConfigured":
     "⚠️ Can't save the setting: SUPABASE_URL / SUPABASE_SERVICE_KEY aren't set on the bot.",
   "lang.adminCheckFailed": "⚠️ Couldn't check whether you're a group admin. Try again in a moment.",
-  "lang.adminOnly": "🚫 Only group admins can change the bot's language here, you dummy.",
+  "lang.adminOnly": "🚫 Only group admins can change the bot's language here.",
   "lang.already": "ℹ️ It's already set to *{language}*.",
   "lang.saveFailed": "⚠️ Couldn't save the language to the database. Try again in a moment.",
   "lang.changed": "✅ Okay, the language for {scope} is now: *{language}*.",
@@ -34,20 +34,20 @@ module.exports = {
 
   // ---------- AI chat ----------
   "forget.had":
-    "Hmph, fine... I've forgotten our whole conversation. Starting from zero again. 😤",
+    "Done. I've cleared our conversation and we can start fresh.",
   "forget.none":
-    "Huh? We haven't even talked about anything yet. There's nothing to forget, you dummy. 🙄",
+    "We haven't talked about anything yet, so there's nothing to clear.",
 
   // ---------- !ringkas ----------
-  "ringkas.reading": "Hmph, hold on, let me read the document first... 📄",
+  "ringkas.reading": "One moment, I'm reading the document first... 📄",
   "ringkas.long":
-    "This document is pretty long (about {chunks} parts that I read one by one), so it'll take a little while, be patient! It's not that I'm lazy, it's just... well, you know. 😤",
+    "This document is pretty long (about {chunks} parts that I read one by one), so it will take a little longer. Thanks for your patience.",
   "ringkas.tip":
     "💡 If you want to ask more detailed questions about this document, just tag me (@AgemasenBot) or reply to my message -- I'll still remember its contents for about {hours} hours. ...I-it's not like I'm eager to keep helping you, okay!",
   "ringkas.noGroq":
-    "Hmph, my owner hasn't given me a GROQ_API_KEY. It's not my fault! 😤",
+    "The bot owner hasn't set a GROQ_API_KEY yet, so this feature isn't available.",
   "ringkas.fail":
-    "Ugh, I couldn't read/summarize the document. Check that the file is really a PDF and isn't corrupted, then try again. 💢",
+    "Sorry, I couldn't read or summarize the document. Check that the file is a valid PDF and isn't corrupted, then try again.",
 
   // ---------- !hd ----------
   "hd.badScale": "❌ That scale isn't available.\n\nUse:\n!hd\n!hd 2x\n!hd 4x",
@@ -143,16 +143,16 @@ module.exports = {
     "✅ Not in backoff. YouTube !dl should work normally.\n(Note: this is the LAST RECORDED status from a previous attempt -- if nobody has tried !dl since the last deploy, this doesn't necessarily reflect the real state of the IP.)",
 
   // ---------- owner / sulking ----------
-  "ngambek.1": "Hmph! I don't feel like being active right now, you dummy. 😤",
-  "ngambek.2": "Ugh, no thanks, I've been switched off. I'm not working right now. 🙄",
+  "ngambek.1": "The bot is currently switched off.",
+  "ngambek.2": "The bot is switched off, so I can't respond right now.",
   "ngambek.3": "Ish, stop ordering me around, I'm inactive right now!",
-  "ngambek.contact": "If you want me active again, contact @{owner}, it's not my call. 💢",
-  "owner.denied.bot": "🚫 Only the owner can switch me on/off, you dummy.",
-  "owner.denied.listgrup": "🚫 Only the owner can see the group list, you dummy.",
-  "owner.denied.user": "🚫 Only the owner can manage per-number blocking, you dummy.",
-  "owner.denied.listuser": "🚫 Only the owner can see the number list, you dummy.",
+  "ngambek.contact": "To have the bot switched back on, please contact @{owner}.",
+  "owner.denied.bot": "🚫 Only the owner can switch the bot on/off.",
+  "owner.denied.listgrup": "🚫 Only the owner can see the group list.",
+  "owner.denied.user": "🚫 Only the owner can manage per-number blocking.",
+  "owner.denied.listuser": "🚫 Only the owner can see the number list.",
   "owner.denied.sub":
-    "🚫 Only the owner can manage subscriptions, you dummy. (Check remaining time: *!subscription*)",
+    "🚫 Only the owner can manage subscriptions. (Check remaining time: *!subscription*)",
 
   // ---------- subscription ----------
   "sub.notEnabled": "ℹ️ The subscription feature isn't enabled.",
@@ -168,7 +168,7 @@ module.exports = {
   "sub.blocked.expired.user": "⏳ Your number's subscription expired on {date}.",
   "sub.blocked.none.group": "🔒 This group isn't subscribed.",
   "sub.blocked.none.user": "🔒 Your number isn't subscribed.",
-  "sub.contactOwner": "Want to keep using me? Contact @{owner} to renew. 💢",
+  "sub.contactOwner": "Want to keep using the bot? Contact @{owner} to renew.",
   "time.expired": "expired",
   "time.dhm.days": "{d}d {h}h",
   "time.dhm.hours": "{h}h {m}m",
@@ -212,7 +212,7 @@ module.exports = {
   "dur.m": "{n}m",
 
   // ---------- AI chat (errors & labels) ----------
-  "ai.fail": "H-hmph! My brain is sulking because I'm too lazy to think right now. Tag me again later. 💢",
+  "ai.fail": "Sorry, I can't process requests right now. Please tag me again in a moment.",
   "ai.tagOnly": "(just tagged me, didn't write anything)",
   "ai.sources": "Sources:",
 

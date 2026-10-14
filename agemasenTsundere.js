@@ -8,7 +8,7 @@
 //   src/tsundere/chatSession.js     -> riwayat obrolan per sesi + persistensi disk
 //   src/tsundere/vision.js          -> deteksi & download gambar buat dianalisis Groq
 //   src/tsundere/documentContext.js -> "ingatan" dokumen PDF dari !ringkas
-//   src/tsundere/persona.js         -> system prompt (kepribadian Special Week)
+//   src/tsundere/persona.js         -> system prompt (Wonder Acute sebagai analis kripto)
 //   src/tsundere/replyFormat.js     -> pemecah jawaban jadi beberapa bubble pesan
 //   src/tsundere/chatReply.js       -> askGroqTsundere (obrolan biasa)
 //   src/tsundere/summarizer.js      -> summarizeDocumentText (!ringkas)

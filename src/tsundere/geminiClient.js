@@ -75,7 +75,7 @@ const GEMINI_VISION_TIMEOUT_MS = Number(process.env.GEMINI_VISION_TIMEOUT_MS) ||
 // Set GEMINI_GROUNDING=0 kalau mau matiin sementara.
 const GEMINI_GROUNDING_ENABLED = process.env.GEMINI_GROUNDING !== "0";
 
-// Gemini 2.5 ke atas punya "thinking". Buat persona ngobrol santai,
+// Gemini 2.5 ke atas punya "thinking". Buat obrolan singkat,
 // mikirnya gak kepakai tapi tokennya tetap kepotong dari maxOutputTokens
 // -- persis masalah yang dulu bikin jawaban Groq vision jadi string kosong
 // (lihat catatan GROQ_VISION_MAX_TOKENS di groqClient.js). Default 0 =
@@ -88,7 +88,7 @@ const GEMINI_THINKING_BUDGET =
 // Batas token jawaban. Dipisah dari GROQ_MAX_TOKENS karena dua provider
 // ini beda karakter: kalau thinking dimatiin, Gemini nulis jawaban yang
 // relatif lebih padat untuk jumlah token yang sama.
-const GEMINI_MAX_TOKENS = Number(process.env.GEMINI_MAX_TOKENS) || 800;
+const GEMINI_MAX_TOKENS = Number(process.env.GEMINI_MAX_TOKENS) || 1500;
 const GEMINI_VISION_MAX_TOKENS = Number(process.env.GEMINI_VISION_MAX_TOKENS) || 1024;
 
 const GEMINI_MAX_RETRIES = Number(process.env.GEMINI_MAX_RETRIES) || 2;
@@ -248,19 +248,14 @@ function contentToParts(content) {
 
 // Instruksi tambahan yang HANYA dipasang saat grounding aktif.
 //
-// Kenapa perlu: begitu google_search nyala, model cenderung kabur ke gaya
-// "laporan hasil pencarian" -- rapi, berpoin, netral, dan persona
-// tsundere-nya ilang. Ini nahan supaya hasil pencarian cuma jadi BAHAN,
-// bukan ngeganti cara ngomongnya.
-const GROUNDING_STYLE_NOTE = `
-
-=== CATATAN SAAT KAMU PUNYA AKSES PENCARIAN ===
+// Supaya hasil pencarian dipakai sebagai DATA yang disitasi dengan jujur
+// (sumber + waktu), bukan dikarang atau disalin mentah-mentah.
+const GROUNDING_STYLE_NOTE = `\n\n=== CATATAN SAAT KAMU PUNYA AKSES PENCARIAN ===
 Kamu punya akses ke hasil pencarian web terbaru. Aturannya:
-- Pakai hasil pencarian cuma sebagai BAHAN jawaban. Cara kamu ngomong TETAP sebagai Special Week -- jangan berubah jadi gaya laporan/artikel berita yang kaku dan netral.
-- Jangan nulis ulang hasil pencarian mentah-mentah atau kepanjangan. Ambil intinya, sampaikan dengan gaya kamu sendiri, tetap ringkas (2-5 kalimat kecuali user minta detail).
-- Gesture (*aksi karakter*) tetap dipakai natural seperti biasa.
-- Kalau info yang ketemu ternyata gak yakin/bertentangan, bilang terus terang -- jangan sok tahu.
-- Kalau pertanyaannya jelas-jelas gak butuh info terkini (obrolan santai, curhat, nanya soal kamu sendiri), ABAIKAN hasil pencarian sepenuhnya dan jawab seperti biasa.`;
+- Pakai hasil pencarian sebagai DATA untuk analisis: harga, berita, sentimen, kondisi pasar. Sebutkan sumber dan perkiraan waktu datanya, dan bedakan fakta (dari sumber) dengan interpretasi dan prediksi kamu.
+- Jangan menyalin hasil pencarian mentah-mentah. Ambil intinya, sampaikan dengan gaya Wonder Acute yang tenang dan ringkas (jangan berubah jadi laporan kaku), kecuali pengguna meminta analisis lengkap.
+- Kalau data yang ditemukan tidak lengkap, usang, atau saling bertentangan, katakan terus terang. Jangan mengarang angka untuk menutup celahnya.
+- Kalau pertanyaannya jelas tidak butuh info terkini (obrolan umum, soal kamu sendiri), ABAIKAN hasil pencarian dan jawab seperti biasa.`;
 
 // Gemini 3.x ke atas itu "thinking-only" -- beda sama 2.5 yang bisa
 // dimatiin total thinking-nya (thinkingBudget: 0 valid). Kirim
