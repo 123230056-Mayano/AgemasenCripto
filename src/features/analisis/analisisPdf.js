@@ -13,6 +13,7 @@
  */
 
 const { PDFDocument, StandardFonts, rgb } = require("pdf-lib");
+const { buildChartPng } = require("./analisisChart");
 
 const PAGE_W = 595.28;
 const PAGE_H = 841.89;
@@ -89,7 +90,13 @@ function makeCleaner(font) {
   };
 }
 
-async function buildAnalysisPdf(data, fx) {
+/**
+ * @param {object} data  hasil /api/analyze
+ * @param {object} [fx]  kurs USD->IDR
+ * @param {object} [opts]
+ * @param {Array}  [opts.candles]  candle siap pakai (opsional; default diambil dari Binance)
+ */
+async function buildAnalysisPdf(data, fx, opts = {}) {
   const pdf = await PDFDocument.create();
   const reg = await pdf.embedFont(StandardFonts.Helvetica);
   const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
@@ -100,6 +107,15 @@ async function buildAnalysisPdf(data, fx) {
   const ctx = data.backend?.context || {};
   const ind = main.indicators || {};
   const trendColor = C[report.trend] || C.muted;
+
+  // Grafik candlestick. Kalau gagal (Binance down, dst) PDF tetap jadi, hanya tanpa grafik.
+  let chartImg = null;
+  try {
+    const png = await buildChartPng(data, { candles: opts.candles });
+    chartImg = await pdf.embedPng(png);
+  } catch (err) {
+    console.log("[analisis] grafik dilewati:", err.response?.status || err.message);
+  }
 
   pdf.setTitle(`Analisis ${main.coin || ""} ${data.backend?.timeframe || ""}`.trim());
   pdf.setAuthor("AGEMASEN Crypto Analyst");
@@ -211,6 +227,20 @@ async function buildAnalysisPdf(data, fx) {
   ]);
   if (fx?.rate) {
     text(`Kurs 1 USD = ${fmtIdr(fx.rate)} (${fx.source || "-"}). Harga dari pasangan USDT di Binance, dianggap setara USD.`, { size: 8, color: C.muted });
+  }
+
+  // ================= GRAFIK =================
+  if (chartImg) {
+    heading("Grafik");
+    const w = CONTENT_W;
+    const h = (chartImg.height / chartImg.width) * w;
+    need(h + 22);
+    page.drawImage(chartImg, { x: MARGIN, y: y - h, width: w, height: h });
+    y -= h + 4;
+    text(
+      "Candle yang sudah tutup, zona waktu WIB. Garis R/S adalah level kunci dari analisis; EMA dihitung dari data yang sama dengan indikator di bawah.",
+      { size: 8, color: C.muted },
+    );
   }
 
   if (data.warnings?.length) {
