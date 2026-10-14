@@ -16,6 +16,8 @@ const COMMAND_ALIASES = {
   "!subscription": "!langganan",
   "!thread": "!dlt",
   "!analysis": "!analisis",
+  "!price": "!harga",
+  "!levels": "!level",
 };
 
 // "!Summarize tolong fokus ke kesimpulan" -> "!ringkas tolong fokus ke kesimpulan"

@@ -61,6 +61,9 @@ Fufu... welcome, Trainer-san. Here's the list of available commands. For crypto 
 ┃ 📈 *CRYPTO ANALYSIS*
 ┗━━━━━━━━━━━━━━━┛
 ▸ !analysis
+▸ !chart
+▸ !price
+▸ !level
 
 ┏━━━━━━━━━━━━━━━┓
 ┃ 💬 *AI CHAT*
@@ -428,4 +431,7 @@ The setting is saved permanently, so it won't reset when the bot restarts.`,
   "cmd.threshold": "📊 *!threshold*\n\nSends the Uma Musume circle rank threshold card from tier SS down to D (minimum fans, fans per day and deltas for each tier).\n\n*Example:*\n```\n!threshold\n```",
   "cmd.leaderboard": "🏆 *!leaderboard*\n\nSends the Uma Musume circle leaderboard card for rank 1 to 50 (tier, leader, live fans and monthly fans).\n\n*Example:*\n```\n!leaderboard\n!lb\n```",
   "cmd.analisis": "📈 *!analysis <coin> [1H|4H|1D]*\n\nCrypto technical analysis (price, indicators, support/resistance, bullish/bearish scenarios, news, risks) sent as a *PDF file*.\n\n*Examples:*\n```\n!analysis btc\n!analysis sol 4h\n!analysis eth 1d\n```\n\nDefault timeframe is *4H*. Use the coin ticker (BTC, ETH, SOL, etc).\n\n⚠️ Automated analysis for education only, not trading signals. Takes about 10-40 seconds, with a 30-second cooldown between requests.",
+  "cmd.chart": "🕯️ *!chart <coin> [15m|1H|4H|1D]*\n\nSends a candlestick chart image with EMA 20/50/200 lines and dashed support/resistance lines.\n\n*Examples:*\n```\n!chart btc 1d\n!chart sol\n```\n\nDefault timeframe is *4H*.",
+  "cmd.harga": "💰 *!price <coin>*\n\nLive price in USDT and Rupiah with the 24h percent change.\n\n*Example:*\n```\n!price eth\n```",
+  "cmd.level": "📊 *!level <coin> [15m|1H|4H|1D]*\n\nResistance (R1, R2) and support (S1, S2) levels with the percent distance from the current price.\n\n*Example:*\n```\n!level sol 4h\n```\n\nDefault timeframe is *4H*. Not financial advice.",
 };

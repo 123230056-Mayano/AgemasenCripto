@@ -321,4 +321,13 @@ module.exports = {
   "analisis.timeout": "⏱️ The analysis server is slow to respond. Try again in a moment.",
   "analisis.fail": "❌ Failed to create the analysis. Try again later.",
   "analisis.failDetail": "❌ Failed to create the analysis: {detail}",
+
+  // ---------- !chart / !price / !level ----------
+  "kripto.busy": "Your previous crypto request is still being processed, hold on a bit.",
+  "kripto.cooldown": "Wait {sec} more seconds before using a crypto command again.",
+  "kripto.chart.caption": "📈 *{coin}/USDT {tf}*\n{price} ({change})",
+  "kripto.level.body": "📊 *{coin}/USDT {tf} levels*\nPrice: {price}\n\n{rows}\n\n_Not financial advice._",
+  "kripto.unsupported": "❌ Coin *{coin}* wasn't found on Binance (USDT pair). Example: *!price eth*.",
+  "kripto.timeout": "⏱️ The market data server is slow to respond. Try again in a moment.",
+  "kripto.fail": "❌ Failed to fetch market data. Try again later.",
 };

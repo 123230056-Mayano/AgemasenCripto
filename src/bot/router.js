@@ -4,6 +4,7 @@ const axios = require("axios");
 
 const { runArtikelCommand } = require("../commands/artikel");
 const { handleAnalisisCommand } = require("../features/analisis/analisisCommand");
+const { handleKriptoCommand } = require("../features/kripto/kriptoCommand");
 const { normalizeCommandAlias } = require("./commandAliases");
 const {
   handleTsundereChat,
@@ -636,6 +637,10 @@ async function handleSingleMessage(sock, msg) {
     // Lihat src/features/analisis/.
     // =====================
     if (await handleAnalisisCommand(sock, msg, { jid, text, lang })) return;
+
+    // !chart / !harga / !level <koin> [tf] -> analisis dasar kripto (data
+    // langsung dari Binance, tidak butuh ANALYST_URL). Lihat src/features/kripto/.
+    if (await handleKriptoCommand(sock, msg, { jid, text, lang })) return;
 
     // =====================
     // !ringkas [instruksi tambahan] -> baca teks dari dokumen PDF (langsung

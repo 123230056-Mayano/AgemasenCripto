@@ -321,4 +321,13 @@ module.exports = {
   "analisis.timeout": "⏱️ Server analisis lambat merespons. Coba lagi sebentar ya.",
   "analisis.fail": "❌ Gagal membuat analisis. Coba lagi nanti.",
   "analisis.failDetail": "❌ Gagal membuat analisis: {detail}",
+
+  // ---------- !chart / !harga / !level ----------
+  "kripto.busy": "Permintaan kripto kamu yang sebelumnya belum selesai, tunggu dulu ya.",
+  "kripto.cooldown": "Tunggu {sec} detik lagi sebelum pakai command kripto lagi ya.",
+  "kripto.chart.caption": "📈 *{coin}/USDT {tf}*\n{price} ({change})",
+  "kripto.level.body": "📊 *Level {coin}/USDT {tf}*\nHarga: {price}\n\n{rows}\n\n_Bukan saran finansial._",
+  "kripto.unsupported": "❌ Koin *{coin}* tidak ditemukan di Binance (pasangan USDT). Contoh: *!harga eth*.",
+  "kripto.timeout": "⏱️ Server data pasar lambat merespons. Coba lagi sebentar ya.",
+  "kripto.fail": "❌ Gagal mengambil data pasar. Coba lagi nanti.",
 };
