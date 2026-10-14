@@ -58,6 +58,11 @@ Hmph... don't get the wrong idea. I'm just showing you the command list, it does
 ▸ !article
 
 ┏━━━━━━━━━━━━━━━┓
+┃ 📈 *CRYPTO ANALYSIS*
+┗━━━━━━━━━━━━━━━┛
+▸ !analysis
+
+┏━━━━━━━━━━━━━━━┓
 ┃ 💬 *AI CHAT*
 ┗━━━━━━━━━━━━━━━┛
 ▸ Tag me (@AgemasenBot) to chat
@@ -422,4 +427,5 @@ The setting is saved permanently, so it won't reset when the bot restarts.`,
   "cmd.club": "🏯 *!club <club name or ID>*\n\nSearch Uma Musume clubs (circles, uma.moe data). You get a list of clubs with similar names plus club ID and leader name. *Reply* to that list with a number to see the club card (stats, rank and each member\'s gain).\n\nIf you type a club ID (digits), the card is shown right away.\n\n*Example:*\n```\n!club hachimi\n!club 738117397\n```",
   "cmd.threshold": "📊 *!threshold*\n\nSends the Uma Musume circle rank threshold card from tier SS down to D (minimum fans, fans per day and deltas for each tier).\n\n*Example:*\n```\n!threshold\n```",
   "cmd.leaderboard": "🏆 *!leaderboard*\n\nSends the Uma Musume circle leaderboard card for rank 1 to 50 (tier, leader, live fans and monthly fans).\n\n*Example:*\n```\n!leaderboard\n!lb\n```",
+  "cmd.analisis": "📈 *!analysis <coin> [1H|4H|1D]*\n\nCrypto technical analysis (price, indicators, support/resistance, bullish/bearish scenarios, news, risks) sent as a *PDF file*.\n\n*Examples:*\n```\n!analysis btc\n!analysis sol 4h\n!analysis eth 1d\n```\n\nDefault timeframe is *4H*. Use the coin ticker (BTC, ETH, SOL, etc).\n\n⚠️ Automated analysis for education only, not trading signals. Takes about 10-40 seconds, with a 30-second cooldown between requests.",
 };

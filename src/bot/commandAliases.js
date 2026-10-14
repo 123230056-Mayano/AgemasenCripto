@@ -15,6 +15,7 @@ const COMMAND_ALIASES = {
   "!forget": "!lupain",
   "!subscription": "!langganan",
   "!thread": "!dlt",
+  "!analysis": "!analisis",
 };
 
 // "!Summarize tolong fokus ke kesimpulan" -> "!ringkas tolong fokus ke kesimpulan"

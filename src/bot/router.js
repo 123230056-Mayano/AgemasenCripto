@@ -3,6 +3,7 @@ const { PDFParse } = require("pdf-parse");
 const axios = require("axios");
 
 const { runArtikelCommand } = require("../commands/artikel");
+const { handleAnalisisCommand } = require("../features/analisis/analisisCommand");
 const { normalizeCommandAlias } = require("./commandAliases");
 const {
   handleTsundereChat,
@@ -628,6 +629,13 @@ async function handleSingleMessage(sock, msg) {
       await runArtikelCommand(sock, jid, articleInput, senderId, lang);
       return;
     }
+
+    // =====================
+    // !analisis <koin> [1H|4H|1D] -> analisis teknikal crypto (web
+    // KriptoPredict, env ANALYST_URL) dikirim sebagai PDF.
+    // Lihat src/features/analisis/.
+    // =====================
+    if (await handleAnalisisCommand(sock, msg, { jid, text, lang })) return;
 
     // =====================
     // !ringkas [instruksi tambahan] -> baca teks dari dokumen PDF (langsung

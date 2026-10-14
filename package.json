@@ -17,6 +17,7 @@
     "cheerio": "^1.0.0",
     "ffmpeg-static": "^5.2.0",
     "ffprobe-static": "^3.1.0",
+    "pdf-lib": "^1.17.1",
     "pdf-parse": "^2.4.5",
     "pg": "^8.13.1",
     "qrcode-terminal": "^0.12.0",

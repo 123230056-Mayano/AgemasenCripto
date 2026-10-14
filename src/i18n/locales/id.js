@@ -310,4 +310,15 @@ module.exports = {
   "dl.err.unsupported": "❌ Link ini belum didukung buat didownload.",
   "dl.err.generic": "Terjadi kesalahan saat download.",
   "dl.rateLimited": "⏳ Lagi kena rate-limit YouTube (server ini kebanyakan request beberapa saat lalu). Coba lagi dalam ~{time}, bot bakal otomatis nyoba lagi setelah itu -- gak perlu diapa-apain, tinggal kirim !dl lagi nanti.",
+
+  // ---------- !analisis ----------
+  "analisis.noUrl": "⚙️ ANALYST_URL belum di-set di server bot, jadi !analisis belum bisa dipakai.",
+  "analisis.busy": "Proses *!analisis* kamu yang sebelumnya belum selesai, tunggu dulu ya.",
+  "analisis.cooldown": "Tunggu {sec} detik lagi sebelum pakai *!analisis* lagi ya.",
+  "analisis.working": "📈 Menganalisis *{coin}* ({tf}) dan menyiapkan PDF... bisa 10-40 detik.",
+  "analisis.caption": "📈 *{coin} {tf}* - {trend}\nHarga: {price}\n_Analisis edukatif, bukan sinyal trading._",
+  "analisis.unsupported": "❌ Koin *{coin}* atau timeframe *{tf}* tidak didukung. Contoh: *!analisis sol 4h* (timeframe: 1H, 4H, 1D).",
+  "analisis.timeout": "⏱️ Server analisis lambat merespons. Coba lagi sebentar ya.",
+  "analisis.fail": "❌ Gagal membuat analisis. Coba lagi nanti.",
+  "analisis.failDetail": "❌ Gagal membuat analisis: {detail}",
 };

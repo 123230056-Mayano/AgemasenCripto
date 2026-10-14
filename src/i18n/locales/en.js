@@ -310,4 +310,15 @@ module.exports = {
   "dl.err.unsupported": "❌ This link isn't supported for downloading yet.",
   "dl.err.generic": "An error occurred while downloading.",
   "dl.rateLimited": "⏳ Hit YouTube's rate limit (this server made too many requests a moment ago). Try again in ~{time}, the bot will automatically retry after that -- nothing to do, just send !dl again later.",
+
+  // ---------- !analysis ----------
+  "analisis.noUrl": "⚙️ ANALYST_URL isn't set on the bot server, so !analysis can't be used yet.",
+  "analisis.busy": "Your previous *!analysis* request is still being processed, hold on a bit.",
+  "analisis.cooldown": "Wait {sec} more seconds before using *!analysis* again.",
+  "analisis.working": "📈 Analyzing *{coin}* ({tf}) and preparing the PDF... may take 10-40 seconds.",
+  "analisis.caption": "📈 *{coin} {tf}* - {trend}\nPrice: {price}\n_Educational analysis, not trading signals._",
+  "analisis.unsupported": "❌ Coin *{coin}* or timeframe *{tf}* isn't supported. Example: *!analysis sol 4h* (timeframes: 1H, 4H, 1D).",
+  "analisis.timeout": "⏱️ The analysis server is slow to respond. Try again in a moment.",
+  "analisis.fail": "❌ Failed to create the analysis. Try again later.",
+  "analisis.failDetail": "❌ Failed to create the analysis: {detail}",
 };

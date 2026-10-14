@@ -125,6 +125,15 @@ const OPENALEX_API_KEY = process.env.OPENALEX_API_KEY || "";
 const OPEN_ACCESS_CONTACT_EMAIL = process.env.OPEN_ACCESS_CONTACT_EMAIL || "";
 
 // =====================================================
+// Fitur "!analisis" -- cetak analisis crypto jadi PDF (src/features/analisis/)
+//
+// - ANALYST_URL : alamat web KriptoPredict (Next.js) yang punya endpoint
+//                 /api/analyze & /api/fx, mis. https://kriptopredict.up.railway.app
+//                 Kosong = !analisis membalas "belum dikonfigurasi".
+// =====================================================
+const ANALYST_URL = (process.env.ANALYST_URL || "").trim().replace(/\/+$/, "");
+
+// =====================================================
 // BAHASA BOT (id / en) -- lihat src/i18n/ dan src/state/languageStore.js
 //
 // - DEFAULT_LANG : bahasa untuk grup/nomor yang BELUM pernah memilih
@@ -148,6 +157,7 @@ module.exports = {
   GIPHY_API_KEY,
   OPENALEX_API_KEY,
   OPEN_ACCESS_CONTACT_EMAIL,
+  ANALYST_URL,
   SUPABASE_URL,
   SUPABASE_SERVICE_KEY,
   SUBSCRIPTION_REQUIRED,
