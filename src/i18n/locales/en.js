@@ -1,0 +1,313 @@
+// =====================================================
+// English. Same keys as id.js (check with: npm run check:i18n).
+// The tsundere personality is kept on purpose -- it's part of the bot.
+// =====================================================
+module.exports = {
+  ...require("./en.menu"),
+
+  // ---------- !lang ----------
+  "lang.scope.group": "this group",
+  "lang.scope.user": "your number",
+  "lang.source.set": "set manually",
+  "lang.source.default": "bot default",
+  "lang.current":
+    "🌐 *Bot language*\n\nFor {scope}: *{language}* ({source})\n\nChange language:\n{list}\n\n_In groups, only group admins can change it._",
+  "lang.invalid": "❓ I don't know the language \"{input}\". Pick one of these:\n{list}",
+  "lang.notConfigured":
+    "⚠️ Can't save the setting: SUPABASE_URL / SUPABASE_SERVICE_KEY aren't set on the bot.",
+  "lang.adminCheckFailed": "⚠️ Couldn't check whether you're a group admin. Try again in a moment.",
+  "lang.adminOnly": "🚫 Only group admins can change the bot's language here, you dummy.",
+  "lang.already": "ℹ️ It's already set to *{language}*.",
+  "lang.saveFailed": "⚠️ Couldn't save the language to the database. Try again in a moment.",
+  "lang.changed": "✅ Okay, the language for {scope} is now: *{language}*.",
+
+  // ---------- common ----------
+  "common.error": "Something went wrong.",
+  "common.timeout": "⏱️ The image server is responding slowly. Please try again.",
+  "common.onlyInGroup": "ℹ️ This command can only be used inside a group.",
+  "common.noName": "(no name)",
+  "common.hiddenMember": "(hidden member)",
+  "common.on": "✅ ACTIVE",
+  "common.off": "📴 INACTIVE",
+  "common.unknownCommand":
+    "❓ Unknown command.\nType *!menu* to see the list of available commands.",
+
+  // ---------- AI chat ----------
+  "forget.had":
+    "Hmph, fine... I've forgotten our whole conversation. Starting from zero again. 😤",
+  "forget.none":
+    "Huh? We haven't even talked about anything yet. There's nothing to forget, you dummy. 🙄",
+
+  // ---------- !ringkas ----------
+  "ringkas.reading": "Hmph, hold on, let me read the document first... 📄",
+  "ringkas.long":
+    "This document is pretty long (about {chunks} parts that I read one by one), so it'll take a little while, be patient! It's not that I'm lazy, it's just... well, you know. 😤",
+  "ringkas.tip":
+    "💡 If you want to ask more detailed questions about this document, just tag me (@AgemasenBot) or reply to my message -- I'll still remember its contents for about {hours} hours. ...I-it's not like I'm eager to keep helping you, okay!",
+  "ringkas.noGroq":
+    "Hmph, my owner hasn't given me a GROQ_API_KEY. It's not my fault! 😤",
+  "ringkas.fail":
+    "Ugh, I couldn't read/summarize the document. Check that the file is really a PDF and isn't corrupted, then try again. 💢",
+
+  // ---------- !hd ----------
+  "hd.badScale": "❌ That scale isn't available.\n\nUse:\n!hd\n!hd 2x\n!hd 4x",
+  "hd.needImage":
+    "📷 Send or reply to the image you want to make HD.\nExamples:\n!hd\n!hd 2x\n!hd 4x",
+  "hd.queued": "⏳ The server is processing another image.\n\nYour request has been queued.",
+  "hd.engineAi": "🤖 AI Super Resolution",
+  "hd.engineSharp": "✨ Upscale + Sharpening",
+  "hd.processing": "⏳ Processing image...\n\n{engine}\n📐 Scale: {scale}x",
+  "hd.successAi": "✨ Image successfully upscaled using AI.",
+  "hd.successSharp": "✨ Image successfully upscaled & sharpened.",
+  "hd.done": "✅ Done!\n\n{line}\n📐 Scale: {scale}x",
+  "hd.fail": "❌ Failed to process the image.\n\nPlease try again with another image.",
+
+  // ---------- image / GIF search / sessions ----------
+  "refill.gif":
+    "🔁 All GIFs for this tag/keyword have already been shown. Starting over from the beginning.",
+  "refill.img":
+    "🔁 All images for this tag/keyword have already been shown. Starting over from the beginning.",
+  "tag.invalidNumber": "⚠️ Invalid number. Pick 1-{max}.",
+  "tag.noImages": "❌ No images found for this character.",
+  "tag.noMore": "❌ There are no more images for this tag.",
+  "tag.pending":
+    "⚠️ There's still a character list waiting for your choice.\n\n➡️ To *pick a character*: reply to the list message, then type its number.\n➡️ To *continue another session* with a code: type the code directly, without replying.",
+  "img.notFound": "❌ Image not found.",
+  "gif.notFound": "❌ No GIF found for this keyword.",
+  "gif.providerFail": "Couldn't find a GIF, or the provider is acting up.",
+  "gif.noApiKey":
+    "⚙️ GIPHY_API_KEY isn't set (Tenor was tried first, but it failed/returned nothing too). Set the GIPHY_API_KEY env var for a more complete fallback.",
+  "pin.notFound": "❌ No images found on Pinterest for this keyword.",
+  "pixiv.notFound": "❌ No safe illustrations found on Pixiv for this keyword.",
+  "pixiv.blocked": "🚫 This keyword is blocked by the adult-content filter. !pixiv only serves general-audience content.",
+  "batch.partial": "ℹ️ Only found {found} of the {requested} images requested -- that's all there is.",
+  "batch.clamped": "ℹ️ Max {max} images per search, so I'm sending {max}.",
+  "batch.idList": "🆔 *ID list ({n} images):*",
+  "id.notFound": "❌ Image code not found.",
+
+  "cap.mediaImage": "Image",
+  "cap.mediaGif": "GIF",
+  "cap.moreImage": "image",
+  "cap.moreGif": "GIF",
+  "cap.result": "{media} Result",
+  "cap.continued": " (continued)",
+  "cap.character": "Character",
+  "cap.keyword": "Keyword",
+  "cap.sessionCode": "Session Code",
+  "cap.mediaCode": "{media} Code",
+  "cap.link": "Link",
+  "cap.title": "Title",
+  "cap.artist": "Artist",
+  "cap.nextWithCode":
+    "➡️ Type *{code}* (anyone can) or *!next* for another {media} from this search",
+  "cap.next": "➡️ Type *!next* for another {media} from this search",
+  "cap.idLine": "🔁 Type *!id {id}* to view this image again anytime",
+  "tagList.title": "*CHARACTERS FOUND*",
+  "tagList.hint": "_Reply to this message with the character's number to see the image_",
+  "tagList.step": "*PICK A TAG ({n}/{total}): {words}*",
+  "tagList.more": "_Showing {shown} of {total} results. Use a more specific keyword to narrow down._",
+  "img.wordNotFound": "❌ No tag matches \"{word}\". Check the spelling.",
+  "img.tooManyWords": "❌ Too many keywords (max 8 words).",
+
+  // ---------- stickers ----------
+  "sticker.making": "⏳ Making sticker...",
+  "sticker.failed": "❌ Failed to make the sticker.\n{err}",
+  "gif.making": "⏳ Making GIF...",
+  "togif.failed": "❌ Failed to make the GIF.\n{err}",
+  "togif.notAnimated":
+    "⚠️ That's a regular sticker (not animated), so there's nothing to turn into a GIF.\nWant an image instead? Use *!toimg*.",
+  "toimg.failed": "❌ Failed to make the image.\n{err}",
+  "sbrat.tooLong":
+    "⚠️ The text is too long ({len} characters, max {max}) so processing stays fast and doesn't lag the bot. Try shortening it.",
+  "sbrat.failed": "❌ Failed to make the BRAT sticker.\n{err}",
+  "sbrat.renderError": "Something went wrong while rendering the text, please try again.",
+  "gifbrat.tooLong":
+    "⚠️ The text is too long ({len} characters, max {max}) so the GIF stays quick to make and doesn't lag the bot. Try shortening it.",
+  "gifbrat.tooManyWords":
+    "⚠️ Too many words ({count}, max {max}) since every word becomes one animation frame. Try shortening it.",
+  "gifbrat.failed": "❌ Failed to make the BRAT GIF.\n{err}",
+  "schat.nameTooLong": "⚠️ The sender name is too long (max {max} characters).",
+  "schat.msgTooLong":
+    "⚠️ The message is too long ({len} characters, max {max}) so the sticker layout stays tidy and processing stays fast.",
+  "schat.failed": "❌ Failed to make the chat sticker.\n{err}",
+  "schat.renderError": "Something went wrong while rendering, please try again.",
+
+  // ---------- download ----------
+  "dl.invalidLink": "❌ Invalid link.",
+  "dl.noLinkInReply": "❌ The message you replied to doesn't contain a link. Reply to a message that has a link (YouTube, TikTok, Instagram, X, etc.) and then type !dl, !dlr, or !dlt.",
+  "dl.badHeight":
+    "⚠️ Resolution \"{hint}\" isn't recognized, use one of: {list}. Continuing the download at default quality for now...",
+  "dlstatus.backoff":
+    "⏳ In backoff (hit YouTube's rate limit). Remaining wait: ~{time}.\nThe bot will automatically retry after that -- YouTube !dl is rejected for now so we don't add more load on the IP.",
+  "dlstatus.ok":
+    "✅ Not in backoff. YouTube !dl should work normally.\n(Note: this is the LAST RECORDED status from a previous attempt -- if nobody has tried !dl since the last deploy, this doesn't necessarily reflect the real state of the IP.)",
+
+  // ---------- owner / sulking ----------
+  "ngambek.1": "Hmph! I don't feel like being active right now, you dummy. 😤",
+  "ngambek.2": "Ugh, no thanks, I've been switched off. I'm not working right now. 🙄",
+  "ngambek.3": "Ish, stop ordering me around, I'm inactive right now!",
+  "ngambek.contact": "If you want me active again, contact @{owner}, it's not my call. 💢",
+  "owner.denied.bot": "🚫 Only the owner can switch me on/off, you dummy.",
+  "owner.denied.listgrup": "🚫 Only the owner can see the group list, you dummy.",
+  "owner.denied.user": "🚫 Only the owner can manage per-number blocking, you dummy.",
+  "owner.denied.listuser": "🚫 Only the owner can see the number list, you dummy.",
+  "owner.denied.sub":
+    "🚫 Only the owner can manage subscriptions, you dummy. (Check remaining time: *!subscription*)",
+
+  // ---------- subscription ----------
+  "sub.notEnabled": "ℹ️ The subscription feature isn't enabled.",
+  "sub.label.group": "This group",
+  "sub.label.user": "Your number",
+  "sub.status.active": "Subscription: ✅ ACTIVE",
+  "sub.remaining": "Remaining: *{time}*",
+  "sub.endsAt": "Ends: {date}",
+  "sub.status.expired": "Subscription: ⏳ EXPIRED",
+  "sub.expiredSince": "Expired since: {date}",
+  "sub.status.none": "Subscription: 🔒 not subscribed",
+  "sub.blocked.expired.group": "⏳ This group's subscription expired on {date}.",
+  "sub.blocked.expired.user": "⏳ Your number's subscription expired on {date}.",
+  "sub.blocked.none.group": "🔒 This group isn't subscribed.",
+  "sub.blocked.none.user": "🔒 Your number isn't subscribed.",
+  "sub.contactOwner": "Want to keep using me? Contact @{owner} to renew. 💢",
+  "time.expired": "expired",
+  "time.dhm.days": "{d}d {h}h",
+  "time.dhm.hours": "{h}h {m}m",
+  "time.dhm.minutes": "{m}m",
+
+  // ---------- group info / online / bot status ----------
+  "groupinfo.title": "📋 *Group Info*",
+  "groupinfo.name": "*Name:* {v}",
+  "groupinfo.members": "*Members:* {v}",
+  "groupinfo.admins": "*Admins:* {v}",
+  "groupinfo.creator": "*Created by:* {v}",
+  "groupinfo.created": "*Created on:* {v}",
+  "groupinfo.whoCanSend": "*Who can send messages:* {v}",
+  "groupinfo.adminsOnly": "admins only",
+  "groupinfo.everyone": "all members",
+  "groupinfo.botHere": "*Bot in this group:* {v}",
+  "groupinfo.desc": "*Description:*",
+  "groupinfo.adminList": "*Admin list:*",
+  "groupinfo.fail": "⚠️ Failed to get group info. Try again in a moment.",
+  "online.cooldown": "⏳ Be patient, wait {sec} more seconds before checking online again.",
+  "online.tooMany":
+    "⚠️ This group has {n} members, too many to check (max {max}) so the bot account doesn't get rate-limited by WhatsApp.",
+  "online.checking": "🔎 Checking {n} members, wait ~{sec} seconds...",
+  "online.none": "_No one detected online._",
+  "online.result": "🟢 *Online in {group}* ({online}/{total})\n\n{body}\n\n{note}",
+  "online.note":
+    "_Note: people who hide their online status in their WhatsApp privacy settings won't show up._",
+  "online.fail": "⚠️ Failed to check who's online. Try again in a moment.",
+  "botstatus.title": "🤖 *Bot Status*",
+  "botstatus.connection": "*Connection:* ✅ connected",
+  "botstatus.uptime": "*Uptime:* {v}",
+  "botstatus.groups": "*Groups:* {total} (active {active}, inactive {disabled})",
+  "botstatus.dmUsers": "*DM users recorded:* {v}",
+  "botstatus.memory": "*Bot memory:* {v} MB",
+  "botstatus.node": "*Node.js:* {v}",
+  "botstatus.server": "*Server:* {v}",
+  "botstatus.thisGroup": "*In this group:* {v}",
+  "botstatus.fail": "⚠️ Failed to get bot status. Try again in a moment.",
+  "dur.d": "{n}d",
+  "dur.h": "{n}h",
+  "dur.m": "{n}m",
+
+  // ---------- AI chat (errors & labels) ----------
+  "ai.fail": "H-hmph! My brain is sulking because I'm too lazy to think right now. Tag me again later. 💢",
+  "ai.tagOnly": "(just tagged me, didn't write anything)",
+  "ai.sources": "Sources:",
+
+  // ---------- !trainer (Uma Musume) ----------
+  "trainer.notFound": "❌ Trainer \"{q}\" not found.",
+  "trainer.tooLong": "⚠️ Keyword too long (max 40 characters).",
+  "trainer.listTitle": "*TRAINERS FOUND* ({count})\nKeyword: _{q}_",
+  "trainer.listHint": "_Reply to this message with a trainer number to see their card_",
+  "trainer.listPage": "Page {page}/{pages}",
+  "trainer.listNav": "_Reply *next* / *prev* / *page 5* to change page_",
+  "trainer.invalidPage": "⚠️ Invalid page. Pick 1-{max}.",
+  "trainer.invalidNumber": "⚠️ Invalid number. Pick 1-{max}.",
+  "trainer.caption": "*{name}*\n🆔 {id}",
+  "trainer.cardFail": "⚠️ Could not build the card, here is the short info:",
+  "trainer.noKey": "⚙️ UMA_API_KEY is not set on the bot server.",
+  "trainer.auth": "⚙️ The uma.moe API key was rejected. Check UMA_API_KEY on the bot server.",
+  "trainer.rate": "⏳ uma.moe is rate limiting requests. Try again in a moment.",
+  "trainer.fail": "❌ Failed to fetch data from uma.moe. Try again later.",
+  // ---------- !club / !threshold / !leaderboard (Uma Musume circle) ----------
+  "club.tooLong": "⚠️ Keyword too long (max 40 characters).",
+  "club.notFound": "❌ Club \"{q}\" not found.",
+  "club.gone": "❌ No club found with ID {id}.",
+  "club.listTitle": "*CLUBS FOUND* ({count})\nKeyword: _{q}_",
+  "club.listHint": "_Reply to this message with a club number to see its card_",
+  "club.invalidNumber": "⚠️ Invalid number. Pick 1-{max}.",
+  "club.caption": "*{name}*\n🆔 {id} · Tier {tier}\n👑 Leader: {leader}",
+  "circle.cardFail": "⚠️ Could not build the card, here is the short info:",
+  "threshold.caption": "*CIRCLE RANK THRESHOLDS*\nTier SS → D",
+  "leaderboard.caption": "*CIRCLE LEADERBOARD*\nRank 1-{n}",
+
+  // ---------- !article ----------
+  "art.busy": "Your previous *!article* request is still being processed, hold on a bit.",
+  "art.cooldown": "Wait {sec} more seconds before using *!article* again.",
+  "art.usage": "❗ Format:\n• *!article <keywords>* -> search publications\n• *!article doi <DOI>* -> check DOI, citations & PDF\n• *!article arxiv <keywords>* -> search preprints on arXiv\n• *!article <URL>* -> fetch a document from a public link\n\nExamples:\n!article drone racing\n!article doi 10.1000/xyz123\n!article arxiv autonomous navigation",
+  "art.invalidDoi": "❌ Invalid DOI. Example: *!article doi 10.1000/xyz123*",
+  "art.searching": "🔎 Searching publications on OpenAlex...",
+  "art.searchingArxiv": "🔎 Searching preprints on arXiv...",
+  "art.lookingUpDoi": "🔎 Checking the DOI on OpenAlex & Crossref...",
+  "art.enriching": "🔗 Matching DOI (Crossref), checking legal PDF (Unpaywall) & arXiv versions...",
+  "art.jr.header": "📚 *Search results:* {query}\nShowing the top {count} publications.",
+  "art.jr.headerArxiv": "📚 *arXiv results:* {query}\nShowing the top {count} preprints.",
+  "art.jr.headerDoi": "🔖 *DOI metadata:* {doi}",
+  "art.jr.etAl": "et al.",
+  "art.jr.authors": "👤 {authors}",
+  "art.jr.year": "📅 Year: {year}",
+  "art.jr.venue": "📖 Source: {venue}",
+  "art.jr.doi": "🔖 DOI: {doi}",
+  "art.jr.link": "🔗 Publisher: {url}",
+  "art.jr.cites": "📊 Citations: {count} ({source})",
+  "art.jr.citesNA": "📊 Citations: not available",
+  "art.jr.pdfAvailable": "📥 PDF: ✅ Available ({source})",
+  "art.jr.pdfPage": "📥 Open access: ✅ Available via landing page ({source})",
+  "art.jr.pdfNotFound": "📥 PDF: ❌ No free version found",
+  "art.jr.pdfUnknown": "📥 PDF: ❓ Cannot be confirmed",
+  "art.jr.arxiv": "📄 arXiv: {url}",
+  "art.jr.partial": "⚠️ Some services did not respond: {services}. Results may be incomplete.",
+  "art.jr.footer": "ℹ️ PDF status only reflects the sources checked (Unpaywall, arXiv, OpenAlex). \"No free version found\" does not guarantee none exists. Citation counts differ between providers.",
+  "art.jr.allFailed": "❌ The journal search services are not responding or have hit a rate limit. Please try again in a moment.",
+  "art.jr.empty": "❌ No publications match \"{query}\". Try different keywords.",
+  "art.jr.doiNotFound": "❌ DOI {doi} was not found on OpenAlex or Crossref.",
+  "art.processing": "⏳ Processing the article...",
+  "art.detecting": "🔍 Detecting the source...",
+  "art.findingPdf": "📄 Looking for a public PDF file...",
+  "art.findingOA": "🔎 Looking for the official Open Access version...",
+  "art.untitled": "Untitled",
+  "art.found": "✅ Article found\n\n📄 Title: {title}\n🌐 Source: {provider}\n\n📥 Sending the document...",
+  "art.caption": "📄 {title}\n🔗 Original source: {url}",
+  "art.oaFound": "✅ Open Access version found\n\n📄 Title: {title}\n🔗 PDF: {url}",
+  "art.invalid": "❌ Invalid URL.",
+  "art.notFound": "❌ No public PDF file is available.\n\n🔗 You can open the original article here:\n{url}",
+  "art.error": "❌ Something went wrong while processing the article. Please try again later.",
+
+  // ---------- !dl / !dlr (status & errors) ----------
+  "dl.photoDetected": "🖼️ Looks like this is a photo post, not a video. Trying to download the photos...",
+  "dl.photoWait": "⏳ Downloading photos/carousel, please wait...",
+  "dl.photoNone": "❌ Failed to download photos.\n\nNo photos could be fetched from this link -- make sure it's really a photo carousel/slideshow link (if it's a video, just use !dl).",
+  "dl.photoFail": "❌ Failed to download photos.\n\nPlease try again or check the link.",
+  "dl.threadWait": "⏳ Downloading thread (text + media), please wait...",
+  "dl.threadFail": "❌ Failed to download the thread.\n\nMake sure the link is correct and the post is public (X/Twitter sometimes needs cookies, see GALLERYDL_COOKIES_FILE), then try again.\n\nDetail: {detail}",
+  "dl.threadTruncated": "ℹ️ This thread has {total} media files; only the first {sent} were sent to avoid flooding the chat.",
+  "dl.queued": "🕒 Queued on the download server (position {pos}). Be patient, no need to send it again.",
+  "dl.failed": "❌ Download failed.\n{error}",
+  "dl.fallback": "⚠️ The main download server is having trouble, trying the backup method first...",
+  "dl.waitAudioSilence": "⏳ Downloading audio (MP3) via the download server, please wait...",
+  "dl.waitVideoSilence": "⏳ Downloading video{height} via the download server, please wait...",
+  "dl.waitAudio": "⏳ Downloading audio (MP3), please wait...",
+  "dl.waitVideo": "⏳ Downloading video, please wait...",
+  "dl.maxHeight": " (max {height}p)",
+  "dl.err.geo": "🌍 This video is geo-restricted by its platform -- the bot's server can't access it from its location. Try another video/link.",
+  "dl.err.private": "🔒 This video is private and can't be accessed without logging in.",
+  "dl.err.bot": "🤖 YouTube flagged this bot's server as suspicious traffic (common on cloud/datacenter IPs like Railway/AWS/GCP) -- this is NOT about the video being age-restricted. Try again in a bit, or enable a PO Token server (env var YTDLP_POT_BASE_URL) for a more permanent fix.",
+  "dl.err.age": "🔞 This video is age-restricted by its platform and needs a login -- this bot can't log in to an account.",
+  "dl.err.pot": "⚙️ The POT provider (bgutil) can't be reached from the server -- check that the service is still running and YTDLP_POT_BASE_URL is correct.",
+  "dl.err.gone": "❌ This video/post is no longer available (it may have been deleted, or the link is wrong).",
+  "dl.err.unsupported": "❌ This link isn't supported for downloading yet.",
+  "dl.err.generic": "An error occurred while downloading.",
+  "dl.rateLimited": "⏳ Hit YouTube's rate limit (this server made too many requests a moment ago). Try again in ~{time}, the bot will automatically retry after that -- nothing to do, just send !dl again later.",
+};

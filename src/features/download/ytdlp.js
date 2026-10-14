@@ -1,0 +1,1106 @@
+const { t } = require("../../i18n");
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
+const crypto = require("crypto");
+const { spawn } = require("child_process");
+const ffmpegPath = require("ffmpeg-static");
+const ffprobePath = require("ffprobe-static").path;
+
+// yt-dlp (dan ffmpeg-nya) butuh dua binary: "ffmpeg" DAN "ffprobe", dan
+// KEDUANYA harus ada di satu folder yang sama, karena --ffmpeg-location
+// cuma nunjuk ke SATU direktori (yt-dlp nyari "ffprobe" otomatis di
+// direktori itu juga, gak bisa dikasih path ffprobe terpisah).
+//
+// Masalahnya: paket npm "ffmpeg-static" CUMA nyediain binary ffmpeg, TIDAK
+// menyertakan ffprobe sama sekali -- makanya dipasang paket terpisah
+// "ffprobe-static" khusus buat ffprobe-nya. Tapi dua paket ini naruh
+// binary-nya di folder node_modules yang BEDA, jadi kalau --ffmpeg-location
+// cuma diarahin ke folder ffmpeg-static, yt-dlp gak bakal ketemu ffprobe
+// sama sekali -> muncul "WARNING: unable to obtain file audio codec with
+// ffprobe" pas extract MP3 (dan proses postprocessing-nya gagal total),
+// atau di kasus lain video kekirim tanpa audio kalau merge video+audio
+// butuh ffprobe buat verifikasi stream tapi gak ketemu binary-nya.
+//
+// Fix-nya: siapin SATU folder gabungan (di tmp dir) yang isinya symlink
+// (atau copy kalau symlink gak didukung filesystem-nya) ke KEDUA binary
+// itu, dengan nama file asli masing-masing ("ffmpeg"/"ffmpeg.exe" dan
+// "ffprobe"/"ffprobe.exe") supaya yt-dlp bisa nemuin dua-duanya lewat satu
+// --ffmpeg-location. Dibikin sekali aja pas modul ini di-load (bukan tiap
+// kali download), biar gak nambah overhead per-request.
+function ensureCombinedFfmpegBinDir() {
+  const dir = path.join(os.tmpdir(), "agemasen-ffmpeg-bin");
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+  } catch (err) {
+    console.error("[dl] Gagal bikin folder gabungan ffmpeg/ffprobe:", err.message);
+    // Fallback: kalau gagal, tetap balikin folder ffmpeg-static asli --
+    // minimal ffmpeg-nya sendiri masih bisa dipakai (kayak perilaku lama).
+    return path.dirname(ffmpegPath);
+  }
+
+  for (const src of [ffmpegPath, ffprobePath]) {
+    const dest = path.join(dir, path.basename(src));
+    if (fs.existsSync(dest)) continue; // sudah pernah disiapin sebelumnya
+    try {
+      fs.symlinkSync(src, dest);
+    } catch {
+      // Symlink bisa gagal di beberapa environment (mis. Windows tanpa izin
+      // admin, atau filesystem tertentu di container) -- fallback ke copy
+      // file biasa, lalu pastikan bit executable-nya ikut ke-set.
+      try {
+        fs.copyFileSync(src, dest);
+        fs.chmodSync(dest, 0o755);
+      } catch (copyErr) {
+        console.error(
+          `[dl] Gagal siapin ${path.basename(src)} di folder gabungan:`,
+          copyErr.message,
+        );
+      }
+    }
+  }
+
+  return dir;
+}
+
+const FFMPEG_BIN_DIR = ensureCombinedFfmpegBinDir();
+
+// =====================================================
+// Fitur: Download media dari link ("!dl")
+// YouTube (video/short), Bilibili, Facebook (video/reel/postingan video),
+// TikTok, Instagram, Twitter/X, dst -- semua situs yang didukung yt-dlp.
+//
+// Dukungan YouTube awalnya dibangun dari resep "yt-dlp-rescue" (Maret
+// 2026) buat 2 masalah utama: SABR throttle (client "web" default cuma
+// kasih 1 format 360p) & deteksi bot di IP cloud/datacenter. TAPI per
+// Agustus 2026, sebagian resep itu sudah basi -- lihat komentar detail di
+// bagian "Khusus YouTube" di bawah (dalam downloadMediaFromUrl) buat
+// histori kenapa override player_client dihapus.
+//
+// Yang MASIH dipakai sekarang:
+//   - --js-runtimes node (Node.js SUDAH terinstall buat project ini
+//     sendiri) buat nyelesein signature/n challenge.
+//   - --force-ipv4, cegah masalah routing IPv6 di beberapa cloud provider.
+//   - Opsional PO Token server (lihat YTDLP_POT_BASE_URL) buat kasus
+//     yang masih kena deteksi bot -- SANGAT DIREKOMENDASIKAN buat
+//     deployment cloud/server (Railway dst), karena IP datacenter jauh
+//     lebih sering diblokir YouTube dibanding IP residensial biasa.
+//
+// PENTING: ini butuh binary "yt-dlp" TERINSTALL DI SERVER, terpisah dari
+// dependency npm project ini (npm wrapper yt-dlp-exec ternyata rapuh --
+// postinstall-nya sering gagal ambil binary dari GitHub releases). Cara
+// paling gampang & paling stabil: `pip install -U yt-dlp` di server, atau
+// download binary standalone-nya dari GitHub releases resmi yt-dlp lalu
+// taruh di PATH. Kalau nama/lokasi binary-nya beda, override lewat env
+// var YTDLP_PATH (sama seperti pola MEME_FONT_PATH di atas).
+//
+// ffmpeg TIDAK perlu diinstall terpisah untuk fitur ini -- kita pakai
+// ffmpeg-static yang sudah jadi dependency project ini (lewat
+// --ffmpeg-location), jadi yt-dlp bisa gabungin stream video+audio atau
+// convert ke MP3 tanpa butuh ffmpeg sistem.
+// =====================================================
+const YTDLP_PATH = process.env.YTDLP_PATH || "yt-dlp";
+// Binary "gallery-dl" -- TERPISAH dari yt-dlp, dipakai KHUSUS buat jalur
+// foto/carousel/slideshow ("!dl" fallback foto & "!dlr"). yt-dlp TERBUKTI
+// gak reliable buat foto Instagram/TikTok (lihat komentar panjang di
+// downloadGalleryFromUrl di bawah) -- gallery-dl dirancang khusus buat
+// gambar/galeri jadi jauh lebih cocok buat kasus ini.
+const GALLERYDL_PATH = process.env.GALLERYDL_PATH || "gallery-dl";
+
+// Cookies buat gallery-dl (khusus Instagram) -- sejak pertengahan 2025,
+// Instagram makin agresif maksa login bahkan buat postingan PUBLIK kalau
+// request-nya datang tanpa cookies/sesi yang valid. Tanpa ini,
+// gallery-dl bakal kena redirect ke halaman login ("HTTP redirect to
+// login page") dan gagal total, walau link-nya postingan publik biasa.
+//
+// Cara siapin:
+//   1. Login ke instagram.com di browser BIASA (Chrome/Firefox) pakai
+//      akun mana aja (disaranin akun "buangan", BUKAN akun utama --
+//      cookies ini dipakai bareng buat SEMUA request bot, jadi kalau
+//      akunnya kena flag, semua fitur foto IG ikut kena).
+//   2. Export cookies-nya ke format Netscape (cookies.txt) pakai
+//      extension browser, mis. "Get cookies.txt LOCALLY" (Chrome) atau
+//      "cookies.txt" (Firefox).
+//   3. Upload file hasil export itu ke server (mis. taruh di repo project
+//      -- TAPI JANGAN commit ke git public, tambahin ke .gitignore --
+//      atau upload manual ke Railway lewat volume/shell).
+//   4. Set env var ini (di Railway tab Variables) ke path file-nya, mis.
+//      GALLERYDL_COOKIES_FILE=/app/instagram-cookies.txt
+//
+// Opsional -- kalau kosong (default), gallery-dl jalan tanpa cookies
+// (bakal gagal khusus buat Instagram, TikTok biasanya masih OK tanpa
+// ini). Cookies expire dari waktu ke waktu (biasanya beberapa
+// minggu/bulan) -- kalau tiba-tiba mulai gagal lagi dengan pesan yang
+// sama, kemungkinan besar cookies-nya sudah kadaluarsa, tinggal ulangi
+// langkah export di atas.
+// Alternatif setup cookies lewat env var base64 -- cocok buat platform
+// tanpa persistent volume (mis. Railway) di mana naruh file cookies.txt
+// langsung ke disk/repo gak praktis. Kalau env var ini diisi, kita decode
+// base64-nya balik jadi file fisik di tmpdir SEKALI pas modul ini
+// di-load, lalu path file itu dipakai sebagai fallback GALLERYDL_COOKIES_FILE
+// (kalau GALLERYDL_COOKIES_FILE belum diisi manual) -- dan juga dipakai
+// buat --cookies yt-dlp khusus Instagram (lihat downloadMediaFromUrl).
+//
+// Cara siapin:
+//   1. Export cookies.txt seperti biasa (lihat komentar GALLERYDL_COOKIES_FILE
+//      di bawah).
+//   2. `base64 -w0 cookies.txt` (Linux/Mac) lalu copy hasilnya.
+//   3. Set env var IG_COOKIES_B64 di Railway (tab Variables) ke hasil itu.
+function decodeCookiesFromEnvBase64(envVarName) {
+  const raw = process.env[envVarName];
+  if (!raw) return "";
+
+  try {
+    const dir = path.join(os.tmpdir(), "agemasen-cookies");
+    fs.mkdirSync(dir, { recursive: true });
+    const dest = path.join(dir, `${envVarName.toLowerCase()}.txt`);
+
+    const decoded = Buffer.from(raw, "base64").toString("utf8");
+
+    // Sanity check ringan -- file cookies Netscape yang valid selalu
+    // diawali baris ini. Kalau gak cocok, kemungkinan besar env var-nya
+    // salah isi (mis. ke-paste isi cookies.txt mentah, bukan base64-nya).
+    if (!decoded.includes("# Netscape HTTP Cookie File")) {
+      console.error(
+        `[dl] ${envVarName} ter-set tapi hasil decode base64-nya gak keliatan seperti cookies.txt Netscape. Dicek lagi isinya.`,
+      );
+    }
+
+    fs.writeFileSync(dest, decoded, { mode: 0o600 });
+    return dest;
+  } catch (err) {
+    console.error(`[dl] Gagal decode ${envVarName} jadi file cookies:`, err.message);
+    return "";
+  }
+}
+
+const GALLERYDL_COOKIES_FILE =
+  process.env.GALLERYDL_COOKIES_FILE || decodeCookiesFromEnvBase64("IG_COOKIES_B64");
+
+// Alternatif dari GALLERYDL_COOKIES_FILE di atas -- LEBIH SIMPEL setup-nya
+// (gak perlu extension browser & export manual), tapi TRADE-OFF-nya
+// password akun IG kesimpen di server (env var) dan gallery-dl login
+// sendiri lewat script setiap kali dipanggil -- pola ini lebih gampang
+// bikin Instagram curiga & minta verifikasi tambahan ("Suspicious Login
+// Attempt" / checkpoint / 2FA) dibanding pakai cookies dari sesi browser
+// asli.
+//
+// WAJIB pakai akun "buangan", BUKAN akun IG utama/pribadi -- akun ini
+// dipakai bareng buat SEMUA request bot, jadi paling rawan kena
+// flag/suspend duluan kalau bot dipakai banyak orang & sering.
+//
+// Kalau KEDUANYA (cookies file & username/password) diisi, cookies file
+// yang menang (lihat downloadGalleryFromUrl) -- keduanya gak dipakai
+// bareng.
+//
+// Cara pakai: isi 2 env var ini di Railway (tab Variables):
+//   GALLERYDL_INSTAGRAM_USERNAME = username akun buangan
+//   GALLERYDL_INSTAGRAM_PASSWORD = password akun buangan
+//
+// Kosongkan (default) buat nonaktifin -- gallery-dl jalan tanpa
+// autentikasi Instagram sama sekali (bakal gagal khusus Instagram, lihat
+// komentar GALLERYDL_COOKIES_FILE di atas soal kenapa).
+const GALLERYDL_INSTAGRAM_USERNAME =
+  process.env.GALLERYDL_INSTAGRAM_USERNAME || "";
+const GALLERYDL_INSTAGRAM_PASSWORD =
+  process.env.GALLERYDL_INSTAGRAM_PASSWORD || "";
+
+// URL base HTTP server "bgutil-ytdlp-pot-provider" (Proof-of-Origin Token
+// provider), KALAU mau di-deploy sebagai service terpisah (mis. di
+// Railway) buat kasus deteksi bot yang masih lolos walau sudah pakai
+// client rotation + --js-runtimes node.
+//
+// Opsional -- kalau env var ini KOSONG (default), fitur ini gak diaktifin
+// dan bot tetap jalan cuma mengandalkan client rotation. Kalau mau aktifin:
+//  1. Plugin Python-nya harus terinstall di server yang sama dengan
+//     binary yt-dlp: `pip install -U bgutil-ytdlp-pot-provider`
+//  2. Service HTTP provider-nya harus jalan terpisah & bisa diakses dari
+//     sini, lalu isi env var ini dengan URL-nya (mis. http://127.0.0.1:4416
+//     kalau satu container, atau URL publik/private networking Railway
+//     kalau service terpisah).
+const YTDLP_POT_BASE_URL = process.env.YTDLP_POT_BASE_URL || "";
+
+// Fallback PALING GAMPANG (tapi paling gak scalable) buat kasus deteksi bot
+// "Sign in to confirm you're not a bot": --cookies-from-browser, ambil
+// cookies YouTube langsung dari browser lokal yang sudah login.
+//
+// HANYA cocok buat TESTING DI LAPTOP SENDIRI (bukan Railway/cloud server)
+// karena:
+//   - Butuh browser beneran terinstall & sudah login YouTube di MESIN YANG
+//     SAMA tempat yt-dlp jalan -- di container Railway gak ada browser.
+//   - Cookies akun pribadi kepakai buat semua request bot -- kalau bot
+//     dipakai banyak orang & sering, akun YouTube-nya sendiri yang bisa
+//     kena flag/rate-limit, bukan cuma IP server-nya.
+//   - Cookies expire & perlu login ulang di browser dari waktu ke waktu.
+//
+// Isi dengan nama browser yang dipakai: "chrome", "edge", "firefox", dst.
+// Opsional -- kosongkan (default) buat nonaktifin.
+const YTDLP_COOKIES_FROM_BROWSER = process.env.YTDLP_COOKIES_FROM_BROWSER || "";
+
+// Batas ukuran file hasil download, biar gak nyoba kirim file raksasa yang
+// bakal gagal/lambat banget dikirim lewat WhatsApp.
+// Default 200MB (bisa diubah lewat env DL_MAX_MB di Railway Variables).
+// File > ~90MB otomatis dikirim sebagai DOKUMEN (lihat sendDownloadedMedia
+// di gallerydl.js) karena batas video WhatsApp sekitar 100MB.
+const DL_MAX_MB = Number(process.env.DL_MAX_MB) || 200;
+const DL_MAX_FILESIZE = `${DL_MAX_MB}M`;
+const DL_MAX_BYTES = DL_MAX_MB * 1024 * 1024;
+
+// =====================================================
+// QUEUE -- batasin berapa banyak proses yt-dlp yang boleh jalan BERSAMAAN.
+// Tanpa ini, kalau 10-20 orang nge-`!dl` bareng, server bisa langsung
+// jalanin 10-20 proses yt-dlp sekaligus -> gampang banget kena rate-limit
+// (429) atau bikin server kehabisan resource. Dengan queue, cuma
+// DL_QUEUE_CONCURRENCY job yang jalan bersamaan, sisanya ngantre giliran.
+// =====================================================
+const DL_QUEUE_CONCURRENCY = Number(process.env.DL_QUEUE_CONCURRENCY) || 2;
+let dlActiveWorkers = 0;
+const dlQueue = [];
+
+// =====================================================
+// BACKOFF OTOMATIS KHUSUS YOUTUBE -- jawaban buat pertanyaan "gimana cara
+// tau kapan boleh coba lagi": daripada nebak-nebak manual atau spam test
+// yang malah bikin makin lama redanya, bot ini otomatis "diam" sendiri
+// begitu kedeteksi kena rate-limit (429) atau bot-detection (LOGIN_REQUIRED
+// / "sign in to confirm"), terus otomatis coba lagi kalau waktunya udah
+// lewat -- gak perlu restart bot atau ubah kode manual tiap kali kena.
+//
+// Cara kerja: exponential backoff. Gagal pertama -> tunggu 15 menit.
+// Masih gagal lagi (dalam masa itu ada yang coba lain) -> waktu tunggu
+// DIGANDAKAN (30 menit, 60 menit, dst), sampai batas maksimal 4 jam.
+// Begitu ada 1 percobaan yang BERHASIL, backoff langsung direset ke 0 --
+// jadi gak perlu manual "kasih tau bot udah aman" segala.
+// =====================================================
+const YTDLP_BACKOFF_INITIAL_MS = 15 * 60 * 1000; // 15 menit
+const YTDLP_BACKOFF_MAX_MS = 4 * 60 * 60 * 1000; // 4 jam
+let ytdlpBackoffUntil = 0; // timestamp (ms) -- 0 artinya gak lagi backoff
+let ytdlpBackoffMs = 0; // durasi backoff TERAKHIR yang dipakai (buat digandain kalau gagal lagi)
+
+function getYtdlpBackoffRemainingMs() {
+  return Math.max(0, ytdlpBackoffUntil - Date.now());
+}
+
+function formatDurationId(ms, lang) {
+  const totalMinutes = Math.ceil(ms / 60000);
+  if (totalMinutes < 60) return t(lang, "dur.m", { n: totalMinutes });
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return minutes > 0
+    ? `${t(lang, "dur.h", { n: hours })} ${t(lang, "dur.m", { n: minutes })}`
+    : t(lang, "dur.h", { n: hours });
+}
+
+// Dipanggil tiap kali download YouTube GAGAL karena pola rate-limit/bot-
+// detection (lihat pemanggilnya di handleDlDownload). Kalau gagalnya
+// karena alasan lain (video private, geo-restricted, dst), JANGAN panggil
+// ini -- itu bukan soal IP kena limit, jadi gak perlu ikut nge-backoff.
+function registerYtdlpRateLimitFailure() {
+  ytdlpBackoffMs = ytdlpBackoffMs
+    ? Math.min(ytdlpBackoffMs * 2, YTDLP_BACKOFF_MAX_MS)
+    : YTDLP_BACKOFF_INITIAL_MS;
+  ytdlpBackoffUntil = Date.now() + ytdlpBackoffMs;
+  console.log(
+    `[yt-dlp][backoff] Kena rate-limit/bot-detection. Backoff dinaikkan ke ${formatDurationId(ytdlpBackoffMs)}, sampai ${new Date(ytdlpBackoffUntil).toISOString()}`,
+  );
+}
+
+// Dipanggil tiap kali download YouTube BERHASIL -- reset backoff, karena
+// itu bukti IP-nya udah gak lagi kena limit.
+function registerYtdlpSuccess() {
+  if (ytdlpBackoffMs > 0) {
+    console.log("[yt-dlp][backoff] Download berhasil, backoff direset.");
+  }
+  ytdlpBackoffMs = 0;
+  ytdlpBackoffUntil = 0;
+}
+
+// Pola stderr yang nandain "ini soal IP/rate-limit", BUKAN soal video-nya
+// sendiri (private/geo-restricted/dll -- itu gak ada hubungannya sama
+// kondisi IP, jadi gak perlu bikin bot ikut "diam").
+function isRateLimitOrBotDetectionError(raw) {
+  return /HTTP Error 429|Too Many Requests|sign in to confirm you.?re not a bot|Only images are available|Missing required Visitor Data/i.test(
+    raw || "",
+  );
+}
+
+function processDlQueue() {
+  while (dlActiveWorkers < DL_QUEUE_CONCURRENCY && dlQueue.length > 0) {
+    const job = dlQueue.shift();
+    dlActiveWorkers++;
+    job
+      .jobFn()
+      .then(job.resolve, job.reject)
+      .finally(() => {
+        dlActiveWorkers--;
+        processDlQueue();
+      });
+  }
+}
+
+function enqueueDownloadJob(jobFn) {
+  return new Promise((resolve, reject) => {
+    dlQueue.push({ jobFn, resolve, reject });
+    processDlQueue();
+  });
+}
+
+// Baca info teknis video (codec, profile, resolusi, dst) lewat "ffmpeg -i"
+// -- info-nya keluar di stderr (bukan stdout), dan ffmpeg SELALU exit
+// dengan kode error kalau gak dikasih output file, jadi kita cuma perlu
+// stderr-nya, bukan urusin exit code-nya.
+function probeVideoInfo(inputPath) {
+  return new Promise((resolve) => {
+    const proc = spawn(ffmpegPath, ["-i", inputPath]);
+    let info = "";
+    proc.stderr.on("data", (chunk) => {
+      info += chunk.toString();
+    });
+    proc.on("close", () => resolve(info));
+    proc.on("error", () => resolve(info));
+  });
+}
+
+// Transcode ulang ke H.264 (yuv420p, profil "high", max 720p) + AAC --
+// dipakai KHUSUS kalau video sumbernya codec non-H.264 (AV1/VP9/dst)
+// yang gak bisa diputar WhatsApp mobile sama sekali. Lebih lambat dari
+// remux biasa (beneran re-encode, bukan cuma copy stream), tapi ini
+// satu-satunya cara jamin videonya bisa dibuka di WA.
+// opts (semuanya opsional -- default-nya = perilaku lama persis):
+//   maxWidth : lebar maksimum hasil (default 1280 alias 720p-ish)
+//   crf      : kualitas x264, makin besar makin kecil ukurannya
+//              (default: biarin x264 pakai default-nya, 23)
+//   audioBitrate : default "128k"
+//   threads  : jumlah thread encoder x264 (default 2 -- lihat catatan di
+//              bawah, JANGAN dibiarkan auto-detect)
+// Dipakai dua tingkat sama ensureWhatsAppCompatibleVideo() di bawah: pass
+// pertama kualitas normal, pass kedua (cuma kalau hasilnya masih kegedean
+// buat WhatsApp) diperkecil lagi pakai crf/maxWidth yang lebih agresif.
+//
+// CATATAN PENTING soal "-threads": kalau opsi ini gak di-set, x264 bakal
+// auto-detect jumlah CPU dan spawn sebanyak itu thread encoder. Di host
+// container kayak Railway, jumlah core yang kedetect adalah core MESIN
+// FISIK host (bisa puluhan/70+), BUKAN jatah CPU asli plan kamu -- padahal
+// jatah MEMORI-nya tetap kecil. Tiap thread x264 butuh buffer frame sendiri,
+// jadi makin banyak thread = makin banyak memori yang diklaim di awal,
+// SEBELUM frame pertama sempat di-render. Hasilnya: proses ffmpeg langsung
+// ditembak mati (OOM kill / SIGKILL) oleh container, muncul sebagai
+// "exit null" (bukan exit code beneran, tapi mati kena sinyal) dan log
+// cuma sempat nunjukin "frame=0" tanpa progress apa pun. Makanya di sini
+// threads DIBATASI KECIL secara eksplisit, biar konsumsi memorinya bisa
+// diprediksi dan gak auto-mengikuti core count host yang gak relevan.
+// Beberapa video sumber (banyak ketemu di klip TikTok/reels ber-HEVC)
+// nyimpen metadata warna (colour_primaries/transfer_characteristics/
+// matrix_coefficients) dengan nilai "reserved" (3) -- nilai yang menurut
+// ITU-T H.273 belum dialokasikan. FFmpeg 7.x punya bug (trac.ffmpeg.org/
+// ticket/11020) di mana filter graph-nya (termasuk filter "scale" yang
+// kita pakai di bawah) langsung nolak stream kayak gitu dengan error
+// "Invalid color range" -> "Error reinitializing filters!" -> encoder
+// gak pernah kebuka. Ini KONSISTEN gagal (bukan soal resource/OOM),
+// jadi tanpa fix ini semua tier transcode bakal gagal terus-terusan
+// buat video dengan metadata kayak gini.
+//
+// Fix-nya: pakai bitstream filter buat nimpa nilai "reserved" itu jadi
+// nilai valid (1 = BT.709, asumsi paling aman buat video web/mobile)
+// SEBELUM filter graph sempat baca metadata itu. Nyetel "-color_range"/
+// "-colorspace" dkk sebagai opsi output TIDAK cukup (sudah dicoba di
+// thread bug-nya, tetap gagal) karena itu cuma ngubah metadata di
+// output, bukan apa yang dibaca decoder/filter graph di tengah proses.
+const METADATA_BSF_BY_CODEC = {
+  h264: "h264_metadata",
+  hevc: "hevc_metadata",
+  h265: "hevc_metadata",
+  av1: "av1_metadata",
+};
+
+// PENTING: nama opsi warnanya beda ejaan tergantung bsf-nya, meskipun
+// artinya sama persis (section 6.4.2 masing-masing spec).
+// - h264_metadata & hevc_metadata -> ejaan INGGRIS: "colour_primaries"
+//   (ikut istilah "colour_description" di spec H.264/HEVC)
+// - av1_metadata -> ejaan AMERIKA: "color_primaries" (tanpa huruf "u",
+//   ikut istilah AV1 spec section 6.4.2)
+// Pakai ejaan yang salah bikin ffmpeg langsung stop dengan error
+// "Option 'colour_primaries' not found" SEBELUM sempat baca -i sama
+// sekali -- makanya video AV1 (banyak dari YouTube Shorts) selalu gagal
+// di kedua tier transcode, sementara H.264/HEVC baik-baik saja.
+const COLOR_OPTION_SPELLING_BY_BSF = {
+  h264_metadata: "colour",
+  hevc_metadata: "colour",
+  av1_metadata: "color",
+};
+
+function buildColorFixBsfArgs(codecName) {
+  const bsf = METADATA_BSF_BY_CODEC[(codecName || "").toLowerCase()];
+  if (!bsf) return [];
+  const spelling = COLOR_OPTION_SPELLING_BY_BSF[bsf] || "colour";
+  return [
+    "-bsf:v",
+    `${bsf}=${spelling}_primaries=1:transfer_characteristics=1:matrix_coefficients=1`,
+  ];
+}
+
+function runFfmpegTranscodeToH264(inputPath, outputPath, opts = {}) {
+  const {
+    maxWidth = 1280,
+    crf = null,
+    audioBitrate = "128k",
+    threads = 2,
+    codecName = null,
+  } = opts;
+  return new Promise((resolve, reject) => {
+    const proc = spawn(ffmpegPath, [
+      "-y",
+      ...buildColorFixBsfArgs(codecName),
+      "-i",
+      inputPath,
+      "-c:v",
+      "libx264",
+      "-threads",
+      String(threads),
+      "-profile:v",
+      "high",
+      "-pix_fmt",
+      "yuv420p",
+      "-vf",
+      `scale='min(${maxWidth},iw)':-2`,
+      ...(crf ? ["-crf", String(crf), "-preset", "veryfast"] : []),
+      "-c:a",
+      "aac",
+      "-b:a",
+      audioBitrate,
+      "-movflags",
+      "+faststart",
+      outputPath,
+    ]);
+    let stderr = "";
+    proc.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    proc.on("error", reject);
+    proc.on("close", (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`ffmpeg transcode H.264 exit ${code}: ${stderr}`));
+    });
+  });
+}
+
+// Remux cepat: pindahin "moov atom" ke depan file mp4 (+faststart) tanpa
+// re-encode (-c copy), biar WhatsApp mobile bisa muter videonya. Lihat
+// komentar panjang di pemanggilnya (downloadMediaFromUrl) buat alasan
+// kenapa ini perlu.
+function runFfmpegFaststartRemux(inputPath, outputPath) {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(ffmpegPath, [
+      "-y",
+      "-i",
+      inputPath,
+      "-c",
+      "copy",
+      "-movflags",
+      "+faststart",
+      outputPath,
+    ]);
+    let stderr = "";
+    proc.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    proc.on("error", reject);
+    proc.on("close", (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`ffmpeg faststart remux exit ${code}: ${stderr}`));
+    });
+  });
+}
+
+// =====================================================
+// "Sterilisasi" file video sebelum dikirim ke WhatsApp.
+//
+// Dipakai DUA jalur sekaligus:
+//   1. downloadMediaFromUrl() -- hasil yt-dlp lokal (jalur lama).
+//   2. silenceApi.js -- file .mp4 yang diambil dari Worker SilenceYTDown.
+//
+// Kenapa perlu:
+//   - WhatsApp mobile TIDAK bisa decode AV1, dan VP9 dukungannya gak
+//     konsisten. File-nya sehat, tapi di HP muncul "This video is not
+//     available because something is wrong with the video file". Jadi
+//     kalau codec-nya bukan H.264, WAJIB transcode (bukan cuma remux).
+//   - Kalau codec-nya SUDAH H.264, cukup remux +faststart (moov atom
+//     dipindah ke depan) -- cepat, tanpa penurunan kualitas.
+//   - Khusus jalur SilenceYTDown: kualitasnya di-cap 1080p (bukan 720p
+//     kayak selector yt-dlp lokal), jadi file 1080p gampang nembus batas
+//     WhatsApp. Lewat opsi maxBytes, fungsi ini otomatis nge-shrink
+//     (turunin resolusi + naikin CRF) sampai muat, berjenjang.
+//
+// Return: path file yang siap dikirim. Kalau ffmpeg gagal total, sengaja
+// balikin file aslinya (lebih baik coba kirim apa adanya daripada
+// gagal total), sama seperti perilaku lama.
+// =====================================================
+const WA_SHRINK_TIERS = [
+  { maxWidth: 3840, crf: 24, audioBitrate: "128k" },
+  { maxWidth: 2560, crf: 26, audioBitrate: "128k" },
+  { maxWidth: 1920, crf: 26, audioBitrate: "128k" },
+  { maxWidth: 1280, crf: 26, audioBitrate: "128k" },
+  { maxWidth: 854, crf: 30, audioBitrate: "96k" },
+  { maxWidth: 640, crf: 33, audioBitrate: "64k" },
+];
+
+// Tinggi (p) yang diminta user -> lebar maksimum hasil transcode. Biar
+// permintaan 1080p/1440p/4K gak ikut di-downscale paksa ke 1280 lebar.
+const WA_WIDTH_BY_HEIGHT = {
+  144: 256, 240: 426, 360: 640, 480: 854,
+  720: 1280, 1080: 1920, 1440: 2560, 2160: 3840,
+};
+
+async function ensureWhatsAppCompatibleVideo(inputPath, opts = {}) {
+  const {
+    workDir = path.dirname(inputPath),
+    prefix = `wa-${crypto.randomBytes(4).toString("hex")}`,
+    maxBytes = 0, // 0 = gak usah peduli ukuran (perilaku lama)
+    maxHeight = 720,
+  } = opts;
+  const widthCap = WA_WIDTH_BY_HEIGHT[maxHeight] || 1280;
+
+  const info = await probeVideoInfo(inputPath);
+  const isH264 = /Video:\s*h264/i.test(info);
+  // Nama codec mentah (h264/hevc/av1/vp9/dst) buat mutusin bitstream
+  // filter mana yang perlu dipasang di runFfmpegTranscodeToH264 (lihat
+  // komentar panjang di situ soal bug "Invalid color range" FFmpeg 7.x).
+  const codecName = info.match(/Video:\s*([a-z0-9]+)/i)?.[1] || null;
+
+  // Ketemu pas investigasi kasus "video kekirim tanpa suara": kadang
+  // sumbernya SENDIRI (sebelum kita proses apa-apa) udah gak punya stream
+  // audio sama sekali -- bukan gara-gara transcode/remux di sini yang
+  // "ngilangin" suara. Dicek & di-log di sini biar ketauan dari awal
+  // (Railway Logs), bukan baru ketauan pas user komplain video-nya bisu.
+  if (!/Audio:/i.test(info)) {
+    console.warn(
+      `[dl] PERINGATAN: file sumber (${inputPath}) TIDAK PUNYA stream audio sama sekali -- video bakal dikirim bisu. Ini bukan bug di transcode/remux, sumbernya emang udah video-only (cek lagi format selector / cookies buat platform ini).`,
+    );
+  }
+  const sizeOf = (p) => {
+    try {
+      return fs.statSync(p).size;
+    } catch {
+      return 0;
+    }
+  };
+
+  const inputSize = sizeOf(inputPath);
+  const tooBig = maxBytes > 0 && inputSize > maxBytes;
+
+  // Jalur cepat: codec sudah benar DAN ukurannya masih muat -> remux aja.
+  if (isH264 && !tooBig) {
+    const outPath = path.join(workDir, `${prefix}-faststart.mp4`);
+    try {
+      await runFfmpegFaststartRemux(inputPath, outPath);
+      console.log("[dl] Codec sudah H.264 -- remux +faststart saja.");
+      return outPath;
+    } catch (err) {
+      console.error(
+        "[dl] Gagal remux +faststart, pakai file asli (video mungkin gagal dibuka di WA):",
+        err.message,
+      );
+      return inputPath;
+    }
+  }
+
+  // Perlu re-encode: entah karena codec-nya bukan H.264, atau karena
+  // file-nya kegedean buat WhatsApp (atau dua-duanya).
+  if (!isH264) {
+    console.log(
+      `[dl] Codec BUKAN H.264 (${info.match(/Video:.*$/m)?.[0] || "?"}) -- transcode ke H.264.`,
+    );
+  }
+  if (tooBig) {
+    console.log(
+      `[dl] Ukuran ${(inputSize / 1024 / 1024).toFixed(2)}MB > batas ${(maxBytes / 1024 / 1024).toFixed(0)}MB -- dikecilin dulu.`,
+    );
+  }
+
+  // Tier pertama = kualitas normal (sama kayak perilaku lama) kalau cuma
+  // masalah codec. Kalau file-nya kegedean, langsung mulai dari tier yang
+  // sudah pakai CRF biar ada efek pengecilan beneran.
+  //
+  // Kalau cuma masalah codec (bukan kegedean), sekarang ada tier kedua
+  // sebagai fallback: kalau tier pertama gagal (misalnya kena OOM kill di
+  // host), coba lagi dengan resolusi lebih kecil + CRF lebih agresif --
+  // makin kecil frame-nya, makin kecil juga puncak pemakaian memorinya,
+  // jadi ada peluang tier kedua ini lolos walau tier pertama kena OOM.
+  const shrinkTiers = WA_SHRINK_TIERS.filter((t) => t.maxWidth <= widthCap);
+  const tiers = tooBig
+    ? shrinkTiers.length
+      ? shrinkTiers
+      : [WA_SHRINK_TIERS[WA_SHRINK_TIERS.length - 1]]
+    : widthCap > 1280
+      ? [
+          // preset veryfast (otomatis kalau crf di-set) -- 1080p+ pakai
+          // preset default bakal lama banget di server kecil.
+          { maxWidth: widthCap, crf: 24, audioBitrate: "128k" },
+          { maxWidth: 1280, crf: 28, audioBitrate: "128k" },
+          { maxWidth: 640, crf: 30, audioBitrate: "96k" },
+        ]
+      : [
+          { maxWidth: 1280, crf: null, audioBitrate: "128k" },
+          { maxWidth: 640, crf: 30, audioBitrate: "96k" },
+        ];
+
+  let lastGood = null;
+
+  for (const [i, tier] of tiers.entries()) {
+    const outPath = path.join(workDir, `${prefix}-h264-${i}.mp4`);
+    try {
+      await runFfmpegTranscodeToH264(inputPath, outPath, { ...tier, codecName });
+    } catch (err) {
+      console.error(`[dl] Transcode tier ${i} gagal:`, err.message);
+      continue;
+    }
+
+    const size = sizeOf(outPath);
+    lastGood = outPath;
+    console.log(
+      `[dl] Transcode tier ${i} (maxWidth=${tier.maxWidth}, crf=${tier.crf ?? "default"}) -> ${(size / 1024 / 1024).toFixed(2)}MB`,
+    );
+
+    if (maxBytes === 0 || size <= maxBytes) return outPath;
+  }
+
+  // Semua tier sudah dicoba tapi masih kegedean juga -- lempar error yang
+  // pesannya sudah ramah user (pemanggil tinggal tampilin apa adanya).
+  if (lastGood && maxBytes > 0 && sizeOf(lastGood) > maxBytes) {
+    const err = new Error(
+      `Videonya kepanjangan/kegedean buat WhatsApp -- setelah dikompres pun masih ${(sizeOf(lastGood) / 1024 / 1024).toFixed(0)}MB (batas ~${(maxBytes / 1024 / 1024).toFixed(0)}MB). Coba video yang lebih pendek, atau pakai "!dl <link> mp3" kalau cuma butuh audionya.`,
+    );
+    err.tooLargeForWhatsApp = true;
+    throw err;
+  }
+
+  // Semua tier transcode gagal TOTAL (misalnya tetap kena OOM kill walau
+  // sudah dikecilin) DAN codec sumbernya memang bukan H.264. Dulu di sini
+  // kita balikin inputPath apa adanya ("mendingan coba kirim daripada
+  // gagal total") -- tapi itu keliru: kalau codec-nya bukan H.264, WA
+  // mobile PASTI gak bisa buka file itu, jadi "mencoba kirim" cuma
+  // menunda kegagalan sampai user buka videonya dan nemu "This video is
+  // not available". Lebih jujur (dan lebih membantu) buat langsung kasih
+  // error yang jelas di sini, daripada diam-diam ngirim file yang gak
+  // akan pernah bisa diputar.
+  if (!lastGood && !isH264) {
+    const err = new Error(
+      "Gagal transcode video ke format yang bisa dibuka WhatsApp (server kehabisan resource pas nge-encode). Coba lagi beberapa saat, atau pakai video dengan resolusi/durasi lebih kecil.",
+    );
+    err.transcodeFailed = true;
+    throw err;
+  }
+
+  return lastGood || inputPath;
+}
+
+function runYtDlp(args) {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(YTDLP_PATH, args);
+    let stderr = "";
+
+    proc.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    proc.on("error", (err) => {
+      if (err.code === "ENOENT") {
+        reject(
+          new Error(
+            "yt-dlp tidak ditemukan di server. Install dulu (`pip install -U yt-dlp`) lalu pastikan ada di PATH, atau set env var YTDLP_PATH ke lokasi binary-nya.",
+          ),
+        );
+        return;
+      }
+      reject(err);
+    });
+    proc.on("close", (code) => {
+      if (code === 0) resolve();
+      else {
+        // Log stderr MENTAH ke console (keliatan di Railway Logs) supaya
+        // gampang di-debug -- pesan yang dikirim ke WhatsApp sengaja
+        // disederhanain (lihat friendlyDlError), jadi tanpa ini kita gak
+        // bisa lihat detail teknis aslinya dari luar server.
+        console.error("[yt-dlp] gagal, stderr mentah:\n" + stderr);
+        const err = new Error(
+          `yt-dlp keluar dengan kode ${code}\n${stderr.slice(-800)}`,
+        );
+        err.stderr = stderr;
+        reject(err);
+      }
+    });
+  });
+}
+
+// Ubah pesan error mentah dari yt-dlp (yang teknis/kadang bahasa lain,
+// kadang malah traceback Python) jadi pesan yang gampang dipahami user
+// WhatsApp, buat kasus-kasus umum yang sering ketemu. Kalau gak ada pola
+// yang dikenal, fallback ke baris pertama pesan error yt-dlp-nya.
+function friendlyDlError(err, lang) {
+  const raw = err.stderr || "";
+
+  if (
+    /版权地区受限|not available in your country|not available in your location|geo.?restrict/i.test(
+      raw,
+    )
+  ) {
+    return t(lang, "dl.err.geo");
+  }
+  if (/private video|video is private/i.test(raw)) {
+    return t(lang, "dl.err.private");
+  }
+  // PENTING: dicek DULUAN sebelum age-restrict, karena pesan ini pola
+  // katanya mirip ("sign in to confirm...") tapi artinya beda total --
+  // ini YouTube curiga IP server-nya bot/datacenter, BUKAN video-nya
+  // dibatasi umur. Kalau ini yang muncul terus-terusan meski sudah pakai
+  // client rotation (lihat komentar downloadMediaFromUrl), coba aktifin
+  // PO Token server (YTDLP_POT_BASE_URL).
+  if (/sign in to confirm you.?re not a bot/i.test(raw)) {
+    return t(lang, "dl.err.bot");
+  }
+  if (/sign in to confirm|age.?restrict/i.test(raw)) {
+    return t(lang, "dl.err.age");
+  }
+  if (/bgutil.*(connection refused|econnrefused|failed to fetch|timed? ?out)/i.test(raw)) {
+    return t(lang, "dl.err.pot");
+  }
+  if (
+    /video unavailable|content isn.?t available|no longer available|this video (has been removed|is unavailable)/i.test(
+      raw,
+    )
+  ) {
+    return t(lang, "dl.err.gone");
+  }
+  if (/unsupported url|no extractor/i.test(raw)) {
+    return t(lang, "dl.err.unsupported");
+  }
+
+  if (!err.stderr) {
+    // Ini error yang kita lempar sendiri (bukan dari stderr yt-dlp),
+    // pesannya udah pasti ramah buat user, tinggal dipakai apa adanya.
+    return err.message;
+  }
+
+  // Fallback terakhir: baris "ERROR: ..." pertama dari output yt-dlp,
+  // dipangkas biar gak nampilin traceback Python yang teknis banget.
+  const firstErrorLine =
+    raw.split("\n").find((l) => l.trim().startsWith("ERROR:")) ||
+    raw.split("\n").find(Boolean);
+  return (firstErrorLine || t(lang, "dl.err.generic")).replace(
+    /^ERROR:\s*/,
+    "",
+  );
+}
+
+// Deteksi link YouTube (termasuk youtu.be & Shorts) -- dipakai buat
+// nambahin argumen khusus YouTube (client rotation, dst -- lihat
+// downloadMediaFromUrl) di "!dl".
+function isYoutubeUrl(url) {
+  try {
+    const host = new URL(url).hostname.replace(/^www\./, "");
+    return host === "youtube.com" || host === "m.youtube.com" || host === "youtu.be";
+  } catch {
+    return false;
+  }
+}
+
+// Deteksi link Instagram -- dipakai buat nambahin --cookies ke yt-dlp
+// (lihat downloadMediaFromUrl). Tanpa login, Instagram nyembunyiin format
+// audio dari reel/video (yt-dlp -F cuma nampilin video-only walau
+// postingannya beneran ada suaranya) -- --cookies buka format audio itu.
+function isInstagramUrl(url) {
+  try {
+    const host = new URL(url).hostname.replace(/^www\./, "");
+    return host === "instagram.com" || host.endsWith(".instagram.com");
+  } catch {
+    return false;
+  }
+}
+
+// mode: "video" -> MP4 (gabungan video+audio terbaik dalam batas ukuran)
+//       "audio" -> MP3 (audio-only, hasil ekstraksi)
+// Generik untuk YouTube (video/short), Bilibili, Facebook (video/reel/
+// postingan video), TikTok, Instagram, X/Twitter, dst -- semua situs yang
+// didukung yt-dlp. YouTube dapet argumen tambahan (lihat di bawah).
+// Resolusi yang boleh diminta user lewat "!dl <link> <height>p" buat jalur
+// yt-dlp lokal (fallback kalau SilenceYTDown lagi gak dipakai/gagal).
+const YTDLP_ALLOWED_HEIGHTS = [144, 240, 360, 480, 720, 1080, 1440, 2160];
+const YTDLP_DEFAULT_MAX_HEIGHT = 720; // perilaku lama, dipertahankan sebagai default
+
+// BUG LAMA (ketemu pas investigasi kasus "video kekirim tanpa suara"):
+// filter `[height<=720]` di selector -f nolak SEMUA video vertikal, karena
+// video vertikal (mis. reel 9:16) disimpan dengan "height" gedenya di
+// SISI PANJANG -- 720x1280 itu height-nya 1280, BUKAN 720, jadi ketolak
+// filter height<=720 walau secara visual itu video 720p. Akibatnya
+// selector jatuh ke fallback "/best" paling akhir, yang diam-diam bisa
+// milih format VIDEO-ONLY kalau kebetulan gak ada format gabungan --
+// video 1440p VP9 (berat, dan bisa jadi cuma video tanpa audio).
+//
+// Fix: JANGAN filter pakai "height<=", pakai --format-sort (-S) dengan
+// "res:" -- res: di yt-dlp otomatis ngukur dari SISI TERPENDEK video
+// (jadi video vertikal 720x1280 dianggap "res 720" dengan benar, sama
+// kayak video horizontal 1280x720), dan itu SORT bukan FILTER keras jadi
+// gak ada kasus "ketolak semua -> jatuh ke /best". Codec H.264+AAC juga
+// dipindah dari filter jadi preferensi sort (vcodec:h264,acodec:aac),
+// biar tetep diusahain tapi gak bikin selector gagal total kalau
+// sumbernya cuma nyedia VP9/Opus.
+function buildVideoFormatSelector() {
+  // Selector -f: ambil video+audio terbaik (bv*+ba), fallback ke satu
+  // format gabungan terbaik (b) kalau DASH video+audio terpisah gak ada.
+  // Sengaja TIDAK ada filter height/vcodec di sini -- itu semua diatur
+  // lewat -S (lihat buildFormatSortArgs) biar gak ada risiko selector-nya
+  // ketolak total dan jatuh diam-diam ke format video-only.
+  return "bv*+ba/b";
+}
+
+// Argumen --format-sort terpisah, dipasangkan bareng buildVideoFormatSelector()
+// di atas. "res:${cap}" nge-cap resolusi (diukur dari sisi terpendek, jadi
+// benar buat video vertikal), lalu preferensi codec H.264+AAC biar hasil
+// akhirnya bisa diputer di player native WhatsApp HP.
+function buildFormatSortArgs(maxHeight) {
+  const cap = YTDLP_ALLOWED_HEIGHTS.includes(maxHeight)
+    ? maxHeight
+    : YTDLP_DEFAULT_MAX_HEIGHT;
+  return ["-S", `res:${cap},vcodec:h264,acodec:aac`];
+}
+
+async function downloadMediaFromUrl(url, mode, maxHeight) {
+  const tmpDir = os.tmpdir();
+  const uid = crypto.randomBytes(6).toString("hex");
+  const outputTemplate = path.join(tmpDir, `dl-${uid}.%(ext)s`);
+
+  const commonArgs = [
+    "--no-playlist",
+    // CATATAN: --no-warnings SENGAJA TIDAK dipakai (walau dulu ada). Flag
+    // itu nyembunyiin baris WARNING dari stderr yang ditangkap bot --
+    // termasuk baris "HTTP Error 429" dan info PO Token yang JUSTRU jadi
+    // sinyal utama buat sistem backoff otomatis (lihat
+    // isRateLimitOrBotDetectionError) ndeteksi rate-limit. Tanpa warning
+    // ini, bot cuma lihat baris ERROR generik ("Requested format is not
+    // available") tanpa tau AKAR masalahnya rate-limit atau bukan -- jadi
+    // backoff otomatis gak pernah kepicu walau sebenarnya lagi kena 429.
+    // Baris WARNING ini cuma masuk ke console.log (Railway Logs), TIDAK
+    // ikut dikirim ke user WhatsApp (itu tetap lewat friendlyDlError),
+    // jadi aman gak bikin pesan ke user jadi berantakan.
+    "--ffmpeg-location",
+    FFMPEG_BIN_DIR,
+    "--max-filesize",
+    DL_MAX_FILESIZE,
+    // Jeda kecil (detik) antar request internal yt-dlp -- bukan obat buat
+    // rate-limit yang udah kejadian, tapi pencegahan biar gak gampang
+    // numpuk ke 429 lagi terutama kalau banyak download YouTube beruntun.
+    "--sleep-requests",
+    "1",
+    "-o",
+    outputTemplate,
+  ];
+
+  // Khusus YouTube.
+  //
+  // CATATAN (Agustus 2026, update ke-2): sempat dihapus sama sekali (lihat
+  // histori komentar di atas), TAPI ternyata di IP Railway (datacenter),
+  // client default yang dipilih otomatis yt-dlp (visionos) kena
+  // LOGIN_REQUIRED walau PO Token sudah valid -- beda dari test di IP
+  // residensial yang mulus tanpa override apa pun.
+  //
+  // Ditest manual satu-satu langsung di container Railway:
+  //   - default/tanpa override (visionos)  -> LOGIN_REQUIRED
+  //   - android_vr                          -> GVS PO Token gak didukung
+  //                                             provider bgutil sama sekali
+  //                                             (semua format di-skip)
+  //   - web (+ POT provider yang valid)     -> BERHASIL, download penuh
+  //
+  // Jadi "web" dipasang eksplisit lagi -- BUKAN rotasi banyak client kayak
+  // resep asli, cuma satu client yang sudah terbukti cocok dipasangkan
+  // dengan bgutil POT provider. Kalau nanti kualitas hasil download-nya
+  // masih suka mentok di format rendah (SABR throttle web client), baru
+  // pertimbangkan nambahin visitor_data atau POT context lain -- tapi
+  // jangan buru-buru rotasi ke client lain lagi tanpa test manual dulu,
+  // karena provider bgutil ini spesifik cuma dukung PO Token buat
+  // keluarga client "web" (web, mweb, web_safari, tv), bukan mobile/VR.
+  if (isYoutubeUrl(url)) {
+    commonArgs.push("--extractor-args", "youtube:player_client=web");
+
+    // Cegah masalah routing IPv6 yang lumayan sering kejadian di
+    // beberapa cloud provider (Railway/AWS/GCP dst).
+    commonArgs.push("--force-ipv4");
+
+    // Solver signature/n challenge YouTube -- pakai runtime "node" (SUDAH
+    // terinstall buat project ini sendiri, jadi TIDAK butuh install Deno
+    // terpisah). --remote-components auto-download komponen solver
+    // terbaru dari GitHub kalau versi cache lokal ketinggalan zaman.
+    commonArgs.push("--js-runtimes", "node");
+    commonArgs.push("--remote-components", "ejs:github");
+
+    // Kalau POT provider di-set (lihat komentar YTDLP_POT_BASE_URL di
+    // atas), kasih tau yt-dlp lokasinya -- ini buat kasus deteksi bot
+    // yang masih lolos walau sudah pakai client rotation di atas.
+    if (YTDLP_POT_BASE_URL) {
+      commonArgs.push(
+        "--extractor-args",
+        `youtubepot-bgutilhttp:base_url=${YTDLP_POT_BASE_URL}`,
+      );
+    }
+
+    // Fallback cookies-from-browser (lihat komentar YTDLP_COOKIES_FROM_BROWSER
+    // di atas) -- hanya diaktifin kalau env var-nya di-set.
+    if (YTDLP_COOKIES_FROM_BROWSER) {
+      commonArgs.push("--cookies-from-browser", YTDLP_COOKIES_FROM_BROWSER);
+    }
+  }
+
+  // Khusus Instagram: tanpa cookies, Instagram nyembunyiin format audio
+  // reel/video dari yt-dlp (walau postingannya beneran ada suaranya) --
+  // ketemu pas investigasi kasus "video kekirim tanpa suara". Reuse file
+  // yang sama dengan GALLERYDL_COOKIES_FILE (dipakai jalur foto/gallery-dl
+  // juga), apapun asalnya (path manual atau hasil decode IG_COOKIES_B64).
+  // Log diagnostik sementara -- biar keliatan di Railway Logs KENAPA
+  // --cookies dipasang atau enggak, tanpa perlu nebak-nebak. Aman
+  // dibiarkan permanen (gak nampilin isi cookies-nya, cuma status).
+  console.log(
+    `[dl][debug] isInstagramUrl(url)=${isInstagramUrl(url)} GALLERYDL_COOKIES_FILE=${GALLERYDL_COOKIES_FILE ? `"${GALLERYDL_COOKIES_FILE}" (ada, ${fs.existsSync(GALLERYDL_COOKIES_FILE) ? "file ADA" : "file TIDAK ADA di disk!"})` : "(KOSONG)"}`,
+  );
+
+  if (isInstagramUrl(url) && GALLERYDL_COOKIES_FILE) {
+    commonArgs.push("--cookies", GALLERYDL_COOKIES_FILE);
+  }
+
+  const args =
+    mode === "audio"
+      ? [
+          ...commonArgs,
+          "-x",
+          "--audio-format",
+          "mp3",
+          "--audio-quality",
+          "5",
+          url,
+        ]
+      : [
+          ...commonArgs,
+          "-f",
+          // PENTING: paksa codec H.264 (avc1) + AAC (mp4a), BUKAN cuma
+          // "terbaik apa adanya". yt-dlp defaultnya sering milih VP9/AV1
+          // + Opus (kualitas oke tapi codec modern) yang cuma bisa
+          // dimainin di player berbasis browser (WA Web/Chrome), TAPI
+          // player video native di app WA HP kebanyakan cuma jamin
+          // dukung H.264+AAC -- makanya video ke-download tapi gak bisa
+          // dibuka di HP.
+          //
+          // Kualitas dibatasi lewat buildVideoFormatSelector() -- default
+          // 720p kalau user gak minta resolusi spesifik (mis. "!dl <link>
+          // 480p" -> maxHeight=480), gak perlu 1080p/4K yang bikin file
+          // gede & lama diproses/dikirim ke WhatsApp.
+          //
+          // CATATAN: filter [filesize<95M] SENGAJA TIDAK dipakai di sini
+          // (walau versi sebelumnya ada). Filter itu cuma ngecek field
+          // "filesize" PASTI -- format yang cuma punya "filesize_approx"
+          // (kayak itag 18 pas mode SABR, ditandai simbol "\u2248" di
+          // --list-formats) bakal KETOLAK filter itu walau ukuran
+          // aslinya kecil, bikin selector gagal total ("Requested format
+          // is not available") padahal ada format yang muat. Batas
+          // ukuran file tetap ditegakkan lewat flag --max-filesize
+          // (lihat DL_MAX_FILESIZE di atas), yang otomatis
+          // mempertimbangkan filesize_approx juga.
+          buildVideoFormatSelector(),
+          ...buildFormatSortArgs(maxHeight),
+          "--merge-output-format",
+          "mp4",
+          url,
+        ];
+
+  try {
+    try {
+      await runYtDlp(args);
+    } catch (err) {
+      // Instagram (carousel foto) khususnya SERING keluar exit code 1
+      // (BUKAN 0 dengan file kosong seperti kasus di bawah) dengan pesan
+      // literal "No video formats found!" per slide -- ini juga tanda
+      // postingan foto, bukan cuma pola "sukses tapi file kosong".
+      // Ditandai sama kayak di bawah biar handleDlDownload otomatis
+      // nyoba jalur foto (tryHandleAsPhotoPost).
+      if (/No video formats found/i.test(err.stderr || err.message || "")) {
+        err.possiblyPhotoOnly = true;
+      }
+      throw err;
+    }
+
+    // Nama file pastinya baru ketahuan setelah yt-dlp selesai (ekstensi
+    // ditentukan otomatis olehnya), jadi dicari lewat prefix uid ini.
+    const files = fs
+      .readdirSync(tmpDir)
+      .filter((f) => f.startsWith(`dl-${uid}`));
+
+    if (files.length === 0) {
+      // yt-dlp selesai TANPA error (exit code 0) tapi gak ada file yang
+      // dihasilkan -- pola ini paling sering kejadian pas link-nya
+      // postingan FOTO (carousel Instagram / slideshow TikTok), bukan
+      // video. Ditandai lewat properti ini biar handleDlDownload bisa
+      // otomatis nyoba jalur foto (lihat tryHandleAsPhotoPost) sebelum
+      // nyerah dan nampilin error ke user.
+      const err = new Error(
+        `File hasil download tidak ditemukan. Mungkin link-nya tidak mengandung video/audio (mis. postingan berupa foto saja), atau ukurannya melebihi batas ${DL_MAX_MB}MB.`,
+      );
+      err.possiblyPhotoOnly = true;
+      throw err;
+    }
+
+    const outputPath = path.join(tmpDir, files[0]);
+
+    let finalPath = outputPath;
+    if (mode !== "audio" && outputPath.toLowerCase().endsWith(".mp4")) {
+      // Logikanya dipindah ke ensureWhatsAppCompatibleVideo() (lihat di
+      // atas) supaya jalur download lewat API SilenceYTDown
+      // (silenceApi.js) bisa pakai pemrosesan yang PERSIS SAMA -- dulu
+      // blok ini nempel di sini doang, jadi file dari API eksternal gak
+      // kebagian pengecekan codec ini sama sekali.
+      finalPath = await ensureWhatsAppCompatibleVideo(outputPath, {
+        workDir: tmpDir,
+        prefix: `dl-${uid}`,
+        maxBytes: DL_MAX_BYTES,
+        maxHeight: YTDLP_ALLOWED_HEIGHTS.includes(maxHeight) ? maxHeight : YTDLP_DEFAULT_MAX_HEIGHT,
+      });
+    }
+
+
+    const buffer = fs.readFileSync(finalPath);
+    console.log(
+      `[dl] Ukuran file final yang bakal dikirim: ${(buffer.length / 1024 / 1024).toFixed(2)}MB (${finalPath})`,
+    );
+
+    return { buffer };
+  } finally {
+    // Bersihin semua file sisa dengan prefix uid ini (termasuk file
+    // sementara lain yang mungkin ditinggal yt-dlp kalau prosesnya gagal
+    // di tengah jalan).
+    try {
+      for (const f of fs.readdirSync(tmpDir)) {
+        if (f.startsWith(`dl-${uid}`)) {
+          fs.rm(path.join(tmpDir, f), { force: true }, () => {});
+        }
+      }
+    } catch {
+      // abaikan -- ini cuma usaha bersih-bersih tmp, bukan hal kritis
+    }
+  }
+}
+
+
+module.exports = {
+  GALLERYDL_PATH,
+  GALLERYDL_COOKIES_FILE,
+  GALLERYDL_INSTAGRAM_USERNAME,
+  GALLERYDL_INSTAGRAM_PASSWORD,
+  getYtdlpBackoffRemainingMs,
+  formatDurationId,
+  registerYtdlpRateLimitFailure,
+  registerYtdlpSuccess,
+  isRateLimitOrBotDetectionError,
+  enqueueDownloadJob,
+  runYtDlp,
+  friendlyDlError,
+  isYoutubeUrl,
+  downloadMediaFromUrl,
+  ensureWhatsAppCompatibleVideo,
+  probeVideoInfo,
+  YTDLP_ALLOWED_HEIGHTS,
+  DL_MAX_BYTES,
+};
