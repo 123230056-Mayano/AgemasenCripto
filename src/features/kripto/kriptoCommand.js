@@ -4,6 +4,7 @@
  * features/kripto/kriptoCommand.js
  * ------------------------------------------------------------------
  * Command analisis dasar yang melengkapi !analisis:
+ *   !listkripto [kata kunci] -> daftar koin yang tersedia (lihat kriptoList.js)
  *   !chart <koin> [tf]   -> gambar candlestick + EMA 20/50/200 + garis S/R
  *   !harga <koin>        -> harga live USDT + Rupiah + % perubahan 24 jam
  *   !level <koin> [tf]   -> R1/R2/S1/S2 + jarak % dari harga sekarang
@@ -16,6 +17,7 @@ const { sendCommandDetail } = require("../menu/menu");
 const { getSenderJid } = require("../../utils/whatsapp");
 const { renderChart } = require("../analisis/analisisChart");
 const { getDefaultTf } = require("./defaultTf");
+const { getAvailableCoins, filterCoins, buildMessages } = require("./kriptoList");
 const {
   TIMEFRAMES,
   TF_LABEL,
@@ -108,13 +110,34 @@ async function runLevel(sock, msg, { jid, lang }, { coin, tf }) {
 
 const RUNNERS = { chart: runChart, harga: runHarga, level: runLevel };
 
+async function runList(sock, msg, { jid, lang }, keyword) {
+  const all = await getAvailableCoins(lang);
+  const coins = filterCoins(all, keyword);
+  if (!coins.length) {
+    await sock.sendMessage(jid, { text: t(lang, "kripto.list.empty", { q: keyword.trim().slice(0, 40) }) }, { quoted: msg });
+    return;
+  }
+  const header = t(lang, "kripto.list.header", { total: coins.length });
+  const footer = t(lang, "kripto.list.footer");
+  const messages = buildMessages(coins, header, footer);
+  for (let i = 0; i < messages.length; i++) {
+    await sock.sendMessage(jid, { text: messages[i] }, i === 0 ? { quoted: msg } : undefined);
+  }
+}
+
 /**
  * @returns {Promise<boolean>} true kalau pesan ini salah satu command kripto dasar.
  */
 async function handleKriptoCommand(sock, msg, { jid, text, lang }) {
+  const listMatch = text.match(/^!(?:listkripto|listcrypto)(?:\s+([\s\S]*))?$/i);
   let name = null;
   let match = null;
+  if (listMatch) {
+    name = "list";
+    match = listMatch;
+  }
   for (const [key, def] of Object.entries(COMMANDS)) {
+    if (name) break;
     const m = text.match(def.re);
     if (m) {
       name = key;
@@ -124,7 +147,7 @@ async function handleKriptoCommand(sock, msg, { jid, text, lang }) {
   }
   if (!name) return false;
 
-  const args = parseArgs(match[1] || "", COMMANDS[name]);
+  const args = name === "list" ? { coin: null, tf: null, keyword: match[1] || "" } : parseArgs(match[1] || "", COMMANDS[name]);
   if (!args) {
     await sendCommandDetail(sock, jid, name, lang);
     return true;
@@ -144,6 +167,10 @@ async function handleKriptoCommand(sock, msg, { jid, text, lang }) {
   inFlight.add(senderId);
   lastRequestAt.set(senderId, Date.now());
   try {
+    if (name === "list") {
+      await runList(sock, msg, { jid, lang }, args.keyword);
+      return true;
+    }
     const tf = args.tf || getDefaultTf(senderId);
     await RUNNERS[name](sock, msg, { jid, lang }, { coin: args.coin, tf });
   } catch (err) {

@@ -17,6 +17,7 @@ const COMMAND_ALIASES = {
   "!thread": "!dlt",
   "!analysis": "!analisis",
   "!price": "!harga",
+  "!listcrypto": "!listkripto",
   "!levels": "!level",
 };
 

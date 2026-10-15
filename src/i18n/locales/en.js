@@ -330,4 +330,7 @@ module.exports = {
   "kripto.unsupported": "❌ Coin *{coin}* wasn't found on Binance (USDT pair). Example: *!price eth*.",
   "kripto.timeout": "⏱️ The market data server is slow to respond. Try again in a moment.",
   "kripto.fail": "❌ Failed to fetch market data. Try again later.",
+  "kripto.list.header": "📋 *CRYPTO LIST* – {total} total",
+  "kripto.list.footer": "_Use the ticker with !price, !chart, !level, or !analysis. Filter: !listcrypto meme_",
+  "kripto.list.empty": "❌ No coins match *{q}*. Try a category (meme, defi, layer, ai, gaming) or a coin ticker/name.",
 };

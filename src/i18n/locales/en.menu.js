@@ -64,6 +64,7 @@ Fufu... welcome, Trainer-san. Here's the list of available commands. For crypto 
 ▸ !chart
 ▸ !price
 ▸ !level
+▸ !listcrypto
 
 ┏━━━━━━━━━━━━━━━┓
 ┃ 💬 *AI CHAT*
@@ -434,4 +435,5 @@ The setting is saved permanently, so it won't reset when the bot restarts.`,
   "cmd.chart": "🕯️ *!chart <coin> [15m|1H|4H|1D]*\n\nSends a candlestick chart image with EMA 20/50/200 lines and dashed support/resistance lines.\n\n*Examples:*\n```\n!chart btc 1d\n!chart sol\n```\n\nDefault timeframe is *4H*.",
   "cmd.harga": "💰 *!price <coin>*\n\nLive price in USDT and Rupiah with the 24h percent change.\n\n*Example:*\n```\n!price eth\n```",
   "cmd.level": "📊 *!level <coin> [15m|1H|4H|1D]*\n\nResistance (R1, R2) and support (S1, S2) levels with the percent distance from the current price.\n\n*Example:*\n```\n!level sol 4h\n```\n\nDefault timeframe is *4H*. Not financial advice.",
+  "cmd.listkripto": "📋 *!listcrypto [keyword]*\n\nCoins available for !price, !chart, !level, and !analysis, grouped by category.\n\n*Examples:*\n```\n!listcrypto\n!listcrypto meme\n!listcrypto sol\n```\n\nOptional keyword: category, ticker, or coin name.",
 };

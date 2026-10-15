@@ -330,4 +330,7 @@ module.exports = {
   "kripto.unsupported": "❌ Koin *{coin}* tidak ditemukan di Binance (pasangan USDT). Contoh: *!harga eth*.",
   "kripto.timeout": "⏱️ Server data pasar lambat merespons. Coba lagi sebentar ya.",
   "kripto.fail": "❌ Gagal mengambil data pasar. Coba lagi nanti.",
+  "kripto.list.header": "📋 *DAFTAR KRIPTO* ({total} koin)",
+  "kripto.list.footer": "_Pakai ticker-nya di !harga, !chart, !level, atau !analisis. Filter: !listkripto meme_",
+  "kripto.list.empty": "❌ Tidak ada koin yang cocok dengan *{q}*. Coba kategori (meme, defi, layer, ai, gaming) atau ticker/nama koin.",
 };
