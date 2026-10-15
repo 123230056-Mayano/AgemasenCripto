@@ -317,7 +317,7 @@ module.exports = {
   "analisis.cooldown": "Tunggu {sec} detik lagi sebelum pakai *!analisis* lagi ya.",
   "analisis.working": "📈 Menganalisis *{coin}* ({tf}) dan menyiapkan PDF... bisa 10-40 detik.",
   "analisis.caption": "📈 *{coin} {tf}* - {trend}\nHarga: {price}\n_Analisis edukatif, bukan sinyal trading._",
-  "analisis.unsupported": "❌ Koin *{coin}* atau timeframe *{tf}* tidak didukung. Contoh: *!analisis sol 4h* (timeframe: 1H, 4H, 1D).",
+  "analisis.unsupported": "❌ Koin *{coin}* atau timeframe *{tf}* tidak didukung. Contoh: *!analisis sol 4h* (timeframe: 15m, 1H, 4H, 1D).",
   "analisis.timeout": "⏱️ Server analisis lambat merespons. Coba lagi sebentar ya.",
   "analisis.fail": "❌ Gagal membuat analisis. Coba lagi nanti.",
   "analisis.failDetail": "❌ Gagal membuat analisis: {detail}",

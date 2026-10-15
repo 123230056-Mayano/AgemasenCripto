@@ -26,7 +26,7 @@ const axios = require("axios");
 const { createCanvas, GlobalFonts } = require("@napi-rs/canvas");
 
 const BINANCE = (process.env.BINANCE_BASE || "https://data-api.binance.vision").replace(/\/+$/, "");
-const INTERVAL = { "1H": "1h", "4H": "4h", "1D": "1d" };
+const INTERVAL = { "15M": "15m", "1H": "1h", "4H": "4h", "1D": "1d" };
 const FETCH_LIMIT = 320; // cukup supaya EMA200 sudah terisi di seluruh candle yang digambar
 const VISIBLE = 110; // jumlah candle yang digambar
 
@@ -116,7 +116,7 @@ const COLORS = {
  * @param {object} o
  * @param {Array<{t,o,h,l,c}>} o.candles   candle closed, urut lama -> baru
  * @param {string} o.coin
- * @param {string} o.tf                    "1H" | "4H" | "1D"
+ * @param {string} o.tf                    "15M" | "1H" | "4H" | "1D"
  * @param {number[]} [o.resistance]
  * @param {number[]} [o.support]
  * @returns {Buffer} PNG

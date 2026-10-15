@@ -633,7 +633,7 @@ async function handleSingleMessage(sock, msg) {
     }
 
     // =====================
-    // !analisis <koin> [1H|4H|1D] -> analisis teknikal crypto (web
+    // !analisis <koin> [15m|1H|4H|1D] -> analisis teknikal crypto (web
     // KriptoPredict, env ANALYST_URL) dikirim sebagai PDF.
     // Lihat src/features/analisis/.
     // =====================

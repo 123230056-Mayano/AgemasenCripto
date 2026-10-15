@@ -3,7 +3,7 @@
 /**
  * features/analisis/analisisCommand.js
  * ------------------------------------------------------------------
- * Command "!analisis <koin> [1H|4H|1D]" (alias "!analysis").
+ * Command "!analisis <koin> [15m|1H|4H|1D]" (alias "!analysis").
  *
  * Alur:
  *   1. Parse argumen (koin + timeframe, default 4H).
@@ -24,7 +24,7 @@ const { sendCommandDetail } = require("../menu/menu");
 const { getSenderJid } = require("../../utils/whatsapp");
 const { buildAnalysisPdf, fmtUsd } = require("./analisisPdf");
 
-const TIMEFRAMES = ["1H", "4H", "1D"];
+const TIMEFRAMES = ["15M", "1H", "4H", "1D"];
 const DEFAULT_TF = "4H";
 const ANALYZE_TIMEOUT_MS = 70_000; // Gemini di server timeout 40 dtk + fetch data
 const COOLDOWN_MS = 30_000;
