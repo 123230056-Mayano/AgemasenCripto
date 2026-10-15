@@ -20,6 +20,7 @@
  *   !ringkasan / !stat / !scan <kondisi> [tf] -> statistik & screener pasar (statistik.js)
  *   !watch / !unwatch / !watchlist / !alert / !alertlevel / !alerts / !hapusalert /
  *   !harian / !stopharian -> watchlist & alert pribadi (watchlist.js, alertMonitor.js)
+ *   !kurs / !konversi / !tf -> utilitas (utilitas.js)
  *
  * [tf] = 15m | 1H | 4H | 1D; kosong -> default pengguna (awal 4H).
  */
@@ -33,6 +34,7 @@ const { getAvailableCoins, filterCoins, buildMessages } = require("./kriptoList"
 const { PASAR_COMMANDS, PASAR_RUNNERS, parsePasarArgs } = require("./pasar");
 const { STAT_COMMANDS, STAT_RUNNERS, parseStatArgs } = require("./statistik");
 const { WATCH_COMMANDS, WATCH_RUNNERS, parseWatchArgs } = require("./watchlist");
+const { UTIL_COMMANDS, UTIL_RUNNERS, parseUtilArgs } = require("./utilitas");
 const { EMA_PERIODS, computeEmas, classifyTrend, detectCross, strengthScore } = require("./indicators");
 const {
   TIMEFRAMES,
@@ -357,6 +359,19 @@ async function handleKriptoCommand(sock, msg, { jid, text, lang }) {
       }
     }
   }
+  // Utilitas (!kurs, !konversi, !tf) -> lihat utilitas.js
+  let isUtil = false;
+  if (!name) {
+    for (const [key, def] of Object.entries(UTIL_COMMANDS)) {
+      const m = text.match(def.re);
+      if (m) {
+        name = key;
+        match = m;
+        isUtil = true;
+        break;
+      }
+    }
+  }
   if (!name) return false;
 
   const senderId = getSenderJid(msg) || jid;
@@ -364,10 +379,17 @@ async function handleKriptoCommand(sock, msg, { jid, text, lang }) {
   if (isPasar) args = parsePasarArgs(name, match[1] || "", getDefaultTf(senderId));
   else if (isStat) args = parseStatArgs(name, match[1] || "", getDefaultTf(senderId));
   else if (isWatch) args = parseWatchArgs(name, match[1] || "");
+  else if (isUtil) args = parseUtilArgs(name, match[1] || "");
   else if (name === "list") args = { coin: null, coin2: null, tf: null, keyword: match[1] || "" };
   else args = parseArgs(match[1] || "", COMMANDS[name]);
   if (!args) {
     await sendCommandDetail(sock, jid, name, lang);
+    return true;
+  }
+
+  // !tf cuma menyimpan preferensi (tanpa data pasar), jadi tidak kena cooldown.
+  if (isUtil && name === "tf") {
+    await UTIL_RUNNERS.tf(sock, msg, { jid, lang, senderId }, args);
     return true;
   }
 
@@ -394,6 +416,10 @@ async function handleKriptoCommand(sock, msg, { jid, text, lang }) {
     }
     if (isWatch) {
       await WATCH_RUNNERS[name](sock, msg, { jid, lang, senderId }, args);
+      return true;
+    }
+    if (isUtil) {
+      await UTIL_RUNNERS[name](sock, msg, { jid, lang, senderId }, args);
       return true;
     }
     if (name === "list") {

@@ -32,6 +32,8 @@ const COMMAND_ALIASES = {
   "!deletealert": "!hapusalert",
   "!daily": "!harian",
   "!stopdaily": "!stopharian",
+  "!rate": "!kurs",
+  "!convert": "!konversi",
 };
 
 // "!Summarize tolong fokus ke kesimpulan" -> "!ringkas tolong fokus ke kesimpulan"

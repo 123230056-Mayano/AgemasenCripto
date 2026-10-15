@@ -439,4 +439,11 @@ module.exports = {
   "daily.watch": "📋 *Watchlist kamu*\n{table}",
   "daily.noWatch": "📋 Watchlist kamu masih kosong. Tambah dengan *!watch <koin>*.",
   "daily.body": "🗓️ *RINGKASAN HARIAN KRIPTO* ({tz})\n\n{market}\n\n{watch}\n\n_Bukan saran finansial._",
+
+  // ---------- utilitas: !kurs / !konversi / !tf ----------
+  "kripto.kurs.body": "💱 1 USDT = {rate}",
+  "kripto.kurs.unavailable": "❌ Kurs Rupiah belum bisa diambil. Coba lagi nanti.",
+  "kripto.konversi.body": "🔄 {amount} {coin} = {usd} = {idr}",
+  "kripto.konversi.noIdr": "🔄 {amount} {coin} = {usd}\n_(kurs Rupiah belum tersedia)_",
+  "kripto.tf.set": "✅ Timeframe default diubah ke {tf}.",
 };

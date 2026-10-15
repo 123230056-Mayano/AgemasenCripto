@@ -86,6 +86,9 @@ Fufu... welcome, Trainer-san. Here's the list of available commands. For crypto 
 ▸ !deletealert
 ▸ !daily
 ▸ !stopdaily
+▸ !rate
+▸ !convert
+▸ !tf
 
 ┏━━━━━━━━━━━━━━━┓
 ┃ 💬 *AI CHAT*
@@ -480,4 +483,8 @@ The setting is saved permanently, so it won't reset when the bot restarts.`,
   "cmd.hapusalert": "🗑️ *!deletealert <id>*\n\nDeletes an alert by the ID shown in *!alerts*.\n\n*Example:*\n```\n!deletealert 3\n```",
   "cmd.harian": "🗓️ *!daily [time]*\n\nSubscribe to an automatic daily summary (market + your watchlist), sent to the chat where you run this command. Default time is 08:00 WIB; set it in 24-hour format.\n\n*Example:*\n```\n!daily\n!daily 07:30\n```\n\nStop with *!stopdaily*.",
   "cmd.stopharian": "🗓️ *!stopdaily*\n\nStops the daily summary.\n\n*Example:*\n```\n!stopdaily\n```",
+
+  "cmd.kurs": "💱 *!rate*\n\nShows the current 1 USDT to Rupiah rate.\n\n*Example:*\n```\n!rate\n```",
+  "cmd.konversi": "🔄 *!convert <amount> <coin>*\n\nConverts an amount of a coin to USDT and Rupiah.\n\n*Example:*\n```\n!convert 2 SOL\n!convert 0.5 BTC\n```",
+  "cmd.tf": "⏱️ *!tf <timeframe>*\n\nSaves your default timeframe, so [tf] in other commands can be left out. Options: 15m, 1H, 4H, 1D (initially 4H).\n\n*Example:*\n```\n!tf 1H\n```",
 };

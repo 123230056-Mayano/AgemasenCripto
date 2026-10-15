@@ -66,7 +66,7 @@ function user(jid) {
 /** Hapus entri user yang sudah kosong supaya file tidak membengkak. */
 function prune(jid) {
   const u = users[jid];
-  if (u && !u.watch.length && !u.alerts.length && !u.daily) delete users[jid];
+  if (u && !u.watch.length && !u.alerts.length && !u.daily && !u.tf) delete users[jid];
 }
 
 // ---------- watchlist ----------
@@ -154,6 +154,15 @@ function allDaily() {
   return out;
 }
 
+// ---------- timeframe default (!tf) ----------
+/** @returns {string|null} timeframe tersimpan (\"15M\"|\"1H\"|\"4H\"|\"1D\") atau null. */
+const getTf = (jid) => users[jid]?.tf || null;
+
+function setTf(jid, tf) {
+  user(jid).tf = tf;
+  save();
+}
+
 /** Dipanggil setelah mengubah field alert/daily secara langsung (mis. lastSent, armed). */
 const persist = save;
 
@@ -170,6 +179,8 @@ module.exports = {
   findLevelAlert,
   removeAlert,
   allAlerts,
+  getTf,
+  setTf,
   getDaily,
   setDaily,
   clearDaily,
