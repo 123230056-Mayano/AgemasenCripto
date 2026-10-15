@@ -28,6 +28,10 @@ const COMMAND_ALIASES = {
   "!search": "!cari",
   "!overview": "!ringkasan",
   "!stats": "!stat",
+  "!levelalert": "!alertlevel",
+  "!deletealert": "!hapusalert",
+  "!daily": "!harian",
+  "!stopdaily": "!stopharian",
 };
 
 // "!Summarize tolong fokus ke kesimpulan" -> "!ringkas tolong fokus ke kesimpulan"

@@ -11,6 +11,7 @@ const P = require("pino");
 const { handleMessagesUpsert } = require("./router");
 const { installHumanizer } = require("../utils/humanize");
 const { setSocket, startStatsServer } = require("../features/stats/stats");
+const { setAlertSocket } = require("../features/kripto/alertMonitor");
 const { initSubscriptions } = require("../state/subscriptionStore");
 const { initLanguageStore } = require("../state/languageStore");
 const session = require("../state/sessionState");
@@ -102,6 +103,7 @@ async function startBot() {
   installHumanizer(sock);
 
   setSocket(sock);
+  setAlertSocket(sock); // alert harga/level & ringkasan harian (kripto Bagian 5)
   initSubscriptions();
   initLanguageStore();
   startChatRegistry(sock);

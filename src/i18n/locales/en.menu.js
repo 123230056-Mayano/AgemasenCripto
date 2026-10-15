@@ -77,6 +77,15 @@ Fufu... welcome, Trainer-san. Here's the list of available commands. For crypto 
 ▸ !overview
 ▸ !stats
 ▸ !scan
+▸ !watch
+▸ !unwatch
+▸ !watchlist
+▸ !alert
+▸ !levelalert
+▸ !alerts
+▸ !deletealert
+▸ !daily
+▸ !stopdaily
 
 ┏━━━━━━━━━━━━━━━┓
 ┃ 💬 *AI CHAT*
@@ -460,4 +469,15 @@ The setting is saved permanently, so it won't reset when the bot restarts.`,
   "cmd.ringkasan": "🌐 *!overview*\n\nMarket overview: market mood, how many coins are above/below EMA 200, and BTC's condition.\n\n*Example:*\n```\n!overview\n```\n\nUses your default timeframe (initially *4H*). Mood is *bullish* when ≥60% of coins are above EMA 200, *bearish* at ≤40%, otherwise neutral. Not financial advice.",
   "cmd.stat": "📊 *!stats*\n\nQuick stats: number of bullish vs bearish vs sideways coins, plus how many are above/below EMA 50 and EMA 200.\n\n*Example:*\n```\n!stats\n```\n\nUses your default timeframe (initially *4H*). Not financial advice.",
   "cmd.scan": "🔎 *!scan <condition> [15m|1H|4H|1D]*\n\nScreener: finds coins that meet a given condition.\n\n*Conditions:*\n• diatas_ema200 / dibawah_ema200 (above / below EMA 200; above_ema200 / below_ema200 also work)\n• dekat_support / dekat_resistance (within 2%; near_support / near_resistance also work)\n• golden_cross / death_cross (EMA 50/200, within the last 10 candles)\n• breakout / breakdown (close beyond the previous 20 candles' high/low)\n\n*Examples:*\n```\n!scan dekat_support 4H\n!scan golden_cross 1D\n```\n\nReturns a list of coins + price + distance to the level (max 25). No timeframe = your default. Not financial advice.",
+
+  // ---------- watchlist & alert (Bagian 5) ----------
+  "cmd.watch": "👀 *!watch <coin>*\n\nAdds a coin to your personal watchlist (max 20 coins).\n\n*Example:*\n```\n!watch SOL\n```\n\nSee it with *!watchlist*.",
+  "cmd.unwatch": "👀 *!unwatch <coin>*\n\nRemoves a coin from your personal watchlist.\n\n*Example:*\n```\n!unwatch SOL\n```",
+  "cmd.watchlist": "📋 *!watchlist*\n\nShows your whole watchlist: price, 24h % change, and a short trend status (uses your default timeframe, initially *4H*).\n\n*Example:*\n```\n!watchlist\n```\n\nNot financial advice.",
+  "cmd.alert": "🔔 *!alert <coin> <price>*\n\nCreates a price alert. The bot messages you when the price touches or breaks that number. Direction (up/down) is set automatically from the current price. The alert is removed once it fires.\n\n*Example:*\n```\n!alert SOL 100\n```\n\nSee active alerts with *!alerts*.",
+  "cmd.alertlevel": "🔔 *!levelalert <coin>*\n\nAutomatic alert when price gets close (≤ 0.5%) to or touches the nearest support/resistance level. Levels are recalculated regularly using your default timeframe (initially *4H*), so this alert stays active until you delete it.\n\n*Example:*\n```\n!levelalert SOL\n```",
+  "cmd.alerts": "🔔 *!alerts*\n\nShows all your active alerts with their IDs.\n\n*Example:*\n```\n!alerts\n```",
+  "cmd.hapusalert": "🗑️ *!deletealert <id>*\n\nDeletes an alert by the ID shown in *!alerts*.\n\n*Example:*\n```\n!deletealert 3\n```",
+  "cmd.harian": "🗓️ *!daily [time]*\n\nSubscribe to an automatic daily summary (market + your watchlist), sent to the chat where you run this command. Default time is 08:00 WIB; set it in 24-hour format.\n\n*Example:*\n```\n!daily\n!daily 07:30\n```\n\nStop with *!stopdaily*.",
+  "cmd.stopharian": "🗓️ *!stopdaily*\n\nStops the daily summary.\n\n*Example:*\n```\n!stopdaily\n```",
 };

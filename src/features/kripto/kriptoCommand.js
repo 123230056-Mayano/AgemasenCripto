@@ -18,6 +18,8 @@
  *   !cari <nama>         -> cari koin berdasarkan nama / ticker
  *   (lima terakhir ada di pasar.js)
  *   !ringkasan / !stat / !scan <kondisi> [tf] -> statistik & screener pasar (statistik.js)
+ *   !watch / !unwatch / !watchlist / !alert / !alertlevel / !alerts / !hapusalert /
+ *   !harian / !stopharian -> watchlist & alert pribadi (watchlist.js, alertMonitor.js)
  *
  * [tf] = 15m | 1H | 4H | 1D; kosong -> default pengguna (awal 4H).
  */
@@ -30,6 +32,7 @@ const { getDefaultTf } = require("./defaultTf");
 const { getAvailableCoins, filterCoins, buildMessages } = require("./kriptoList");
 const { PASAR_COMMANDS, PASAR_RUNNERS, parsePasarArgs } = require("./pasar");
 const { STAT_COMMANDS, STAT_RUNNERS, parseStatArgs } = require("./statistik");
+const { WATCH_COMMANDS, WATCH_RUNNERS, parseWatchArgs } = require("./watchlist");
 const { EMA_PERIODS, computeEmas, classifyTrend, detectCross, strengthScore } = require("./indicators");
 const {
   TIMEFRAMES,
@@ -341,12 +344,26 @@ async function handleKriptoCommand(sock, msg, { jid, text, lang }) {
       }
     }
   }
+  // Watchlist & alert pribadi (!watch, !alert, !harian, ...) -> lihat watchlist.js
+  let isWatch = false;
+  if (!name) {
+    for (const [key, def] of Object.entries(WATCH_COMMANDS)) {
+      const m = text.match(def.re);
+      if (m) {
+        name = key;
+        match = m;
+        isWatch = true;
+        break;
+      }
+    }
+  }
   if (!name) return false;
 
   const senderId = getSenderJid(msg) || jid;
   let args;
   if (isPasar) args = parsePasarArgs(name, match[1] || "", getDefaultTf(senderId));
   else if (isStat) args = parseStatArgs(name, match[1] || "", getDefaultTf(senderId));
+  else if (isWatch) args = parseWatchArgs(name, match[1] || "");
   else if (name === "list") args = { coin: null, coin2: null, tf: null, keyword: match[1] || "" };
   else args = parseArgs(match[1] || "", COMMANDS[name]);
   if (!args) {
@@ -373,6 +390,10 @@ async function handleKriptoCommand(sock, msg, { jid, text, lang }) {
     }
     if (isStat) {
       await STAT_RUNNERS[name](sock, msg, { jid, lang, senderId }, args);
+      return true;
+    }
+    if (isWatch) {
+      await WATCH_RUNNERS[name](sock, msg, { jid, lang, senderId }, args);
       return true;
     }
     if (name === "list") {
