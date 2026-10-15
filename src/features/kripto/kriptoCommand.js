@@ -16,7 +16,8 @@
  *   !top / !flop [jumlah] -> top gainers / losers 24 jam
  *   !kategori            -> daftar kategori koin
  *   !cari <nama>         -> cari koin berdasarkan nama / ticker
- *   (empat terakhir ada di pasar.js)
+ *   (lima terakhir ada di pasar.js)
+ *   !ringkasan / !stat / !scan <kondisi> [tf] -> statistik & screener pasar (statistik.js)
  *
  * [tf] = 15m | 1H | 4H | 1D; kosong -> default pengguna (awal 4H).
  */
@@ -28,6 +29,7 @@ const { renderChart } = require("../analisis/analisisChart");
 const { getDefaultTf } = require("./defaultTf");
 const { getAvailableCoins, filterCoins, buildMessages } = require("./kriptoList");
 const { PASAR_COMMANDS, PASAR_RUNNERS, parsePasarArgs } = require("./pasar");
+const { STAT_COMMANDS, STAT_RUNNERS, parseStatArgs } = require("./statistik");
 const { EMA_PERIODS, computeEmas, classifyTrend, detectCross, strengthScore } = require("./indicators");
 const {
   TIMEFRAMES,
@@ -326,11 +328,25 @@ async function handleKriptoCommand(sock, msg, { jid, text, lang }) {
       }
     }
   }
+  // Statistik & scanner (!ringkasan, !stat, !scan) -> lihat statistik.js
+  let isStat = false;
+  if (!name) {
+    for (const [key, def] of Object.entries(STAT_COMMANDS)) {
+      const m = text.match(def.re);
+      if (m) {
+        name = key;
+        match = m;
+        isStat = true;
+        break;
+      }
+    }
+  }
   if (!name) return false;
 
   const senderId = getSenderJid(msg) || jid;
   let args;
   if (isPasar) args = parsePasarArgs(name, match[1] || "", getDefaultTf(senderId));
+  else if (isStat) args = parseStatArgs(name, match[1] || "", getDefaultTf(senderId));
   else if (name === "list") args = { coin: null, coin2: null, tf: null, keyword: match[1] || "" };
   else args = parseArgs(match[1] || "", COMMANDS[name]);
   if (!args) {
@@ -353,6 +369,10 @@ async function handleKriptoCommand(sock, msg, { jid, text, lang }) {
   try {
     if (isPasar) {
       await PASAR_RUNNERS[name](sock, msg, { jid, lang, senderId }, args);
+      return true;
+    }
+    if (isStat) {
+      await STAT_RUNNERS[name](sock, msg, { jid, lang, senderId }, args);
       return true;
     }
     if (name === "list") {

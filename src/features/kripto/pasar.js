@@ -335,6 +335,7 @@ module.exports = {
   PASAR_RUNNERS,
   parsePasarArgs,
   handleKriptoNext,
+  getMarketRows,
   matchCategories,
   PAGE_SIZE,
 };

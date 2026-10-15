@@ -26,6 +26,8 @@ const COMMAND_ALIASES = {
   "!losers": "!flop",
   "!categories": "!kategori",
   "!search": "!cari",
+  "!overview": "!ringkasan",
+  "!stats": "!stat",
 };
 
 // "!Summarize tolong fokus ke kesimpulan" -> "!ringkas tolong fokus ke kesimpulan"

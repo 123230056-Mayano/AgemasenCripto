@@ -74,6 +74,9 @@ Fufu... welcome, Trainer-san. Here's the list of available commands. For crypto 
 ▸ !flop
 ▸ !categories
 ▸ !search
+▸ !overview
+▸ !stats
+▸ !scan
 
 ┏━━━━━━━━━━━━━━━┓
 ┃ 💬 *AI CHAT*
@@ -454,4 +457,7 @@ The setting is saved permanently, so it won't reset when the bot restarts.`,
   "cmd.flop": "📉 *!flop [count]*\n\nTop 24h losers: coins that fell the most.\n\n*Examples:*\n```\n!flop\n!flop 5\n```\n\nDefault 10 coins, max 25. Not financial advice.",
   "cmd.kategori": "🗂️ *!categories*\n\nShows the coin categories and how many coins each has. The filter word can be used with *!all*.\n\n*Example:*\n```\n!categories\n```",
   "cmd.cari": "🔍 *!search <name>*\n\nSearch coins by name or ticker (partial match).\n\n*Examples:*\n```\n!search sol\n!search bit\n```\n\nResults show ticker and coin name. Check the price with *!price <ticker>*.",
+  "cmd.ringkasan": "🌐 *!overview*\n\nMarket overview: market mood, how many coins are above/below EMA 200, and BTC's condition.\n\n*Example:*\n```\n!overview\n```\n\nUses your default timeframe (initially *4H*). Mood is *bullish* when ≥60% of coins are above EMA 200, *bearish* at ≤40%, otherwise neutral. Not financial advice.",
+  "cmd.stat": "📊 *!stats*\n\nQuick stats: number of bullish vs bearish vs sideways coins, plus how many are above/below EMA 50 and EMA 200.\n\n*Example:*\n```\n!stats\n```\n\nUses your default timeframe (initially *4H*). Not financial advice.",
+  "cmd.scan": "🔎 *!scan <condition> [15m|1H|4H|1D]*\n\nScreener: finds coins that meet a given condition.\n\n*Conditions:*\n• diatas_ema200 / dibawah_ema200 (above / below EMA 200; above_ema200 / below_ema200 also work)\n• dekat_support / dekat_resistance (within 2%; near_support / near_resistance also work)\n• golden_cross / death_cross (EMA 50/200, within the last 10 candles)\n• breakout / breakdown (close beyond the previous 20 candles' high/low)\n\n*Examples:*\n```\n!scan dekat_support 4H\n!scan golden_cross 1D\n```\n\nReturns a list of coins + price + distance to the level (max 25). No timeframe = your default. Not financial advice.",
 };
