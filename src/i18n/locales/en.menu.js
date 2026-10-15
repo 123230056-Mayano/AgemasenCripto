@@ -64,6 +64,10 @@ Fufu... welcome, Trainer-san. Here's the list of available commands. For crypto 
 ▸ !chart
 ▸ !price
 ▸ !level
+▸ !ema
+▸ !trend
+▸ !mtf
+▸ !compare
 ▸ !listcrypto
 
 ┏━━━━━━━━━━━━━━━┓
@@ -436,4 +440,8 @@ The setting is saved permanently, so it won't reset when the bot restarts.`,
   "cmd.harga": "💰 *!price <coin>*\n\nLive price in USDT and Rupiah with the 24h percent change.\n\n*Example:*\n```\n!price eth\n```",
   "cmd.level": "📊 *!level <coin> [15m|1H|4H|1D]*\n\nResistance (R1, R2) and support (S1, S2) levels with the percent distance from the current price.\n\n*Example:*\n```\n!level sol 4h\n```\n\nDefault timeframe is *4H*. Not financial advice.",
   "cmd.listkripto": "📋 *!listcrypto [keyword]*\n\nCoins available for !price, !chart, !level, and !analysis, grouped by category.\n\n*Examples:*\n```\n!listcrypto\n!listcrypto meme\n!listcrypto sol\n```\n\nOptional keyword: category, ticker, or coin name.",
+  "cmd.ema": "📐 *!ema <coin> [15m|1H|4H|1D]*\n\nEMA 20, 50, 200 values and where the price sits against each one (above / below).\n\n*Example:*\n```\n!ema bnb 4h\n```\n\nDefault timeframe is *4H*. Not financial advice.",
+  "cmd.tren": "🧭 *!trend <coin> [15m|1H|4H|1D]*\n\nTrend status: bullish, bearish, or sideways. Mentions a golden cross / death cross if one just happened.\n\n*Example:*\n```\n!trend xrp 4h\n```\n\nDefault timeframe is *4H*. Not financial advice.",
+  "cmd.mtf": "🗂️ *!mtf <coin>*\n\nMulti-timeframe summary (15m, 1H, 4H, 1D) in one table so you can see how the trends line up.\n\n*Example:*\n```\n!mtf btc\n```\n\nColumns: timeframe, trend, position vs EMA 200, nearest level. Not financial advice.",
+  "cmd.bandingkan": "⚔️ *!compare <coin1> <coin2>*\n\nCompares two coins side by side: price, % change, trend, and position against the EMAs, with a short verdict on which one is stronger.\n\n*Example:*\n```\n!compare sol eth\n```\n\nUses your default timeframe (initially *4H*). Not financial advice.",
 };

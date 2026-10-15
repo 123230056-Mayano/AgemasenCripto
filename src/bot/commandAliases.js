@@ -19,6 +19,8 @@ const COMMAND_ALIASES = {
   "!price": "!harga",
   "!listcrypto": "!listkripto",
   "!levels": "!level",
+  "!trend": "!tren",
+  "!compare": "!bandingkan",
 };
 
 // "!Summarize tolong fokus ke kesimpulan" -> "!ringkas tolong fokus ke kesimpulan"

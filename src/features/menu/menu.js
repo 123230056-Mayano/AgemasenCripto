@@ -62,7 +62,7 @@ async function fetchRandomImageForHelp(tag) {
 }
 
 // Tag khusus buat gambar hiasan di !menu.
-const HELP_IMAGE_TAG = "special_week_(umamusume)";
+const HELP_IMAGE_TAG = "wonder_acute_(umamusume)";
 
 // Teks !menu & penjelasan detail per command SEKARANG ada di
 // src/i18n/locales/{id,en}.menu.js (key "menu.text" & "cmd.<nama>") supaya
