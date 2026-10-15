@@ -12,6 +12,11 @@
  *   !tren <koin> [tf]    -> bullish / bearish / sideways (+ golden/death cross baru)
  *   !mtf <koin>          -> tabel tren di 15m, 1H, 4H, 1D sekaligus
  *   !bandingkan <k1> <k2> -> dua koin berdampingan + kesimpulan siapa lebih kuat
+ *   !semua [kategori] [tf] -> semua koin + harga + % (dipaginasi, lanjut pakai !next)
+ *   !top / !flop [jumlah] -> top gainers / losers 24 jam
+ *   !kategori            -> daftar kategori koin
+ *   !cari <nama>         -> cari koin berdasarkan nama / ticker
+ *   (empat terakhir ada di pasar.js)
  *
  * [tf] = 15m | 1H | 4H | 1D; kosong -> default pengguna (awal 4H).
  */
@@ -22,6 +27,7 @@ const { getSenderJid } = require("../../utils/whatsapp");
 const { renderChart } = require("../analisis/analisisChart");
 const { getDefaultTf } = require("./defaultTf");
 const { getAvailableCoins, filterCoins, buildMessages } = require("./kriptoList");
+const { PASAR_COMMANDS, PASAR_RUNNERS, parsePasarArgs } = require("./pasar");
 const { EMA_PERIODS, computeEmas, classifyTrend, detectCross, strengthScore } = require("./indicators");
 const {
   TIMEFRAMES,
@@ -307,15 +313,31 @@ async function handleKriptoCommand(sock, msg, { jid, text, lang }) {
       break;
     }
   }
+  // Daftar & pencarian pasar (!semua, !top, !flop, !kategori, !cari) -> lihat pasar.js
+  let isPasar = false;
+  if (!name) {
+    for (const [key, def] of Object.entries(PASAR_COMMANDS)) {
+      const m = text.match(def.re);
+      if (m) {
+        name = key;
+        match = m;
+        isPasar = true;
+        break;
+      }
+    }
+  }
   if (!name) return false;
 
-  const args = name === "list" ? { coin: null, coin2: null, tf: null, keyword: match[1] || "" } : parseArgs(match[1] || "", COMMANDS[name]);
+  const senderId = getSenderJid(msg) || jid;
+  let args;
+  if (isPasar) args = parsePasarArgs(name, match[1] || "", getDefaultTf(senderId));
+  else if (name === "list") args = { coin: null, coin2: null, tf: null, keyword: match[1] || "" };
+  else args = parseArgs(match[1] || "", COMMANDS[name]);
   if (!args) {
     await sendCommandDetail(sock, jid, name, lang);
     return true;
   }
 
-  const senderId = getSenderJid(msg) || jid;
   if (inFlight.has(senderId)) {
     await sock.sendMessage(jid, { text: t(lang, "kripto.busy") });
     return true;
@@ -329,6 +351,10 @@ async function handleKriptoCommand(sock, msg, { jid, text, lang }) {
   inFlight.add(senderId);
   lastRequestAt.set(senderId, Date.now());
   try {
+    if (isPasar) {
+      await PASAR_RUNNERS[name](sock, msg, { jid, lang, senderId }, args);
+      return true;
+    }
     if (name === "list") {
       await runList(sock, msg, { jid, lang }, args.keyword);
       return true;

@@ -5,6 +5,7 @@ const axios = require("axios");
 const { runArtikelCommand } = require("../commands/artikel");
 const { handleAnalisisCommand } = require("../features/analisis/analisisCommand");
 const { handleKriptoCommand } = require("../features/kripto/kriptoCommand");
+const { handleKriptoNext } = require("../features/kripto/pasar");
 const { normalizeCommandAlias } = require("./commandAliases");
 const {
   handleTsundereChat,
@@ -1836,6 +1837,10 @@ async function handleSingleMessage(sock, msg) {
     // =====================
     if (text === "!next") {
       const session = sessions.get(sessionKey);
+
+      // Kalau pengirim baru saja buka daftar !semua (dan sesi gambarnya lebih
+      // lama / tidak ada), !next = halaman berikutnya daftar kripto itu.
+      if (await handleKriptoNext(sock, msg, { jid, lang, otherSessionAt: session?.lastUsed || 0 })) return;
 
       if (!session) {
         await sendCommandDetail(sock, jid, "next", lang);

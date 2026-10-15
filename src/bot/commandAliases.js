@@ -21,6 +21,11 @@ const COMMAND_ALIASES = {
   "!levels": "!level",
   "!trend": "!tren",
   "!compare": "!bandingkan",
+  "!all": "!semua",
+  "!gainers": "!top",
+  "!losers": "!flop",
+  "!categories": "!kategori",
+  "!search": "!cari",
 };
 
 // "!Summarize tolong fokus ke kesimpulan" -> "!ringkas tolong fokus ke kesimpulan"
