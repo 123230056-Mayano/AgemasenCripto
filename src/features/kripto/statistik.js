@@ -94,6 +94,7 @@ function analyzeCoin(ticker, name, candles, live) {
     ticker,
     name,
     price,
+    lastCandleT: candles[candles.length - 1].t, // waktu BUKA candle closed terakhir (alarm divergence memastikan data sudah final)
     pct24: live && isFinite(live.pct) ? live.pct : null,
     latest,
     info,
@@ -174,6 +175,23 @@ async function getSnapshot(lang, tf) {
 
   building.set(tf, job);
   return job;
+}
+
+/**
+ * Bangun ulang snapshot TF ini dari awal (abaikan cache 3 menit). Dipakai alarm divergence tepat setelah
+ * candle closed, supaya hasilnya memuat candle baru dan bukan snapshot lama. Kalau ada pembangunan yang
+ * sedang berjalan, ditunggu dulu (bisa sudah basi) lalu dibangun ulang sekali.
+ */
+async function refreshSnapshot(lang, tf) {
+  if (building.has(tf)) {
+    try {
+      await building.get(tf);
+    } catch {
+      /* gagal pun tidak masalah, dibangun ulang di bawah */
+    }
+  }
+  snapshots.delete(tf);
+  return getSnapshot(lang, tf);
 }
 
 // ---------- hitung statistik ----------
@@ -498,7 +516,9 @@ module.exports = {
   parseStatArgs,
   // dipakai bias.js
   getSnapshot,
+  refreshSnapshot,
   isSnapshotWarm,
+  CONCURRENCY,
   // diekspor untuk pengujian
   matchCondition,
   analyzeCoin,

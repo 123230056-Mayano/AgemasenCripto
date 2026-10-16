@@ -84,6 +84,7 @@ Fufu... welcome, Trainer-san. Here's the list of available commands. For crypto 
 ▸ !watchlist
 ▸ !alert
 ▸ !levelalert
+▸ !alertdivergent
 ▸ !alerts
 ▸ !deletealert
 ▸ !daily
@@ -483,6 +484,7 @@ The setting is saved permanently, so it won't reset when the bot restarts.`,
   "cmd.watchlist": "📋 *!watchlist*\n\nShows your whole watchlist: price, 24h % change, and a short trend status (uses your default timeframe, initially *4H*).\n\n*Example:*\n```\n!watchlist\n```\n\nNot financial advice.",
   "cmd.alert": "🔔 *!alert <coin> <price>*\n\nCreates a price alert. The bot messages you when the price touches or breaks that number. Direction (up/down) is set automatically from the current price. The alert is removed once it fires.\n\n*Example:*\n```\n!alert SOL 100\n```\n\nSee active alerts with *!alerts*.",
   "cmd.alertlevel": "🔔 *!levelalert <coin>*\n\nAutomatic alert when price gets close (≤ 0.5%) to or touches the nearest support/resistance level. Levels are recalculated regularly using your default timeframe (initially *4H*), so this alert stays active until you delete it.\n\n*Example:*\n```\n!levelalert SOL\n```",
+  "cmd.alertdivergent": "🔔 *!alertdivergent <coin|all|watchlist> [15m|1H|4H|1D] [rsi|macd] [bull|bear] [regular|hidden]*\n\nAutomatic alert when a NEW divergence forms between price and RSI or the MACD histogram, right after a candle closes. Each divergence is announced only once. Alias: *!alertdiv*.\n\n*Create an alert:*\n```\n!alertdivergent btc 1h rsi\n!alertdivergent btc 4h\n!alertdivergent all 4h macd\n!alertdivergent watchlist 1d\n!alertdivergent eth 4h bull regular\n```\nNo rsi/macd = both; no bull/bear = both directions; no type = regular + hidden; no timeframe = your default (!tf).\n\n*Manage:*\n```\n!alertdivergent list\n!alertdivergent delete d1\n!alertdivergent delete all\n```\n\n• Regular = possible reversal, Hidden = possible trend continuation.\n• Alerts go to the chat where you created them (in groups you get tagged).\n• Only divergences confirmed AFTER the alert was created; existing ones can be viewed with !scandivergent.\n• \"all\" works on 1H/4H/1D only; 15m for all coins isn't open yet (too heavy). Use a specific coin or your watchlist.\n• Many signals at once are sent as a single summary message. There are limits on alerts per person/chat and messages per hour.\n\n⚠️ Closed candles only. A pivot needs 3 confirming candles, so the alert arrives slightly after the actual peak/trough. Not a prediction. Educational, not investment advice.",
   "cmd.alerts": "🔔 *!alerts*\n\nShows all your active alerts with their IDs.\n\n*Example:*\n```\n!alerts\n```",
   "cmd.hapusalert": "🗑️ *!deletealert <id>*\n\nDeletes an alert by the ID shown in *!alerts*.\n\n*Example:*\n```\n!deletealert 3\n```",
   "cmd.harian": "🗓️ *!daily [time]*\n\nSubscribe to an automatic daily summary (market + your watchlist), sent to the chat where you run this command. Default time is 08:00 WIB; set it in 24-hour format.\n\n*Example:*\n```\n!daily\n!daily 07:30\n```\n\nStop with *!stopdaily*.",
