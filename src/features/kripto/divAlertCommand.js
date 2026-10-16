@@ -20,6 +20,7 @@
 
 const { t } = require("../../i18n");
 const store = require("../../state/cryptoStore");
+const { withSyncNotice } = require("./syncNotice");
 const { DIV } = require("./divergence");
 const { fetchTicker } = require("./market");
 const {
@@ -126,6 +127,6 @@ async function runAlertDiv(sock, msg, ctx, args) {
   }
 }
 
-const DIVALERT_RUNNERS = { alertdivergent: runAlertDiv };
+const DIVALERT_RUNNERS = { alertdivergent: withSyncNotice(runAlertDiv) };
 
 module.exports = { DIVALERT_COMMANDS, DIVALERT_RUNNERS, parseDivAlertArgs };

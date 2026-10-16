@@ -14,6 +14,7 @@
 
 const { t } = require("../../i18n");
 const { setDefaultTf } = require("./defaultTf");
+const { withSyncNotice } = require("./syncNotice");
 const { TIMEFRAMES, TF_LABEL, fetchTicker, fetchUsdIdr, fmtUsd, fmtIdr } = require("./market");
 
 const UTIL_COMMANDS = {
@@ -92,6 +93,6 @@ async function runTf(sock, msg, { jid, lang, senderId }, { tf }) {
   await sock.sendMessage(jid, { text: t(lang, "kripto.tf.set", { tf: TF_LABEL[tf] }) }, { quoted: msg });
 }
 
-const UTIL_RUNNERS = { kurs: runKurs, konversi: runKonversi, tf: runTf };
+const UTIL_RUNNERS = { kurs: runKurs, konversi: runKonversi, tf: withSyncNotice(runTf) };
 
 module.exports = { UTIL_COMMANDS, UTIL_RUNNERS, parseUtilArgs, parseAmount };

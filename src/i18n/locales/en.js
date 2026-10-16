@@ -421,6 +421,7 @@ module.exports = {
   "watch.rowError": "failed to load data",
   "watch.list.body": "📋 *WATCHLIST* ({n}/{max} coins, trend {tf})\n\n{table}\n\n_Not financial advice._",
   "alert.same": "ℹ️ {coin} is already at {price}. Set the alert at a different price.",
+  "store.unsynced": "⚠️ Your change is active in the bot, but it could not be saved to the database yet. The bot will retry automatically; if the bot restarts before it succeeds, double-check with *!watchlist* / *!alerts*.",
   "alert.full": "❌ You've reached the alert limit ({max}). Delete one with *!deletealert <id>* first.",
   "alert.created": "🔔 Alert #{id} created: {coin} {op} {price}. Current price {now}.",
   "alert.level.none": "❌ No support/resistance level detected for {coin} on {tf} yet.",

@@ -421,6 +421,7 @@ module.exports = {
   "watch.rowError": "data gagal diambil",
   "watch.list.body": "📋 *WATCHLIST* ({n}/{max} koin, tren {tf})\n\n{table}\n\n_Bukan saran finansial._",
   "alert.same": "ℹ️ Harga {coin} sekarang sudah di {price}. Pasang alert di harga lain ya.",
+  "store.unsynced": "⚠️ Perubahanmu aktif di bot, tapi belum berhasil disimpan ke database. Bot akan mencoba lagi otomatis; kalau bot restart sebelum berhasil, cek lagi dengan *!watchlist* / *!alerts*.",
   "alert.full": "❌ Alert kamu sudah penuh (maks {max}). Hapus dulu dengan *!hapusalert <id>*.",
   "alert.created": "🔔 Alert #{id} dibuat: {coin} {op} {price}. Harga sekarang {now}.",
   "alert.level.none": "❌ Belum ada level support/resistance yang terdeteksi untuk {coin} di {tf}.",

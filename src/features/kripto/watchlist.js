@@ -20,6 +20,7 @@
 
 const { t } = require("../../i18n");
 const store = require("../../state/cryptoStore");
+const { withSyncNotice } = require("./syncNotice");
 const { getDefaultTf } = require("./defaultTf");
 const { computeEmas, classifyTrend } = require("./indicators");
 const { TF_LABEL, fetchTicker, fetchCandles, computeLevels, fmtUsd, fmtLevel, fmtPct } = require("./market");
@@ -266,15 +267,15 @@ async function runStopHarian(sock, msg, { jid, lang, senderId }) {
 }
 
 const WATCH_RUNNERS = {
-  watch: runWatch,
-  unwatch: runUnwatch,
+  watch: withSyncNotice(runWatch),
+  unwatch: withSyncNotice(runUnwatch),
   watchlist: runWatchlist,
-  alert: runAlert,
-  alertlevel: runAlertLevel,
+  alert: withSyncNotice(runAlert),
+  alertlevel: withSyncNotice(runAlertLevel),
   alerts: runAlerts,
-  hapusalert: runHapusAlert,
-  harian: runHarian,
-  stopharian: runStopHarian,
+  hapusalert: withSyncNotice(runHapusAlert),
+  harian: withSyncNotice(runHarian),
+  stopharian: withSyncNotice(runStopHarian),
 };
 
 module.exports = {
