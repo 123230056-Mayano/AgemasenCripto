@@ -18,6 +18,7 @@
  *   !cari <nama>         -> cari koin berdasarkan nama / ticker
  *   (lima terakhir ada di pasar.js)
  *   !ringkasan / !stat / !scan <kondisi> [tf] -> statistik & screener pasar (statistik.js)
+ *   !bias <koin> [tf|semua] -> bias arah gabungan indikator per timeframe (bias.js)
  *   !watch / !unwatch / !watchlist / !alert / !alertlevel / !alerts / !hapusalert /
  *   !harian / !stopharian -> watchlist & alert pribadi (watchlist.js, alertMonitor.js)
  *   !kurs / !konversi / !tf -> utilitas (utilitas.js)
@@ -33,6 +34,7 @@ const { getDefaultTf } = require("./defaultTf");
 const { getAvailableCoins, filterCoins, buildMessages } = require("./kriptoList");
 const { PASAR_COMMANDS, PASAR_RUNNERS, parsePasarArgs } = require("./pasar");
 const { STAT_COMMANDS, STAT_RUNNERS, parseStatArgs } = require("./statistik");
+const { BIAS_COMMANDS, BIAS_RUNNERS, parseBiasArgs } = require("./bias");
 const { WATCH_COMMANDS, WATCH_RUNNERS, parseWatchArgs } = require("./watchlist");
 const { UTIL_COMMANDS, UTIL_RUNNERS, parseUtilArgs } = require("./utilitas");
 const { EMA_PERIODS, computeEmas, classifyTrend, detectCross, strengthScore } = require("./indicators");
@@ -346,6 +348,19 @@ async function handleKriptoCommand(sock, msg, { jid, text, lang }) {
       }
     }
   }
+  // Bias market (!bias) -> lihat bias.js
+  let isBias = false;
+  if (!name) {
+    for (const [key, def] of Object.entries(BIAS_COMMANDS)) {
+      const m = text.match(def.re);
+      if (m) {
+        name = key;
+        match = m;
+        isBias = true;
+        break;
+      }
+    }
+  }
   // Watchlist & alert pribadi (!watch, !alert, !harian, ...) -> lihat watchlist.js
   let isWatch = false;
   if (!name) {
@@ -378,6 +393,7 @@ async function handleKriptoCommand(sock, msg, { jid, text, lang }) {
   let args;
   if (isPasar) args = parsePasarArgs(name, match[1] || "", getDefaultTf(senderId));
   else if (isStat) args = parseStatArgs(name, match[1] || "", getDefaultTf(senderId));
+  else if (isBias) args = parseBiasArgs(name, match[1] || "");
   else if (isWatch) args = parseWatchArgs(name, match[1] || "");
   else if (isUtil) args = parseUtilArgs(name, match[1] || "");
   else if (name === "list") args = { coin: null, coin2: null, tf: null, keyword: match[1] || "" };
@@ -412,6 +428,10 @@ async function handleKriptoCommand(sock, msg, { jid, text, lang }) {
     }
     if (isStat) {
       await STAT_RUNNERS[name](sock, msg, { jid, lang, senderId }, args);
+      return true;
+    }
+    if (isBias) {
+      await BIAS_RUNNERS[name](sock, msg, { jid, lang, senderId }, args);
       return true;
     }
     if (isWatch) {

@@ -121,6 +121,11 @@ function hasFreshSnapshot(tf) {
   return !!hit && Date.now() - hit.at < SNAPSHOT_TTL_MS;
 }
 
+/** true kalau snapshot TF ini sudah di cache atau sedang dibangun (dipakai !bias untuk satu pesan "memindai"). */
+function isSnapshotWarm(tf) {
+  return hasFreshSnapshot(tf) || building.has(tf);
+}
+
 /**
  * @returns {Promise<{coins: object[], skipped: number, total: number}>}
  *   coins = hasil analisis koin yang datanya cukup; skipped = koin yang dilewati
@@ -393,6 +398,9 @@ module.exports = {
   STAT_COMMANDS,
   STAT_RUNNERS,
   parseStatArgs,
+  // dipakai bias.js
+  getSnapshot,
+  isSnapshotWarm,
   // diekspor untuk pengujian
   matchCondition,
   analyzeCoin,

@@ -67,6 +67,7 @@ Fufu... welcome, Trainer-san. Here's the list of available commands. For crypto 
 ▸ !ema
 ▸ !trend
 ▸ !mtf
+▸ !bias
 ▸ !compare
 ▸ !listcrypto
 ▸ !all
@@ -463,6 +464,7 @@ The setting is saved permanently, so it won't reset when the bot restarts.`,
   "cmd.ema": "📐 *!ema <coin> [15m|1H|4H|1D]*\n\nEMA 20, 50, 200 values and where the price sits against each one (above / below).\n\n*Example:*\n```\n!ema bnb 4h\n```\n\nDefault timeframe is *4H*. Not financial advice.",
   "cmd.tren": "🧭 *!trend <coin> [15m|1H|4H|1D]*\n\nTrend status: bullish, bearish, or sideways. Mentions a golden cross / death cross if one just happened.\n\n*Example:*\n```\n!trend xrp 4h\n```\n\nDefault timeframe is *4H*. Not financial advice.",
   "cmd.mtf": "🗂️ *!mtf <coin>*\n\nMulti-timeframe summary (15m, 1H, 4H, 1D) in one table so you can see how the trends line up.\n\n*Example:*\n```\n!mtf btc\n```\n\nColumns: timeframe, trend, position vs EMA 200, nearest level. Not financial advice.",
+  "cmd.bias": "📊 *!bias <coin> [15m|1H|4H|1D|all]*\n\nDirectional bias (bullish / neutral / bearish) per timeframe from combined indicators: EMA trend, crossovers, RSI, MACD, market mood, and BTC trend. Calculated directly, no AI.\n\n*Examples:*\n```\n!bias btc\n!bias eth 4h\n!bias sol all\n```\n\nNo timeframe = all (15m, 1H, 4H, 1D). Columns: bias, score (-1 to +1), and confidence (how many components agree). Components without data (e.g. OI/funding) are marked N/A, not counted as zero.\n\nThis is the current market condition, not an entry signal. Indicator-based estimate, not investment advice.",
   "cmd.bandingkan": "⚔️ *!compare <coin1> <coin2>*\n\nCompares two coins side by side: price, % change, trend, and position against the EMAs, with a short verdict on which one is stronger.\n\n*Example:*\n```\n!compare sol eth\n```\n\nUses your default timeframe (initially *4H*). Not financial advice.",
   "cmd.semua": "📊 *!all [category] [15m|1H|4H|1D]*\n\nList of all coins with price and % change. Results are paginated (25 coins per page), type *!next* for the next page.\n\n*Examples:*\n```\n!all\n!all layer1\n!all meme 1h\n```\n\n% change follows the timeframe (your default, initially *4H*). Category is optional, see the list with *!categories*. Not financial advice.",
   "cmd.top": "🚀 *!top [count]*\n\nTop 24h gainers: coins that rose the most.\n\n*Examples:*\n```\n!top\n!top 5\n```\n\nDefault 10 coins, max 25. Not financial advice.",

@@ -68,13 +68,14 @@ function classifyTrend(price, latest) {
 }
 
 /**
- * Golden cross (EMA 50 naik memotong EMA 200) / death cross (turun memotong)
- * yang terjadi dalam CROSS_LOOKBACK candle closed terakhir.
+ * Cross generik antara dua EMA (fast memotong slow) dalam `lookback` candle closed terakhir.
+ * Dipakai !bias untuk 20/50 dan 50/200. Aturan sama persis dengan detectCross lama.
  * @returns {{ type: "golden"|"death", barsAgo: number } | null}
  */
-function detectCross(series, lookback = CROSS_LOOKBACK) {
-  const fast = series[50];
-  const slow = series[200];
+function detectCrossPair(series, fastP, slowP, lookback = CROSS_LOOKBACK) {
+  const fast = series[fastP];
+  const slow = series[slowP];
+  if (!fast || !slow) return null;
   const n = Math.min(fast.length, slow.length);
   for (let i = n - 1; i > n - 1 - lookback && i >= 1; i--) {
     if (fast[i] == null || slow[i] == null || fast[i - 1] == null || slow[i - 1] == null) continue;
@@ -86,9 +87,102 @@ function detectCross(series, lookback = CROSS_LOOKBACK) {
   return null;
 }
 
+/**
+ * Golden cross (EMA 50 naik memotong EMA 200) / death cross (turun memotong)
+ * yang terjadi dalam CROSS_LOOKBACK candle closed terakhir. Perilaku TIDAK berubah
+ * (dipakai !tren dan !scan); sekarang hanya pembungkus detectCrossPair.
+ * @returns {{ type: "golden"|"death", barsAgo: number } | null}
+ */
+function detectCross(series, lookback = CROSS_LOOKBACK) {
+  return detectCrossPair(series, 50, 200, lookback);
+}
+
+
+/**
+ * Status tren cadangan untuk koin baru (< 200 candle): hanya EMA 20 dan 50.
+ *   bullish  = harga di atas EMA 20 & 50 DAN EMA 20 di atas EMA 50
+ *   bearish  = kebalikannya; selain itu sideways.
+ * Skor kekuatan 0..3 (jumlah EMA yang ditembus ke atas + EMA 20 di atas EMA 50).
+ * @returns {{ trend: string, score: number, max: 3, above: number[], ema20AboveEma50: boolean|null, limited: true }}
+ */
+function classifyTrendLimited(price, latest) {
+  const ps = [20, 50];
+  const above = ps.filter((p) => latest[p] != null && price >= latest[p]);
+  const below = ps.filter((p) => latest[p] != null && price < latest[p]);
+  const ema20AboveEma50 = latest[20] == null || latest[50] == null ? null : latest[20] > latest[50];
+  let trend = "sideways";
+  if (above.length === 2 && ema20AboveEma50 === true) trend = "bullish";
+  else if (below.length === 2 && ema20AboveEma50 === false) trend = "bearish";
+  return { trend, score: above.length + (ema20AboveEma50 === true ? 1 : 0), max: 3, above, ema20AboveEma50, limited: true };
+}
+
+/**
+ * RSI Wilder (default 14). Seri sepanjang `values`; null sebelum warmup (index < period).
+ * Deret naik terus -> 100, turun terus -> 0.
+ */
+function rsi(values, period = 14) {
+  const out = new Array(values.length).fill(null);
+  if (values.length <= period) return out;
+  let gain = 0;
+  let loss = 0;
+  for (let i = 1; i <= period; i++) {
+    const d = values[i] - values[i - 1];
+    if (d >= 0) gain += d;
+    else loss -= d;
+  }
+  let avgG = gain / period;
+  let avgL = loss / period;
+  const toRsi = () => (avgL === 0 ? (avgG === 0 ? 50 : 100) : 100 - 100 / (1 + avgG / avgL));
+  out[period] = toRsi();
+  for (let i = period + 1; i < values.length; i++) {
+    const d = values[i] - values[i - 1];
+    avgG = (avgG * (period - 1) + (d > 0 ? d : 0)) / period;
+    avgL = (avgL * (period - 1) + (d < 0 ? -d : 0)) / period;
+    out[i] = toRsi();
+  }
+  return out;
+}
+
+/**
+ * MACD (12, 26, 9). EMA sinyal memakai seed SMA sama seperti ema(). Seri sepanjang `values`.
+ * hist = macd - signal. Index awal bernilai null sampai warmup (26 + 9 - 1 candle).
+ */
+function macd(values, fast = 12, slow = 26, signalP = 9) {
+  const n = values.length;
+  const ef = ema(values, fast);
+  const es = ema(values, slow);
+  const line = new Array(n).fill(null);
+  for (let i = 0; i < n; i++) if (ef[i] != null && es[i] != null) line[i] = ef[i] - es[i];
+  const signal = new Array(n).fill(null);
+  const hist = new Array(n).fill(null);
+  const first = line.findIndex((v) => v != null);
+  if (first !== -1 && n - first >= signalP) {
+    const sig = ema(line.slice(first), signalP);
+    for (let i = 0; i < sig.length; i++) {
+      if (sig[i] == null) continue;
+      signal[first + i] = sig[i];
+      hist[first + i] = line[first + i] - sig[i];
+    }
+  }
+  return { macd: line, signal, hist };
+}
+
 /** Skor kekuatan 0..4: jumlah EMA yang ditembus ke atas (0-3) + EMA 20 di atas EMA 50 (0-1). */
 function strengthScore(info) {
   return info.above.length + (info.ema20AboveEma50 === true ? 1 : 0);
 }
 
-module.exports = { EMA_PERIODS, CROSS_LOOKBACK, ema, computeEmas, pricePosition, classifyTrend, detectCross, strengthScore };
+module.exports = {
+  EMA_PERIODS,
+  CROSS_LOOKBACK,
+  ema,
+  computeEmas,
+  pricePosition,
+  classifyTrend,
+  classifyTrendLimited,
+  detectCross,
+  detectCrossPair,
+  strengthScore,
+  rsi,
+  macd,
+};
