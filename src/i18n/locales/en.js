@@ -337,6 +337,8 @@ module.exports = {
   "kripto.ema.body": "📐 *{coin}/USDT {tf} EMA*\nPrice: {price}\n\n{emas}\n\n{status}\n\n_Not financial advice._",
   "kripto.ema.above": "Price above EMA {p} ({pct})",
   "kripto.ema.below": "Price below EMA {p} ({pct})",
+  "kripto.trend.noData": "not enough data",
+  "kripto.trend.limitedNote": "Under 200 candles: trend uses EMA 20/50 only. Under 50 candles: trend cannot be computed yet.",
   "kripto.ema.noData": "not enough data",
   "kripto.tren.head": "🧭 *{coin}/USDT {tf} trend*\nPrice: {price}",
   "kripto.tren.price": "price {parts}.",

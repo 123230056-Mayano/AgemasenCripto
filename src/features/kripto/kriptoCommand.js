@@ -40,7 +40,7 @@ const { BIAS_COMMANDS, BIAS_RUNNERS, parseBiasArgs } = require("./bias");
 const { DIVALERT_COMMANDS, DIVALERT_RUNNERS, parseDivAlertArgs } = require("./divAlertCommand");
 const { WATCH_COMMANDS, WATCH_RUNNERS, parseWatchArgs } = require("./watchlist");
 const { UTIL_COMMANDS, UTIL_RUNNERS, parseUtilArgs } = require("./utilitas");
-const { EMA_PERIODS, computeEmas, classifyTrend, detectCross, strengthScore } = require("./indicators");
+const { EMA_PERIODS, computeEmas, classifyTrendAuto, detectCross } = require("./indicators");
 const {
   TIMEFRAMES,
   TF_LABEL,
@@ -147,12 +147,17 @@ const PERIODS_TXT = (list) => list.join(", ");
 async function analyze(coin, tf, tick) {
   const [candles, ticker] = await Promise.all([fetchCandles(coin, tf), tick ? Promise.resolve(tick) : fetchTicker(coin)]);
   const { series, latest } = computeEmas(candles);
-  const info = classifyTrend(ticker.price, latest);
+  const info = classifyTrendAuto(ticker.price, latest);
   return { candles, tick: ticker, series, latest, info, cross: detectCross(series) };
 }
 
-const trendLabel = (trend) => trend.charAt(0).toUpperCase() + trend.slice(1); // Bullish / Bearish / Sideways
-const trendIcon = { bullish: "🟢", bearish: "🔴", sideways: "🟡" };
+const capTrend = (trend) => trend.charAt(0).toUpperCase() + trend.slice(1); // Bullish / Bearish / Sideways
+const trendIcon = { bullish: "🟢", bearish: "🔴", sideways: "🟡", nodata: "⚪" };
+/** Label tren; data < 200 candle diberi tanda *, data < 50 candle ditulis "data kurang" (bukan sideways). */
+function trendText(lang, info) {
+  if (info.trend === "nodata") return t(lang, "kripto.trend.noData");
+  return capTrend(info.trend) + (info.limited ? "*" : "");
+}
 
 async function runEma(sock, msg, { jid, lang }, { coin, tf }) {
   const { tick, latest, info } = await analyze(coin, tf);
@@ -186,8 +191,11 @@ async function runTren(sock, msg, { jid, lang }, { coin, tf }) {
   const lines = [
     t(lang, "kripto.tren.head", { coin, tf: TF_LABEL[tf], price: fmtUsd(tick.price) }),
     "",
-    `${trendIcon[info.trend]} *${trendLabel(info.trend)}*: ${describeTrend(lang, info)}`,
+    info.trend === "nodata"
+      ? `${trendIcon.nodata} *${trendText(lang, info)}*`
+      : `${trendIcon[info.trend]} *${capTrend(info.trend)}*: ${describeTrend(lang, info)}`,
   ];
+  if (info.limited) lines.push("", `ℹ️ ${t(lang, "kripto.trend.limitedNote")}`);
   if (cross) {
     lines.push(
       "",
@@ -221,11 +229,11 @@ async function runMtf(sock, msg, { jid, lang }, { coin }) {
   const rows = results.map((r, i) => {
     const lv = nearestLevel(r.candles, tick.price);
     const vs200 = r.info.pos[200] == null ? "-" : t(lang, r.info.pos[200] ? "kripto.mtf.above" : "kripto.mtf.below");
-    return `${pad(TF_LABEL[MTF_TFS[i]], 4)} ${pad(trendLabel(r.info.trend), 8)} ${pad(vs200, 6)} ${lv ? `${lv.tag} ${fmtLevel(lv.v)}` : "-"}`;
+    return `${pad(TF_LABEL[MTF_TFS[i]], 4)} ${pad(trendText(lang, r.info), 11)} ${pad(vs200, 6)} ${lv ? `${lv.tag} ${fmtLevel(lv.v)}` : "-"}`;
   });
-  const header = `${pad(t(lang, "kripto.mtf.colTf"), 4)} ${pad(t(lang, "kripto.mtf.colTrend"), 8)} ${pad("EMA200", 6)} ${t(lang, "kripto.mtf.colLevel")}`;
+  const header = `${pad(t(lang, "kripto.mtf.colTf"), 4)} ${pad(t(lang, "kripto.mtf.colTrend"), 11)} ${pad("EMA200", 6)} ${t(lang, "kripto.mtf.colLevel")}`;
 
-  const counts = { bullish: 0, bearish: 0, sideways: 0 };
+  const counts = { bullish: 0, bearish: 0, sideways: 0, nodata: 0 };
   for (const r of results) counts[r.info.trend]++;
   let verdict;
   if (counts.bullish === results.length) verdict = t(lang, "kripto.mtf.alignBull");
@@ -233,6 +241,7 @@ async function runMtf(sock, msg, { jid, lang }, { coin }) {
   else if (counts.bullish > counts.bearish && counts.bullish >= 2) verdict = t(lang, "kripto.mtf.leanBull", { n: counts.bullish, total: results.length });
   else if (counts.bearish > counts.bullish && counts.bearish >= 2) verdict = t(lang, "kripto.mtf.leanBear", { n: counts.bearish, total: results.length });
   else verdict = t(lang, "kripto.mtf.mixed");
+  if (results.some((r) => r.info.limited)) verdict += "\n* " + t(lang, "kripto.trend.limitedNote");
 
   await sock.sendMessage(
     jid,
@@ -257,7 +266,7 @@ async function runBandingkan(sock, msg, { jid, lang, senderId }, { coin, coin2 }
   const rows = [
     [t(lang, "kripto.cmp.price"), fmtUsd(a.tick.price), fmtUsd(b.tick.price)],
     [t(lang, "kripto.cmp.change"), fmtPct(a.tick.changePct), fmtPct(b.tick.changePct)],
-    [t(lang, "kripto.cmp.trend"), trendLabel(a.info.trend), trendLabel(b.info.trend)],
+    [t(lang, "kripto.cmp.trend"), trendText(lang, a.info), trendText(lang, b.info)],
     ["EMA 20/50/200", posTxt(a), posTxt(b)],
   ];
   const w0 = Math.max(...rows.map((r) => r[0].length), 1);
@@ -269,8 +278,8 @@ async function runBandingkan(sock, msg, { jid, lang, senderId }, { coin, coin2 }
   ].join("\n");
 
   // Pemenang: skor EMA (0-4) lebih tinggi; kalau seri, perubahan 24 jam; selisih < 0.5% dianggap seimbang.
-  const sa = strengthScore(a.info);
-  const sb = strengthScore(b.info);
+  const sa = a.info.score;
+  const sb = b.info.score;
   let verdict;
   const diffChange = a.tick.changePct - b.tick.changePct;
   if (sa === sb && Math.abs(diffChange) < 0.5) {

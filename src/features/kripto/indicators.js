@@ -8,7 +8,9 @@
  * pertama), jadi angkanya identik dengan !chart dan !analisis.
  */
 
-const EMA_PERIODS = [20, 50, 200];
+const { INDICATOR_CONFIG: CFG } = require("../../config/indicatorConfig");
+
+const EMA_PERIODS = [...CFG.EMA_PERIODS];
 const CROSS_LOOKBACK = 10; // golden/death cross dianggap "baru" kalau terjadi <= 10 candle lalu
 
 function ema(values, period) {
@@ -120,7 +122,7 @@ function classifyTrendLimited(price, latest) {
  * RSI Wilder (default 14). Seri sepanjang `values`; null sebelum warmup (index < period).
  * Deret naik terus -> 100, turun terus -> 0.
  */
-function rsi(values, period = 14) {
+function rsi(values, period = CFG.RSI_PERIOD) {
   const out = new Array(values.length).fill(null);
   if (values.length <= period) return out;
   let gain = 0;
@@ -147,7 +149,7 @@ function rsi(values, period = 14) {
  * MACD (12, 26, 9). EMA sinyal memakai seed SMA sama seperti ema(). Seri sepanjang `values`.
  * hist = macd - signal. Index awal bernilai null sampai warmup (26 + 9 - 1 candle).
  */
-function macd(values, fast = 12, slow = 26, signalP = 9) {
+function macd(values, fast = CFG.MACD_FAST, slow = CFG.MACD_SLOW, signalP = CFG.MACD_SIGNAL) {
   const n = values.length;
   const ef = ema(values, fast);
   const es = ema(values, slow);
@@ -171,7 +173,7 @@ function macd(values, fast = 12, slow = 26, signalP = 9) {
  * ATR Wilder (default 14) dari candle {h,l,c}. Seri sepanjang `candles`; null sebelum warmup (index < period).
  * True range candle pertama = h - l.
  */
-function atr(candles, period = 14) {
+function atr(candles, period = CFG.ATR_PERIOD) {
   const out = new Array(candles.length).fill(null);
   if (candles.length <= period) return out;
   const tr = candles.map((c, i) =>
@@ -188,6 +190,60 @@ function atr(candles, period = 14) {
   return out;
 }
 
+/**
+ * Klasifikasi tren yang tidak pernah memaksa "sideways" karena data kurang.
+ *   EMA 200 ada          -> classifyTrend penuh                         (limited: false)
+ *   EMA 50 ada, 200 belum -> classifyTrendLimited (EMA 20/50)           (limited: true)
+ *   EMA 50 pun belum ada -> trend "nodata" (tampilkan "data kurang")    (limited: true, insufficient: true)
+ * Selalu mengembalikan `pos`, `above`, `below`, `ema20AboveEma50`, `score` supaya pemanggil bisa
+ * memakainya tanpa cek tipe.
+ */
+function classifyTrendAuto(price, latest) {
+  const pos = pricePosition(price, latest);
+  if (latest[200] != null) {
+    const info = classifyTrend(price, latest);
+    return { ...info, score: strengthScore(info), max: 4, limited: false, insufficient: false };
+  }
+  if (latest[50] != null) {
+    const info = classifyTrendLimited(price, latest);
+    return { ...info, pos, below: [20, 50].filter((p) => latest[p] != null && price < latest[p]), insufficient: false };
+  }
+  return {
+    trend: "nodata",
+    pos,
+    above: [],
+    below: [],
+    ema20AboveEma50: null,
+    score: 0,
+    max: 3,
+    limited: true,
+    insufficient: true,
+  };
+}
+
+/**
+ * Nilai terbaru RSI / MACD / ATR dari candle closed, siap pakai untuk fitur 03, 07, 08, 09.
+ * Tiap nilai null bila data belum cukup (bukan error, bukan angka karangan).
+ * @returns {{ rsi: number|null, macd: {line,signal,hist,prevHist}|null, atr: number|null, n: number }}
+ */
+function latestIndicators(candles) {
+  const n = candles.length;
+  const closes = candles.map((c) => c.c);
+  const r = rsi(closes);
+  const m = macd(closes);
+  const a = atr(candles);
+  const i = n - 1;
+  return {
+    n,
+    rsi: n ? r[i] : null,
+    macd:
+      n && m.hist[i] != null
+        ? { line: m.macd[i], signal: m.signal[i], hist: m.hist[i], prevHist: i > 0 ? m.hist[i - 1] : null }
+        : null,
+    atr: n ? a[i] : null,
+  };
+}
+
 /** Skor kekuatan 0..4: jumlah EMA yang ditembus ke atas (0-3) + EMA 20 di atas EMA 50 (0-1). */
 function strengthScore(info) {
   return info.above.length + (info.ema20AboveEma50 === true ? 1 : 0);
@@ -201,6 +257,8 @@ module.exports = {
   pricePosition,
   classifyTrend,
   classifyTrendLimited,
+  classifyTrendAuto,
+  latestIndicators,
   detectCross,
   detectCrossPair,
   strengthScore,

@@ -22,7 +22,7 @@ const { t } = require("../../i18n");
 const store = require("../../state/cryptoStore");
 const { withSyncNotice } = require("./syncNotice");
 const { getDefaultTf } = require("./defaultTf");
-const { computeEmas, classifyTrend } = require("./indicators");
+const { computeEmas, classifyTrendAuto } = require("./indicators");
 const { TF_LABEL, fetchTicker, fetchCandles, computeLevels, fmtUsd, fmtLevel, fmtPct } = require("./market");
 
 // Zona waktu ringkasan harian. Default WIB; ganti lewat env DAILY_TZ (nama zona IANA).
@@ -33,7 +33,7 @@ const DAILY_DEFAULT = { hour: 8, minute: 0 };
 const COIN_RE = /^[A-Z0-9]{1,15}$/;
 const pad = (s, n) => String(s).padEnd(n, " ");
 const hhmm = (h, m) => `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
-const TREND_ICON = { bullish: "🟢", bearish: "🔴", sideways: "🟡" };
+const TREND_ICON = { bullish: "🟢", bearish: "🔴", sideways: "🟡", nodata: "⚪" };
 const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 
 const WATCH_COMMANDS = {
@@ -121,8 +121,8 @@ async function loadWatchRows(coins, tf) {
     try {
       const [tick, candles] = await Promise.all([fetchTicker(coin), fetchCandles(coin, tf)]);
       const { latest } = computeEmas(candles);
-      const info = classifyTrend(tick.price, latest);
-      return { coin, price: tick.price, pct: tick.changePct, trend: info.trend };
+      const info = classifyTrendAuto(tick.price, latest);
+      return { coin, price: tick.price, pct: tick.changePct, trend: info.trend, limited: info.limited };
     } catch (err) {
       return { coin, error: true };
     }
@@ -136,9 +136,10 @@ function formatWatchTable(lang, rows) {
   const wPrice = Math.max(...prices.map((p) => p.length));
   const lines = rows.map((r, i) => {
     if (r.error) return `${pad(r.coin, wCoin)} ${t(lang, "watch.rowError")}`;
-    return `${pad(r.coin, wCoin)} ${pad(prices[i], wPrice)} ${fmtPct(r.pct).padStart(8)} ${TREND_ICON[r.trend]} ${cap(r.trend)}`;
+    return `${pad(r.coin, wCoin)} ${pad(prices[i], wPrice)} ${fmtPct(r.pct).padStart(8)} ${TREND_ICON[r.trend]} ${r.trend === "nodata" ? t(lang, "kripto.trend.noData") : cap(r.trend) + (r.limited ? "*" : "")}`;
   });
-  return "```\n" + lines.join("\n") + "\n```";
+  const note = rows.some((r) => r.limited) ? `\n* ${t(lang, "kripto.trend.limitedNote")}` : "";
+  return "```\n" + lines.join("\n") + "\n```" + note;
 }
 
 // ---------- runner ----------

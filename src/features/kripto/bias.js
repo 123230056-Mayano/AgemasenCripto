@@ -264,7 +264,7 @@ function buildCoinInputs(candles, price) {
     "50/200": full ? detectCrossPair(series, 50, 200, BIAS_CROSS_LOOKBACK) : null,
     "20/50": detectCrossPair(series, 20, 50, BIAS_CROSS_LOOKBACK),
   };
-  const rsiSeries = rsi(closes, 14);
+  const rsiSeries = rsi(closes);
   const m = macd(closes);
   const n = closes.length;
   return {

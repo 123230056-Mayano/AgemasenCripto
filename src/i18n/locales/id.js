@@ -337,6 +337,8 @@ module.exports = {
   "kripto.ema.body": "📐 *EMA {coin}/USDT {tf}*\nHarga: {price}\n\n{emas}\n\n{status}\n\n_Bukan saran finansial._",
   "kripto.ema.above": "Harga di atas EMA {p} ({pct})",
   "kripto.ema.below": "Harga di bawah EMA {p} ({pct})",
+  "kripto.trend.noData": "data kurang",
+  "kripto.trend.limitedNote": "Data < 200 candle: tren hanya dari EMA 20/50. Data < 50 candle: tren belum bisa dihitung.",
   "kripto.ema.noData": "data belum cukup",
   "kripto.tren.head": "🧭 *Tren {coin}/USDT {tf}*\nHarga: {price}",
   "kripto.tren.price": "harga {parts}.",

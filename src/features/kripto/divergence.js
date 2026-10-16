@@ -28,6 +28,7 @@
  */
 
 const { rsi, macd, atr } = require("./indicators");
+const { INDICATOR_CONFIG } = require("../../config/indicatorConfig");
 
 const DIV_VERSION = 1;
 const DIV = {
@@ -39,8 +40,8 @@ const DIV = {
   MIN_IND_DIFF_MACD_PCT: 0.05, // selisih hist MACD minimum = 5% dari rentang hist terbaru
   MACD_RANGE_BARS: 100, // "terbaru" untuk rentang histogram = 100 candle closed terakhir
   MIN_PRICE_ATR: 0.1, // selisih harga minimum, dalam kelipatan ATR(14) di pivot kedua
-  RSI_PERIOD: 14,
-  ATR_PERIOD: 14,
+  RSI_PERIOD: INDICATOR_CONFIG.RSI_PERIOD,
+  ATR_PERIOD: INDICATOR_CONFIG.ATR_PERIOD,
 };
 const DEFAULT_INDICATORS = ["rsi", "macd"];
 const MIN_CANDLES = 40; // MACD butuh warmup 26 + 9 - 1 = 34 candle; di bawah ini dilewati (bukan error)
