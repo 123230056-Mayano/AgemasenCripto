@@ -78,6 +78,7 @@ Fufu... welcome, Trainer-san. Here's the list of available commands. For crypto 
 ▸ !overview
 ▸ !stats
 ▸ !scan
+▸ !scandivergent
 ▸ !watch
 ▸ !unwatch
 ▸ !watchlist
@@ -473,7 +474,8 @@ The setting is saved permanently, so it won't reset when the bot restarts.`,
   "cmd.cari": "🔍 *!search <name>*\n\nSearch coins by name or ticker (partial match).\n\n*Examples:*\n```\n!search sol\n!search bit\n```\n\nResults show ticker and coin name. Check the price with *!price <ticker>*.",
   "cmd.ringkasan": "🌐 *!overview*\n\nMarket overview: market mood, how many coins are above/below EMA 200, and BTC's condition.\n\n*Example:*\n```\n!overview\n```\n\nUses your default timeframe (initially *4H*). Mood is *bullish* when ≥60% of coins are above EMA 200, *bearish* at ≤40%, otherwise neutral. Not financial advice.",
   "cmd.stat": "📊 *!stats*\n\nQuick stats: number of bullish vs bearish vs sideways coins, plus how many are above/below EMA 50 and EMA 200.\n\n*Example:*\n```\n!stats\n```\n\nUses your default timeframe (initially *4H*). Not financial advice.",
-  "cmd.scan": "🔎 *!scan <condition> [15m|1H|4H|1D]*\n\nScreener: finds coins that meet a given condition.\n\n*Conditions:*\n• diatas_ema200 / dibawah_ema200 (above / below EMA 200; above_ema200 / below_ema200 also work)\n• dekat_support / dekat_resistance (within 2%; near_support / near_resistance also work)\n• golden_cross / death_cross (EMA 50/200, within the last 10 candles)\n• breakout / breakdown (close beyond the previous 20 candles' high/low)\n\n*Examples:*\n```\n!scan dekat_support 4H\n!scan golden_cross 1D\n```\n\nReturns a list of coins + price + distance to the level (max 25). No timeframe = your default. Not financial advice.",
+  "cmd.scandivergent": "🔀 *!scandivergent <bull|bear> [15m|1H|4H|1D] [rsi|macd] [regular|hidden]*\n\nFinds coins that just formed a divergence between price and RSI or the MACD histogram (uses the !scan engine).\n\n*Types:*\n• Regular = possible reversal (bullish: price lower low, indicator higher low)\n• Hidden = possible trend continuation (bullish: price higher low, indicator lower low)\n\n*Examples:*\n```\n!scandivergent bull 4h\n!scandivergent bear 1h rsi\n!scandivergent bull 1d macd\n!scandivergent bull 4h regular\n```\nSame as `!scan div_bull 4H`. No rsi/macd = both; no type = regular + hidden; no timeframe = your default.\n\n⚠️ Closed candles only. A pivot needs 3 confirming candles, so signals show up slightly after the actual peak/trough. Scan results are not predictions. Educational, not investment advice.",
+  "cmd.scan": "🔎 *!scan <condition> [15m|1H|4H|1D]*\n\nScreener: finds coins that meet a given condition.\n\n*Conditions:*\n• diatas_ema200 / dibawah_ema200 (above / below EMA 200; above_ema200 / below_ema200 also work)\n• dekat_support / dekat_resistance (within 2%; near_support / near_resistance also work)\n• golden_cross / death_cross (EMA 50/200, within the last 10 candles)\n• breakout / breakdown (close beyond the previous 20 candles' high/low)\n• div_bull / div_bear (RSI/MACD divergence, see !scandivergent)\n\n*Examples:*\n```\n!scan dekat_support 4H\n!scan golden_cross 1D\n!scan div_bull 4H rsi\n```\n\nReturns a list of coins + price + distance to the level (max 25). No timeframe = your default. Not financial advice.",
 
   // ---------- watchlist & alert (Bagian 5) ----------
   "cmd.watch": "👀 *!watch <coin>*\n\nAdds a coin to your personal watchlist (max 20 coins).\n\n*Example:*\n```\n!watch SOL\n```\n\nSee it with *!watchlist*.",

@@ -167,6 +167,27 @@ function macd(values, fast = 12, slow = 26, signalP = 9) {
   return { macd: line, signal, hist };
 }
 
+/**
+ * ATR Wilder (default 14) dari candle {h,l,c}. Seri sepanjang `candles`; null sebelum warmup (index < period).
+ * True range candle pertama = h - l.
+ */
+function atr(candles, period = 14) {
+  const out = new Array(candles.length).fill(null);
+  if (candles.length <= period) return out;
+  const tr = candles.map((c, i) =>
+    i === 0 ? c.h - c.l : Math.max(c.h - c.l, Math.abs(c.h - candles[i - 1].c), Math.abs(c.l - candles[i - 1].c)),
+  );
+  let prev = 0;
+  for (let i = 1; i <= period; i++) prev += tr[i];
+  prev /= period;
+  out[period] = prev;
+  for (let i = period + 1; i < candles.length; i++) {
+    prev = (prev * (period - 1) + tr[i]) / period;
+    out[i] = prev;
+  }
+  return out;
+}
+
 /** Skor kekuatan 0..4: jumlah EMA yang ditembus ke atas (0-3) + EMA 20 di atas EMA 50 (0-1). */
 function strengthScore(info) {
   return info.above.length + (info.ema20AboveEma50 === true ? 1 : 0);
@@ -185,4 +206,5 @@ module.exports = {
   strengthScore,
   rsi,
   macd,
+  atr,
 };

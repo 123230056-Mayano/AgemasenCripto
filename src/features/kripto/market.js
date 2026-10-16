@@ -63,7 +63,7 @@ async function fetchCandles(coin, tf) {
     const now = Date.now();
     return res.data
       .filter((k) => k[6] < now)
-      .map((k) => ({ t: k[0], o: +k[1], h: +k[2], l: +k[3], c: +k[4] }));
+      .map((k) => ({ t: k[0], o: +k[1], h: +k[2], l: +k[3], c: +k[4], ct: k[6] })); // ct = waktu tutup (ms), dipakai divergence.js untuk memastikan candle closed
   } catch (err) {
     if (isInvalidSymbol(err)) throw new UnsupportedCoinError(coin);
     throw err;

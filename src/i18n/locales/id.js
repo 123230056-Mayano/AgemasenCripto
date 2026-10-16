@@ -402,6 +402,14 @@ module.exports = {
   "stat.scan.cond.death_cross": "Death cross",
   "stat.scan.cond.breakout": "Breakout",
   "stat.scan.cond.breakdown": "Breakdown",
+  "stat.scan.cond.div_bull": "Divergence bullish",
+  "stat.scan.cond.div_bear": "Divergence bearish",
+  "div.dir.bull": "Bullish",
+  "div.dir.bear": "Bearish",
+  "div.kind.regular": "Reguler",
+  "div.kind.hidden": "Tersembunyi",
+  "div.scan.body": "🔀 *SCAN DIV {dir} {tf}* ({filters})\n{n} dari {total} koin cocok\n\n{rows}\n\n_Reguler = potensi pembalikan, Tersembunyi = potensi lanjutan tren. Dihitung dari candle closed; pivot butuh {win} candle konfirmasi, jadi sinyal muncul sedikit setelah puncak/lembah._\n_Edukasi, bukan saran investasi._",
+  "div.scan.empty": "🔀 Tidak ada divergence {dir} ({filters}) yang baru di {tf} (dari {total} koin dipindai). Hanya yang terkonfirmasi dalam {look} candle closed terakhir yang dihitung.\n_Edukasi, bukan saran investasi._",
 
   // ---------- watchlist & alert (Bagian 5) ----------
   "watch.added": "✅ {coin} ditambahkan ke watchlist.",

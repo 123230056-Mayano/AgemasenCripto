@@ -402,6 +402,14 @@ module.exports = {
   "stat.scan.cond.death_cross": "Death cross",
   "stat.scan.cond.breakout": "Breakout",
   "stat.scan.cond.breakdown": "Breakdown",
+  "stat.scan.cond.div_bull": "Bullish divergence",
+  "stat.scan.cond.div_bear": "Bearish divergence",
+  "div.dir.bull": "Bullish",
+  "div.dir.bear": "Bearish",
+  "div.kind.regular": "Regular",
+  "div.kind.hidden": "Hidden",
+  "div.scan.body": "🔀 *DIV SCAN {dir} {tf}* ({filters})\n{n} of {total} coins match\n\n{rows}\n\n_Regular = possible reversal, Hidden = possible trend continuation. Based on closed candles; a pivot needs {win} confirming candles, so signals appear slightly after the actual peak/trough._\n_Educational, not investment advice._",
+  "div.scan.empty": "🔀 No new {dir} divergence ({filters}) on {tf} ({total} coins scanned). Only divergences confirmed within the last {look} closed candles are counted.\n_Educational, not investment advice._",
 
   // ---------- watchlist & alert (Bagian 5) ----------
   "watch.added": "✅ {coin} added to your watchlist.",

@@ -9,7 +9,9 @@
  *   !scan <kondisi> [tf] -> screener koin berdasarkan kondisi teknikal
  *
  * Kondisi !scan: diatas_ema200, dibawah_ema200, dekat_support, dekat_resistance,
- *                golden_cross, death_cross, breakout, breakdown.
+ *                golden_cross, death_cross, breakout, breakdown,
+ *                div_bull, div_bear (divergence RSI/MACD, lihat divergence.js).
+ * Alias: !scandivergent (!scandiv) bull|bear [tf] [rsi|macd] [reguler|tersembunyi].
  *
  * Timeframe: !ringkasan & !stat memakai default pengguna (!tf, awal 4H);
  * !scan memakai [tf] kalau diisi.
@@ -26,6 +28,7 @@ const { t } = require("../../i18n");
 const { getAvailableCoins } = require("./kriptoList");
 const { getMarketRows } = require("./pasar");
 const { computeEmas, classifyTrend, detectCross } = require("./indicators");
+const { detectDivergence, DIV } = require("./divergence");
 const { TIMEFRAMES, TF_LABEL, fetchCandles, computeLevels, fmtUsd, fmtLevel, fmtPct, pctFrom } = require("./market");
 
 const SNAPSHOT_TTL_MS = 3 * 60_000;
@@ -49,7 +52,15 @@ const CONDITIONS = {
   death_cross: { aliases: ["deathcross"] },
   breakout: { aliases: [] },
   breakdown: { aliases: [] },
+  div_bull: { aliases: ["divbull", "div_bullish", "divbullish", "divergence_bull", "divergence_bullish", "bullish_divergence"] },
+  div_bear: { aliases: ["divbear", "div_bearish", "divbearish", "divergence_bear", "divergence_bearish", "bearish_divergence"] },
 };
+const isDivCondition = (cond) => cond === "div_bull" || cond === "div_bear";
+
+// Modifier khusus scan divergence (token terpisah, tidak pernah bagian dari nama kondisi lain).
+const DIV_IND_TOKENS = { rsi: "rsi", macd: "macd" };
+const DIV_KIND_TOKENS = { reguler: "regular", regular: "regular", reg: "regular", tersembunyi: "hidden", hidden: "hidden", hid: "hidden" };
+const DIV_DIR_TOKENS = { bull: "div_bull", bullish: "div_bull", naik: "div_bull", bear: "div_bear", bearish: "div_bear", turun: "div_bear" };
 
 function matchCondition(raw) {
   const key = String(raw).toLowerCase().trim().replace(/[\s-]+/g, "_");
@@ -91,6 +102,8 @@ function analyzeCoin(ticker, name, candles, live) {
     s1: support[0] ?? null,
     breakout: lastClose > prevHigh ? { level: prevHigh } : null,
     breakdown: lastClose < prevLow ? { level: prevLow } : null,
+    // Divergence RSI/MACD dari candle closed (field terpisah dari field lama). [] kalau tidak ada.
+    div: detectDivergence(candles),
   };
 }
 
@@ -279,7 +292,7 @@ async function runStat(sock, msg, ctx, { tf }) {
  * Filter + urutkan koin untuk satu kondisi.
  * @returns {Array<{coin: object, detail: string, sortKey: number}>}
  */
-function scanCoins(coins, cond, lang) {
+function scanCoins(coins, cond, lang, opts = {}) {
   const out = [];
   const push = (coin, detail, sortKey) => out.push({ coin, detail, sortKey });
 
@@ -330,6 +343,21 @@ function scanCoins(coins, cond, lang) {
           push(c, `${t(lang, "stat.scan.below")} ${fmtLevel(c.breakdown.level)} (${fmtPct(d)})`, d);
         }
         break;
+      case "div_bull":
+      case "div_bear": {
+        const dir = cond === "div_bull" ? "bull" : "bear";
+        const inds = opts.indicators && opts.indicators.length ? opts.indicators : ["rsi", "macd"];
+        const kinds = opts.kinds && opts.kinds.length ? opts.kinds : ["regular", "hidden"];
+        const found = (c.div || []).filter((d) => d.dir === dir && inds.includes(d.indicator) && kinds.includes(d.kind));
+        if (found.length) {
+          const parts = found.map((d) => {
+            const ago = d.barsAgo === 0 ? t(lang, "kripto.tren.justNow") : t(lang, "kripto.tren.barsAgo", { n: d.barsAgo });
+            return `${t(lang, `div.kind.${d.kind}`)} ${d.indicator.toUpperCase()} (${ago})`;
+          });
+          push(c, parts.join(" + "), Math.min(...found.map((d) => d.barsAgo))); // terbaru dulu
+        }
+        break;
+      }
       default:
         break;
     }
@@ -337,9 +365,46 @@ function scanCoins(coins, cond, lang) {
   return out.sort((a, b) => a.sortKey - b.sortKey);
 }
 
-async function runScan(sock, msg, ctx, { condition, tf }) {
+async function runScanDiv(sock, msg, ctx, { condition, tf, indicators, kinds }, snap) {
+  const { jid, lang } = ctx;
+  const dir = condition === "div_bull" ? "bull" : "bear";
+  const inds = indicators && indicators.length ? indicators : ["rsi", "macd"];
+  const filters = [inds.map((i) => i.toUpperCase()).join("/")];
+  if (kinds && kinds.length === 1) filters.push(t(lang, `div.kind.${kinds[0]}`));
+  const hits = scanCoins(snap.coins, condition, lang, { indicators: inds, kinds });
+
+  if (!hits.length) {
+    await sock.sendMessage(
+      jid,
+      { text: t(lang, "div.scan.empty", { dir: t(lang, `div.dir.${dir}`), filters: filters.join(", "), tf: TF_LABEL[tf], total: snap.coins.length, look: DIV.LOOKBACK }) },
+      { quoted: msg },
+    );
+    return;
+  }
+  const shown = hits.slice(0, SCAN_MAX);
+  const rows = shown.map((h, i) => `${i + 1}. *${h.coin.ticker}* ${fmtUsd(h.coin.price)} | ${h.detail}`);
+  const more = hits.length > shown.length ? "\n" + t(lang, "stat.scan.more", { n: hits.length - shown.length }) : "";
+  await sock.sendMessage(
+    jid,
+    {
+      text: t(lang, "div.scan.body", {
+        dir: dir.toUpperCase(), // "BULL" / "BEAR" sesuai contoh PDF 4.6
+        filters: filters.join(", "),
+        tf: TF_LABEL[tf],
+        n: hits.length,
+        total: snap.coins.length,
+        rows: rows.join("\n") + more,
+        win: DIV.PIVOT_WIN,
+      }),
+    },
+    { quoted: msg },
+  );
+}
+
+async function runScan(sock, msg, ctx, { condition, tf, indicators, kinds }) {
   const { jid, lang } = ctx;
   const snap = await ensureSnapshot(sock, msg, ctx, tf);
+  if (isDivCondition(condition)) return runScanDiv(sock, msg, ctx, { condition, tf, indicators, kinds }, snap);
   const hits = scanCoins(snap.coins, condition, lang);
   const label = t(lang, `stat.scan.cond.${condition}`);
 
@@ -371,6 +436,8 @@ const STAT_COMMANDS = {
   ringkasan: { re: /^!ringkasan(?:\s+([\s\S]*))?$/i },
   stat: { re: /^!stats?(?:\s+([\s\S]*))?$/i },
   scan: { re: /^!scan(?:\s+([\s\S]*))?$/i },
+  // alias khusus divergence: !scandivergent / !scandivergence / !scandiv
+  scandivergent: { re: /^!scandiv(?:ergent|ergence)?(?:\s+([\s\S]*))?$/i },
 };
 
 /** @returns {object|null} argumen terurai, atau null kalau format salah (-> tampilkan penjelasan command). */
@@ -378,21 +445,52 @@ function parseStatArgs(name, raw, defaultTf) {
   const text = String(raw || "").trim();
   if (name === "ringkasan" || name === "stat") return text ? null : { tf: defaultTf };
 
+  // !scandivergent <bull|bear> [tf] [rsi|macd] [reguler|tersembunyi]  (arah wajib; urutan token bebas)
+  if (name === "scandivergent") {
+    let tf = null;
+    let condition = null;
+    const inds = [];
+    const kinds = [];
+    for (const tok of text.split(/\s+/).filter(Boolean)) {
+      const low = tok.toLowerCase();
+      if (TIMEFRAMES[tok.toUpperCase()]) tf = tok.toUpperCase();
+      else if (DIV_DIR_TOKENS[low]) condition = DIV_DIR_TOKENS[low];
+      else if (DIV_IND_TOKENS[low]) inds.push(DIV_IND_TOKENS[low]);
+      else if (DIV_KIND_TOKENS[low]) kinds.push(DIV_KIND_TOKENS[low]);
+      else return null; // token tidak dikenal -> tampilkan penjelasan command
+    }
+    if (!condition) return null;
+    return { condition, tf: tf || defaultTf, indicators: [...new Set(inds)], kinds: [...new Set(kinds)] };
+  }
+
   // scan: token timeframe dikenali di mana saja, sisanya digabung jadi nama kondisi
-  // ("dekat support 4H" == "dekat_support 4H").
+  // ("dekat support 4H" == "dekat_support 4H"). Modifier divergence (rsi/macd/reguler/tersembunyi)
+  // dipisah dulu dan hanya sah untuk div_bull / div_bear.
   let tf = null;
   const words = [];
+  const inds = [];
+  const kinds = [];
   for (const tok of text.split(/\s+/).filter(Boolean)) {
+    const low = tok.toLowerCase();
     if (TIMEFRAMES[tok.toUpperCase()]) tf = tok.toUpperCase();
+    else if (DIV_IND_TOKENS[low]) inds.push(DIV_IND_TOKENS[low]);
+    else if (DIV_KIND_TOKENS[low]) kinds.push(DIV_KIND_TOKENS[low]);
     else words.push(tok);
   }
   if (!words.length) return null;
   const condition = matchCondition(words.join("_"));
   if (!condition) return null;
-  return { condition, tf: tf || defaultTf };
+  if (!isDivCondition(condition) && (inds.length || kinds.length)) return null;
+  const res = { condition, tf: tf || defaultTf };
+  if (isDivCondition(condition)) {
+    res.indicators = [...new Set(inds)];
+    res.kinds = [...new Set(kinds)];
+  }
+  return res;
 }
 
-const STAT_RUNNERS = { ringkasan: runRingkasan, stat: runStat, scan: runScan };
+// !scandivergent memakai mesin !scan yang sama (hanya alias yang memetakan ke div_bull / div_bear).
+const STAT_RUNNERS = { ringkasan: runRingkasan, stat: runStat, scan: runScan, scandivergent: runScan };
 
 module.exports = {
   STAT_COMMANDS,
@@ -407,4 +505,5 @@ module.exports = {
   computeStats,
   moodOf,
   scanCoins,
+  runScanDiv,
 };
