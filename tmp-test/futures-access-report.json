@@ -1,0 +1,136 @@
+{
+  "startedAt": "2026-10-17T08:33:36.756Z",
+  "ip": "182.8.226.128",
+  "symbol": "BTCUSDT",
+  "summary": {
+    "Binance": {
+      "ok": 0,
+      "total": 5
+    },
+    "Bybit": {
+      "ok": 0,
+      "total": 2
+    },
+    "OKX": {
+      "ok": 0,
+      "total": 2
+    }
+  },
+  "results": [
+    {
+      "src": "Binance",
+      "name": "funding+mark (premiumIndex)",
+      "url": "https://fapi.binance.com/fapi/v1/premiumIndex",
+      "params": {
+        "symbol": "BTCUSDT"
+      },
+      "status": 0,
+      "ms": 107,
+      "verdict": "DICEGAT JARINGAN/ISP (sertifikat bukan milik exchange) - hasil TIDAK valid, uji dari jaringan lain",
+      "sample": "Hostname/IP does not match certificate's altnames: Host: fapi.binance.com. is not in the cert's altnames: DNS:internetbaik.telkomsel.com, DNS:internettepat.telkomsel.com"
+    },
+    {
+      "src": "Binance",
+      "name": "open interest sekarang",
+      "url": "https://fapi.binance.com/fapi/v1/openInterest",
+      "params": {
+        "symbol": "BTCUSDT"
+      },
+      "status": 0,
+      "ms": 85,
+      "verdict": "DICEGAT JARINGAN/ISP (sertifikat bukan milik exchange) - hasil TIDAK valid, uji dari jaringan lain",
+      "sample": "Hostname/IP does not match certificate's altnames: Host: fapi.binance.com. is not in the cert's altnames: DNS:internetbaik.telkomsel.com, DNS:internettepat.telkomsel.com"
+    },
+    {
+      "src": "Binance",
+      "name": "OI histori 1h (untuk delta 1H/4H/24H)",
+      "url": "https://fapi.binance.com/futures/data/openInterestHist",
+      "params": {
+        "symbol": "BTCUSDT",
+        "period": "1h",
+        "limit": 30
+      },
+      "status": 0,
+      "ms": 97,
+      "verdict": "DICEGAT JARINGAN/ISP (sertifikat bukan milik exchange) - hasil TIDAK valid, uji dari jaringan lain",
+      "sample": "Hostname/IP does not match certificate's altnames: Host: fapi.binance.com. is not in the cert's altnames: DNS:internetbaik.telkomsel.com, DNS:internettepat.telkomsel.com"
+    },
+    {
+      "src": "Binance",
+      "name": "funding histori",
+      "url": "https://fapi.binance.com/fapi/v1/fundingRate",
+      "params": {
+        "symbol": "BTCUSDT",
+        "limit": 3
+      },
+      "status": 0,
+      "ms": 110,
+      "verdict": "DICEGAT JARINGAN/ISP (sertifikat bukan milik exchange) - hasil TIDAK valid, uji dari jaringan lain",
+      "sample": "Hostname/IP does not match certificate's altnames: Host: fapi.binance.com. is not in the cert's altnames: DNS:internetbaik.telkomsel.com, DNS:internettepat.telkomsel.com"
+    },
+    {
+      "src": "Binance",
+      "name": "daftar kontrak perpetual (exchangeInfo)",
+      "url": "https://fapi.binance.com/fapi/v1/exchangeInfo",
+      "params": {},
+      "light": true,
+      "status": 0,
+      "ms": 184,
+      "verdict": "DICEGAT JARINGAN/ISP (sertifikat bukan milik exchange) - hasil TIDAK valid, uji dari jaringan lain",
+      "sample": "Hostname/IP does not match certificate's altnames: Host: fapi.binance.com. is not in the cert's altnames: DNS:internetbaik.telkomsel.com, DNS:internettepat.telkomsel.com"
+    },
+    {
+      "src": "Bybit",
+      "name": "tickers linear (funding+OI)",
+      "url": "https://api.bybit.com/v5/market/tickers",
+      "params": {
+        "category": "linear",
+        "symbol": "BTCUSDT"
+      },
+      "status": 0,
+      "ms": 133,
+      "verdict": "DICEGAT JARINGAN/ISP (sertifikat bukan milik exchange) - hasil TIDAK valid, uji dari jaringan lain",
+      "sample": "Hostname/IP does not match certificate's altnames: Host: api.bybit.com. is not in the cert's altnames: DNS:internetbaik.telkomsel.com, DNS:internettepat.telkomsel.com"
+    },
+    {
+      "src": "Bybit",
+      "name": "OI histori 1h",
+      "url": "https://api.bybit.com/v5/market/open-interest",
+      "params": {
+        "category": "linear",
+        "symbol": "BTCUSDT",
+        "intervalTime": "1h",
+        "limit": 30
+      },
+      "status": 0,
+      "ms": 48,
+      "verdict": "DICEGAT JARINGAN/ISP (sertifikat bukan milik exchange) - hasil TIDAK valid, uji dari jaringan lain",
+      "sample": "Hostname/IP does not match certificate's altnames: Host: api.bybit.com. is not in the cert's altnames: DNS:internetbaik.telkomsel.com, DNS:internettepat.telkomsel.com"
+    },
+    {
+      "src": "OKX",
+      "name": "funding rate",
+      "url": "https://www.okx.com/api/v5/public/funding-rate",
+      "params": {
+        "instId": "BTC-USDT-SWAP"
+      },
+      "status": 0,
+      "ms": 86,
+      "verdict": "DICEGAT JARINGAN/ISP (sertifikat bukan milik exchange) - hasil TIDAK valid, uji dari jaringan lain",
+      "sample": "Hostname/IP does not match certificate's altnames: Host: www.okx.com. is not in the cert's altnames: DNS:internetbaik.telkomsel.com, DNS:internettepat.telkomsel.com"
+    },
+    {
+      "src": "OKX",
+      "name": "open interest",
+      "url": "https://www.okx.com/api/v5/public/open-interest",
+      "params": {
+        "instType": "SWAP",
+        "instId": "BTC-USDT-SWAP"
+      },
+      "status": 0,
+      "ms": 51,
+      "verdict": "DICEGAT JARINGAN/ISP (sertifikat bukan milik exchange) - hasil TIDAK valid, uji dari jaringan lain",
+      "sample": "Hostname/IP does not match certificate's altnames: Host: www.okx.com. is not in the cert's altnames: DNS:internetbaik.telkomsel.com, DNS:internettepat.telkomsel.com"
+    }
+  ]
+}
