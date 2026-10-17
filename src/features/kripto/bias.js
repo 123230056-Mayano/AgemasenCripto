@@ -9,7 +9,8 @@
  * Bias = kondisi pasar saat ini, BUKAN sinyal entry.
  *
  * Susunan file:
- *   1. Konstanta bobot & ambang (SATU tempat, naikkan BIAS_VERSION kalau diubah)
+ *   1. Konstanta bobot & ambang (dibaca dari config/indicatorConfig.js -> BIAS_CONFIG;
+ *      naikkan BIAS_CONFIG.VERSION kalau diubah)
  *   2. Fungsi skor per komponen (murni)
  *   3. computeBias(inputs)  -> murni: tanpa fetch, tanpa cache, tanpa kirim pesan
  *   4. gatherBiasInputs()   -> pengumpul data (Binance + snapshot cache 3 menit)
@@ -21,9 +22,14 @@
  * Changelog:
  *   v1 (2026-10-16) bobot awal usulan PDF: trend .30, cross .15, rsi .10, macd .15,
  *                   mood .10, btc .10, oiFunding .10. Ambang +-0.25 (eksklusif).
+ *   v2 (2026-10-17) item 07 dirapikan: aturan skor pindah ke config; tambah bias KESELURUHAN
+ *                   lintas TF (computeOverallBias, bobot TF 15m .10 / 1H .20 / 4H .30 / 1D .40);
+ *                   collectBias() dipisah dari runBias agar bisa dipakai ulang 08 dan 09.
+ *                   Skor per komponen dan per TF TIDAK berubah dari v1.
  */
 
 const { t } = require("../../i18n");
+const { BIAS_CONFIG: CFG } = require("../../config/indicatorConfig");
 const {
   computeEmas,
   classifyTrend,
@@ -35,32 +41,25 @@ const {
 } = require("./indicators");
 
 // =====================================================================
-// 1. Konstanta (satu tempat)
+// 1. Konstanta: semua nilai dibaca dari config/indicatorConfig.js (BIAS_CONFIG)
 // =====================================================================
-const BIAS_VERSION = 1;
-const BIAS_WEIGHTS = {
-  trend: 0.3,
-  cross: 0.15,
-  rsi: 0.1,
-  macd: 0.15,
-  mood: 0.1,
-  btc: 0.1,
-  oiFunding: 0.1,
-}; // total 1.00
-const BIAS_BULL = 0.25; // skor > +0.25 -> bullish (batas eksklusif)
-const BIAS_BEAR = -0.25; // skor < -0.25 -> bearish (batas eksklusif)
+const BIAS_VERSION = CFG.VERSION;
+const BIAS_WEIGHTS = CFG.WEIGHTS; // total 1.00
+const BIAS_BULL = CFG.BULL; // skor > +0.25 -> bullish (batas eksklusif)
+const BIAS_BEAR = CFG.BEAR; // skor < -0.25 -> bearish (batas eksklusif)
 
-const BIAS_CROSS_LOOKBACK = 20; // cross dianggap relevan <= 20 candle; skor menurun linear
-const BIAS_CROSS_PAIR_WEIGHTS = { "50/200": 0.65, "20/50": 0.35 }; // 20/50 lebih berisik
-const BIAS_RSI_MODE = "momentum"; // "momentum" (usulan) | "contrarian" (jenuh beli = bearish)
-const BIAS_RSI_EXTREME_HI = 75;
-const BIAS_RSI_EXTREME_LO = 25;
-const BIAS_RSI_EXTREME_DAMP = 0.4; // skor RSI di zona ekstrem dikurangi 40%
-const BIAS_AGREE_NEUTRAL = 0.25; // |skor komponen| <= ini dianggap "searah" dengan hasil netral
-const BIAS_CONF_HIGH = 0.75;
-const BIAS_CONF_MID = 0.5;
-const BIAS_REASON_MIN = 0.02; // komponen dengan |bobot*skor| di bawah ini tidak ditampilkan di alasan
-const BIAS_REASON_MAX = 5;
+const BIAS_CROSS_LOOKBACK = CFG.CROSS_LOOKBACK; // cross dianggap relevan <= 20 candle; skor menurun linear
+const BIAS_CROSS_PAIR_WEIGHTS = CFG.CROSS_PAIR_WEIGHTS; // 20/50 lebih berisik
+const BIAS_RSI_MODE = CFG.RSI_MODE; // "momentum" (usulan) | "contrarian" (jenuh beli = bearish)
+const BIAS_RSI_EXTREME_HI = CFG.RSI_EXTREME_HI;
+const BIAS_RSI_EXTREME_LO = CFG.RSI_EXTREME_LO;
+const BIAS_RSI_EXTREME_DAMP = CFG.RSI_EXTREME_DAMP; // skor RSI di zona ekstrem dikurangi 40%
+const BIAS_AGREE_NEUTRAL = CFG.AGREE_NEUTRAL; // |skor komponen| <= ini dianggap "searah" dengan hasil netral
+const BIAS_CONF_HIGH = CFG.CONF_HIGH;
+const BIAS_CONF_MID = CFG.CONF_MID;
+const BIAS_REASON_MIN = CFG.REASON_MIN; // komponen dengan |bobot*skor| di bawah ini tidak ditampilkan di alasan
+const BIAS_REASON_MAX = CFG.REASON_MAX;
+const BIAS_TF_WEIGHTS = CFG.TF_WEIGHTS; // bobot TF untuk bias keseluruhan
 
 const BIAS_TFS = ["15M", "1H", "4H", "1D"]; // urutan tampilan (sama dengan !mtf)
 const TF_LABEL = { "15M": "15m", "1H": "1H", "4H": "4H", "1D": "1D" };
@@ -237,6 +236,49 @@ function computeBias(inputs, opts = {}) {
 
 const confidenceLevel = (c) => (c >= BIAS_CONF_HIGH ? "high" : c >= BIAS_CONF_MID ? "mid" : "low");
 
+/**
+ * Bias KESELURUHAN lintas timeframe (murni). Rata-rata berbobot skor tiap TF memakai
+ * BIAS_TF_WEIGHTS (TF tinggi lebih berat), ambang bullish/bearish sama dengan per TF.
+ * TF gagal / data kurang dilewati dan bobotnya dinormalisasi ulang (bukan dihitung 0).
+ * Keyakinan = porsi bobot TF yang searah hasil akhir (aturan sama dengan computeBias).
+ * Dipakai ulang oleh 08 (!sinyal) dan 09 (probabilitas) agar semua command satu sumber skor.
+ *
+ * @param {{tf:string, result:{score:number, insufficient?:boolean}|null}[]} rows
+ * @param {{ tfWeights?: Record<string, number> }} [opts]
+ * @returns {{ version:number, bias:"bullish"|"bearish"|"netral", score:number, confidence:number,
+ *             used:string[], skipped:string[], insufficient:boolean }}
+ */
+function computeOverallBias(rows, opts = {}) {
+  const tfWeights = opts.tfWeights || BIAS_TF_WEIGHTS;
+  const used = [];
+  const skipped = [];
+  let num = 0;
+  let den = 0;
+  for (const r of rows) {
+    const w = tfWeights[r.tf] ?? 0;
+    if (r.result && !r.result.insufficient && w > 0) {
+      used.push(r.tf);
+      num += w * r.result.score;
+      den += w;
+    } else {
+      skipped.push(r.tf);
+    }
+  }
+  if (den === 0) {
+    return { version: BIAS_VERSION, bias: "netral", score: 0, confidence: 0, used, skipped, insufficient: true };
+  }
+  const score = round4(num / den);
+  const bias = score > BIAS_BULL ? "bullish" : score < BIAS_BEAR ? "bearish" : "netral";
+  let agree = 0;
+  for (const r of rows) {
+    if (!used.includes(r.tf)) continue;
+    const sc = r.result.score;
+    const same = bias === "bullish" ? sc > 0 : bias === "bearish" ? sc < 0 : Math.abs(sc) <= BIAS_AGREE_NEUTRAL;
+    if (same) agree += tfWeights[r.tf];
+  }
+  return { version: BIAS_VERSION, bias, score, confidence: round4(agree / den), used, skipped, insufficient: false };
+}
+
 // =====================================================================
 // 4. Pengumpul input (I/O). Require berat dibuat lazy supaya computeBias bisa diuji tanpa jaringan.
 // =====================================================================
@@ -347,17 +389,28 @@ function pickReasons(result, lang) {
     .filter(Boolean);
 }
 
-function formatBias(lang, { coin, price, rows, reasonTf, reasonResult, limitedAny, failedAny }) {
-  const header = `${pad(t(lang, "kripto.mtf.colTf"), 4)} ${pad("Bias", 8)} ${pad(t(lang, "bias.col.score"), 6)} ${t(lang, "bias.col.conf")}`;
-  const body = rows.map((r) => {
-    if (!r.result) return `${pad(TF_LABEL[r.tf], 4)} ${t(lang, "bias.failed")}`;
-    const res = r.result;
+function formatBias(lang, { coin, price, rows, reasonTf, reasonResult, limitedAny, failedAny, overall }) {
+  const W = overall ? 5 : 4; // kolom pertama melebar agar label "Total" muat
+  const header = `${pad(t(lang, "kripto.mtf.colTf"), W)} ${pad("Bias", 8)} ${pad(t(lang, "bias.col.score"), 6)} ${t(lang, "bias.col.conf")}`;
+  const rowLine = (name, res) => {
     const label = res.insufficient ? "-" : t(lang, `bias.label.${res.bias}`);
     const conf = res.insufficient ? "-" : t(lang, `bias.conf.${confidenceLevel(res.confidence)}`);
-    return `${pad(TF_LABEL[r.tf], 4)} ${pad(label, 8)} ${pad(fmtScore(res.score), 6)} ${conf}`;
-  });
+    return `${pad(name, W)} ${pad(label, 8)} ${pad(fmtScore(res.score), 6)} ${conf}`;
+  };
+  const body = rows.map((r) => (r.result ? rowLine(TF_LABEL[r.tf], r.result) : `${pad(TF_LABEL[r.tf], W)} ${t(lang, "bias.failed")}`));
+  if (overall && !overall.insufficient) body.push("-".repeat(header.length), rowLine(t(lang, "bias.overall.row"), overall));
 
-  const parts = [t(lang, "bias.head", { coin, ver: BIAS_VERSION, price }), "", "```\n" + [header, ...body].join("\n") + "\n```"];
+  const parts = [t(lang, "bias.head", { coin, ver: BIAS_VERSION, price })];
+  if (overall && !overall.insufficient) {
+    parts.push(
+      t(lang, "bias.overall.line", {
+        bias: t(lang, `bias.label.${overall.bias}`),
+        score: fmtScore(overall.score),
+        conf: t(lang, `bias.conf.${confidenceLevel(overall.confidence)}`),
+      }),
+    );
+  }
+  parts.push("", "```\n" + [header, ...body].join("\n") + "\n```");
 
   if (reasonResult) {
     const lines = pickReasons(reasonResult, lang);
@@ -368,6 +421,10 @@ function formatBias(lang, { coin, price, rows, reasonTf, reasonResult, limitedAn
     if (na.length) parts.push(t(lang, "bias.na", { list: na.join(", ") }));
   }
   const notes = [];
+  if (overall && !overall.insufficient) {
+    const weights = BIAS_TFS.map((tf) => `${TF_LABEL[tf]} ${Math.round((BIAS_TF_WEIGHTS[tf] ?? 0) * 100)}%`).join(", ");
+    notes.push(t(lang, "bias.overall.note", { weights }));
+  }
   if (limitedAny) notes.push(t(lang, "bias.note.limited"));
   if (failedAny) notes.push(t(lang, "bias.note.failed"));
   if (notes.length) parts.push("", ...notes);
@@ -376,8 +433,37 @@ function formatBias(lang, { coin, price, rows, reasonTf, reasonResult, limitedAn
 }
 
 /**
- * !bias <koin> [tf|semua]. Satu snapshot per TF (cache 3 menit statistik.js), tanpa Gemini.
- * TF yang gagal ditandai, tidak menggagalkan seluruh perintah.
+ * Kumpulkan hasil bias per TF untuk satu koin (I/O). Dipisah dari runBias supaya 08 (!sinyal)
+ * dan 09 (probabilitas) memakai skor yang SAMA. Satu snapshot per TF (cache 3 menit statistik.js).
+ * TF yang gagal -> { tf, result: null, err }, tidak menggagalkan TF lain.
+ * @param {string} coin
+ * @param {string[]} tfs
+ * @param {{ lang: string, tick: {price:number} }} ctx
+ * @returns {Promise<{tf:string, result:object|null, limited:boolean, err?:Error}[]>}
+ */
+async function collectBias(coin, tfs, ctx) {
+  const stat = require("./statistik");
+  return Promise.all(
+    tfs.map(async (tf) => {
+      let snapshot = null;
+      try {
+        snapshot = await stat.getSnapshot(ctx.lang, tf); // gagal -> mood & BTC dilewati
+      } catch {
+        snapshot = null;
+      }
+      try {
+        const inputs = await gatherBiasInputs(coin, tf, { lang: ctx.lang, tick: ctx.tick, snapshot });
+        return { tf, result: computeBias(inputs), limited: inputs.limited };
+      } catch (err) {
+        return { tf, result: null, limited: false, err };
+      }
+    }),
+  );
+}
+
+/**
+ * !bias <koin> [tf|semua]. Tanpa Gemini. TF yang gagal ditandai, tidak menggagalkan seluruh perintah.
+ * Lebih dari satu TF berhasil -> ditambah baris Total (bias keseluruhan, computeOverallBias).
  */
 async function runBias(sock, msg, ctx, { coin, tfs }) {
   const { jid, lang } = ctx;
@@ -391,22 +477,7 @@ async function runBias(sock, msg, ctx, { coin, tfs }) {
     await sock.sendMessage(jid, { text: t(lang, "bias.scanning", { coin }) }, { quoted: msg });
   }
 
-  const results = await Promise.all(
-    tfs.map(async (tf) => {
-      let snapshot = null;
-      try {
-        snapshot = await stat.getSnapshot(lang, tf); // gagal -> mood & BTC dilewati
-      } catch {
-        snapshot = null;
-      }
-      try {
-        const inputs = await gatherBiasInputs(coin, tf, { lang, tick, snapshot });
-        return { tf, result: computeBias(inputs), limited: inputs.limited };
-      } catch (err) {
-        return { tf, result: null, limited: false, err };
-      }
-    }),
-  );
+  const results = await collectBias(coin, tfs, { lang, tick });
 
   const ok = results.filter((r) => r.result);
   if (!ok.length) {
@@ -417,6 +488,7 @@ async function runBias(sock, msg, ctx, { coin, tfs }) {
 
   // Alasan: untuk satu TF = TF itu; untuk semua = 4H kalau ada, kalau tidak TF tertinggi yang berhasil.
   const pick = ok.find((r) => r.tf === "4H") || ok[ok.length - 1];
+  const overall = ok.length > 1 ? computeOverallBias(results) : null;
   const text = formatBias(lang, {
     coin,
     price: fmtUsd(tick.price),
@@ -425,6 +497,7 @@ async function runBias(sock, msg, ctx, { coin, tfs }) {
     reasonResult: pick.result,
     limitedAny: ok.some((r) => r.limited),
     failedAny: results.some((r) => !r.result),
+    overall,
   });
   await sock.sendMessage(jid, { text }, { quoted: msg });
 }
@@ -462,10 +535,14 @@ module.exports = {
   BIAS_WEIGHTS,
   BIAS_BULL,
   BIAS_BEAR,
+  BIAS_TF_WEIGHTS,
+  BIAS_TFS,
   BIAS_COMMANDS,
   BIAS_RUNNERS,
   parseBiasArgs,
   computeBias,
+  computeOverallBias,
+  collectBias,
   gatherBiasInputs,
   buildCoinInputs,
   confidenceLevel,
