@@ -11,6 +11,7 @@
  * Kondisi !scan: diatas_ema200, dibawah_ema200, dekat_support, dekat_resistance,
  *                golden_cross, death_cross, breakout, breakdown,
  *                div_bull, div_bear (divergence RSI/MACD, lihat divergence.js).
+ * !scandivergent <koin> [tf] [rsi|macd]: chart satu koin (harga + MACD + RSI, panah di pivot divergence)
  * !scandivergent (!scandiv) [tf] [rsi|macd]: TANPA argumen = semua koin, 4 TF, RSI+MACD, reguler+tersembunyi,
  *   bullish+bearish. Hasil dikelompokkan per TF lalu Bullish/Bearish; banyak sinyal = PDF (format sama dengan
  *   alarm !alertdiv, divPdf.js). Token lama bull|bear dan reguler|tersembunyi tetap diterima sebagai filter tambahan.
@@ -31,8 +32,9 @@ const { t } = require("../../i18n");
 const { getAvailableCoins } = require("./kriptoList");
 const { getMarketRows } = require("./pasar");
 const { computeEmas, classifyTrend, detectCross } = require("./indicators");
-const { detectDivergence, DIV } = require("./divergence");
+const { detectDivergence, DIV, DEFAULT_INDICATORS } = require("./divergence");
 const { buildDivergencePdf } = require("./divPdf");
+const { renderDivChart } = require("./divChart");
 const { buildSections, chooseReportMode, buildPdfIntro, buildGroupedText, describeFilters, fmtCandleTime } = require("./divAlertCore");
 const { TIMEFRAMES, TF_LABEL, fetchCandles, computeLevels, fmtUsd, fmtLevel, fmtPct, pctFrom } = require("./market");
 
@@ -539,10 +541,69 @@ async function runScanDiv(sock, msg, ctx, { condition, tf, indicators, kinds }, 
 }
 
 /**
+ * !scandivergent <koin> [tf] [rsi|macd] [bull|bear] [reguler|tersembunyi]
+ * Chart satu koin: harga + MACD + RSI, panah biru di pivot divergence beserta perubahan nilainya.
+ * Memakai detectDivergence() yang sama dengan scan, jadi hasilnya konsisten dengan daftar !scandivergent.
+ */
+async function runScanDivergentCoin(sock, msg, ctx, { coin, tf, condition, indicators, kinds }) {
+  const { jid, lang } = ctx;
+  const inds = indicators && indicators.length ? indicators : [...DEFAULT_INDICATORS];
+  const kindList = kinds && kinds.length ? kinds : ["regular", "hidden"];
+  const dirs = condition ? [condition === "div_bull" ? "bull" : "bear"] : ["bull", "bear"];
+
+  const candles = await fetchCandles(coin, tf); // closed saja; koin tak dikenal -> UnsupportedCoinError (ditangani pemanggil)
+  const divs = detectDivergence(candles, { indicators: inds }).filter((d) => dirs.includes(d.dir) && kindList.includes(d.kind));
+  const labels = {
+    bull: t(lang, "div.dir.bull"),
+    bear: t(lang, "div.dir.bear"),
+    regular: t(lang, "div.kind.regular"),
+    hidden: t(lang, "div.kind.hidden"),
+  };
+  const png = renderDivChart({ candles, coin, tf: TF_LABEL[tf], divs, labels });
+
+  const price = candles[candles.length - 1].c;
+  const head = t(lang, "divchart.caption.head", { coin, tf: TF_LABEL[tf], price: fmtUsd(price), filters: describeFilters(lang, { indicators: inds, dirs: condition ? dirs : [], kinds: kinds || [] }) });
+  let body;
+  if (!divs.length) {
+    body = t(lang, "divchart.caption.none", { look: DIV.LOOKBACK });
+  } else {
+    const rows = divs.map((d) => {
+      const ago = d.barsAgo === 0 ? t(lang, "kripto.tren.justNow") : t(lang, "kripto.tren.barsAgo", { n: d.barsAgo });
+      const pct = ((d.pivot2.price - d.pivot1.price) / d.pivot1.price) * 100;
+      return t(lang, "divchart.caption.row", {
+        icon: d.dir === "bull" ? "🟢" : "🔴",
+        dir: t(lang, `div.dir.${d.dir}`),
+        kind: t(lang, `div.kind.${d.kind}`),
+        ind: d.indicator.toUpperCase(),
+        p1: fmtLevel(d.pivot1.price),
+        p2: fmtLevel(d.pivot2.price),
+        pct: `${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%`,
+        i1: fmtIndVal(d.pivot1.ind),
+        i2: fmtIndVal(d.pivot2.ind),
+        di: `${d.pivot2.ind - d.pivot1.ind >= 0 ? "+" : "-"}${fmtIndVal(Math.abs(d.pivot2.ind - d.pivot1.ind))}`,
+        ago,
+      });
+    });
+    body = rows.join("\n");
+  }
+  await sock.sendMessage(jid, { image: png, caption: `${head}\n${body}\n${t(lang, "divchart.caption.foot", { win: DIV.PIVOT_WIN })}` }, { quoted: msg });
+}
+
+// Nilai indikator di caption: 2 desimal; MACD koin murah bisa sangat kecil.
+function fmtIndVal(v) {
+  const a = Math.abs(v);
+  if (a === 0) return "0.00";
+  if (a >= 1) return v.toFixed(2);
+  if (a >= 0.01) return v.toFixed(3);
+  return v.toPrecision(3);
+}
+
+/**
  * !scandivergent (item 05). Semua koin x (satu TF atau keempat TF), dibaca dari snapshot cache yang sama
  * dengan !scan. condition null = dua arah. tf null = keempat TF.
  */
-async function runScanDivergent(sock, msg, ctx, { condition, tf, indicators, kinds }) {
+async function runScanDivergent(sock, msg, ctx, { coin, condition, tf, indicators, kinds }) {
+  if (coin) return runScanDivergentCoin(sock, msg, ctx, { coin, tf, condition, indicators, kinds });
   const { jid, lang } = ctx;
   const tfs = tf ? [tf] : ALL_TFS;
   const entries = await loadSnapshots(sock, msg, ctx, tfs);
@@ -649,6 +710,7 @@ function parseStatArgs(name, raw, defaultTf) {
   // Token bull|bear dan reguler|tersembunyi tetap diterima sebagai filter tambahan (kompatibel dengan versi lama).
   if (name === "scandivergent") {
     let tf = null;
+    let coin = null;
     let condition = null;
     const inds = [];
     const kinds = [];
@@ -659,10 +721,12 @@ function parseStatArgs(name, raw, defaultTf) {
       else if (DIV_DIR_TOKENS[low]) dirs.add(DIV_DIR_TOKENS[low]);
       else if (DIV_IND_TOKENS[low]) inds.push(DIV_IND_TOKENS[low]);
       else if (DIV_KIND_TOKENS[low]) kinds.push(DIV_KIND_TOKENS[low]);
+      else if (!coin && /^[A-Za-z0-9]{1,15}$/.test(tok)) coin = tok.toUpperCase(); // !scandivergent <koin>: chart satu koin
       else return null; // token tidak dikenal -> tampilkan penjelasan command
     }
     if (dirs.size === 1) condition = [...dirs][0]; // dua arah sekaligus = semua arah
-    return { condition, tf, indicators: [...new Set(inds)], kinds: [...new Set(kinds)] };
+    // Mode per koin menggambar SATU chart, jadi TF kosong = default pengguna (bukan keempat TF seperti scan semua koin).
+    return { coin, condition, tf: coin ? tf || defaultTf : tf, indicators: [...new Set(inds)], kinds: [...new Set(kinds)] };
   }
 
   // scan: token timeframe dikenali di mana saja, sisanya digabung jadi nama kondisi
@@ -713,4 +777,5 @@ module.exports = {
   scanCoins,
   runScanDiv,
   runScanDivergent,
+  runScanDivergentCoin,
 };

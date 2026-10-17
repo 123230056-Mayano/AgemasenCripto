@@ -429,6 +429,10 @@ module.exports = {
   "div.kind.hidden": "Tersembunyi",
   "div.scan.body": "🔀 *SCAN DIV {dir} {tf}* ({filters})\n{n} dari {total} koin cocok\n\n{rows}\n\n_Reguler = potensi pembalikan, Tersembunyi = potensi lanjutan tren. Dihitung dari candle closed; pivot butuh {win} candle konfirmasi, jadi sinyal muncul sedikit setelah puncak/lembah._\n_Edukasi, bukan saran investasi._",
   "div.scan.empty": "🔀 Tidak ada divergence {dir} ({filters}) yang baru di {tf} (dari {total} koin dipindai). Hanya yang terkonfirmasi dalam {look} candle closed terakhir yang dihitung.\n_Edukasi, bukan saran investasi._",
+  "divchart.caption.head": "🔀 *{coin}/USDT {tf}* {price}\n_{filters}_\n",
+  "divchart.caption.none": "Tidak ada divergence baru. Hanya yang terkonfirmasi dalam {look} candle closed terakhir yang dihitung.",
+  "divchart.caption.row": "{icon} *{dir} {kind} {ind}* ({ago})\n   Harga {p1} → {p2} ({pct})\n   {ind} {i1} → {i2} ({di})",
+  "divchart.caption.foot": "\n_Panah biru = dari pivot 1 ke pivot 2. Pivot butuh {win} candle konfirmasi. Edukasi, bukan saran investasi._",
 
   // ---------- watchlist & alert (Bagian 5) ----------
   "watch.added": "✅ {coin} ditambahkan ke watchlist.",

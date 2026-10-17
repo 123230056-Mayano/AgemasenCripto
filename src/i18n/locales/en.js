@@ -429,6 +429,10 @@ module.exports = {
   "div.kind.hidden": "Hidden",
   "div.scan.body": "🔀 *DIV SCAN {dir} {tf}* ({filters})\n{n} of {total} coins match\n\n{rows}\n\n_Regular = possible reversal, Hidden = possible trend continuation. Based on closed candles; a pivot needs {win} confirming candles, so signals appear slightly after the actual peak/trough._\n_Educational, not investment advice._",
   "div.scan.empty": "🔀 No new {dir} divergence ({filters}) on {tf} ({total} coins scanned). Only divergences confirmed within the last {look} closed candles are counted.\n_Educational, not investment advice._",
+  "divchart.caption.head": "🔀 *{coin}/USDT {tf}* {price}\n_{filters}_\n",
+  "divchart.caption.none": "No new divergence. Only those confirmed within the last {look} closed candles are counted.",
+  "divchart.caption.row": "{icon} *{dir} {kind} {ind}* ({ago})\n   Price {p1} → {p2} ({pct})\n   {ind} {i1} → {i2} ({di})",
+  "divchart.caption.foot": "\n_Blue arrow = from pivot 1 to pivot 2. Pivots need {win} confirmation candles. Educational, not investment advice._",
 
   // ---------- watchlist & alert (Bagian 5) ----------
   "watch.added": "✅ {coin} added to your watchlist.",
