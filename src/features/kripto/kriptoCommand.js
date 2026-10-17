@@ -19,6 +19,7 @@
  *   (lima terakhir ada di pasar.js)
  *   !ringkasan / !stat / !scan <kondisi> [tf] -> statistik & screener pasar (statistik.js)
  *   !bias <koin> [tf|semua] -> bias arah gabungan indikator per timeframe (bias.js)
+ *   !sinyal <koin> [tf|semua] -> skenario entry / SL / TP1 / TP2 / RR semua timeframe, tanpa AI (signal.js)
  *   !alertdivergent (!alertdiv) <koin|semua|watchlist> [tf] [rsi|macd] | list | hapus <id|semua>
  *                        -> alarm divergence otomatis tiap candle closed (divAlertCommand.js, alertMonitor.js)
  *   !watch / !unwatch / !watchlist / !alert / !alertlevel / !alerts / !hapusalert /
@@ -37,6 +38,7 @@ const { getAvailableCoins, filterCoins, buildMessages } = require("./kriptoList"
 const { PASAR_COMMANDS, PASAR_RUNNERS, parsePasarArgs } = require("./pasar");
 const { STAT_COMMANDS, STAT_RUNNERS, parseStatArgs } = require("./statistik");
 const { BIAS_COMMANDS, BIAS_RUNNERS, parseBiasArgs } = require("./bias");
+const { SIGNAL_COMMANDS, SIGNAL_RUNNERS, parseSignalArgs } = require("./signal");
 const { DIVALERT_COMMANDS, DIVALERT_RUNNERS, parseDivAlertArgs } = require("./divAlertCommand");
 const { WATCH_COMMANDS, WATCH_RUNNERS, parseWatchArgs } = require("./watchlist");
 const { UTIL_COMMANDS, UTIL_RUNNERS, parseUtilArgs } = require("./utilitas");
@@ -394,6 +396,19 @@ async function handleKriptoCommand(sock, msg, { jid, text, lang }) {
       }
     }
   }
+  // Skenario entry / SL / TP (!sinyal) -> lihat signal.js
+  let isSignal = false;
+  if (!name) {
+    for (const [key, def] of Object.entries(SIGNAL_COMMANDS)) {
+      const m = text.match(def.re);
+      if (m) {
+        name = key;
+        match = m;
+        isSignal = true;
+        break;
+      }
+    }
+  }
   // Alarm divergence (!alertdivergent / !alertdiv) -> lihat divAlertCommand.js
   let isDivAlert = false;
   if (!name) {
@@ -440,6 +455,7 @@ async function handleKriptoCommand(sock, msg, { jid, text, lang }) {
   if (isPasar) args = parsePasarArgs(name, match[1] || "", getDefaultTf(senderId));
   else if (isStat) args = parseStatArgs(name, match[1] || "", getDefaultTf(senderId));
   else if (isBias) args = parseBiasArgs(name, match[1] || "");
+  else if (isSignal) args = parseSignalArgs(name, match[1] || "");
   else if (isDivAlert) args = parseDivAlertArgs(name, match[1] || "", getDefaultTf(senderId));
   else if (isWatch) args = parseWatchArgs(name, match[1] || "");
   else if (isUtil) args = parseUtilArgs(name, match[1] || "");
@@ -479,6 +495,10 @@ async function handleKriptoCommand(sock, msg, { jid, text, lang }) {
     }
     if (isBias) {
       await BIAS_RUNNERS[name](sock, msg, { jid, lang, senderId }, args);
+      return true;
+    }
+    if (isSignal) {
+      await SIGNAL_RUNNERS[name](sock, msg, { jid, lang, senderId }, args);
       return true;
     }
     if (isDivAlert) {

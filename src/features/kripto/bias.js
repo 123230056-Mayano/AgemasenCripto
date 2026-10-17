@@ -337,11 +337,11 @@ async function marketInputsFromSnapshot(snapshot, coin) {
  * supaya pemanggil bisa menandai TF itu tanpa menggagalkan TF lain.
  * @param {string} coin
  * @param {string} tf "15M"|"1H"|"4H"|"1D"
- * @param {{ lang: string, tick: {price:number}, snapshot: object|null }} ctx
+ * @param {{ lang: string, tick: {price:number}, snapshot: object|null, candles?: object[] }} ctx
  */
 async function gatherBiasInputs(coin, tf, ctx) {
   const { fetchCandles } = require("./market");
-  const candles = await fetchCandles(coin, tf);
+  const candles = ctx.candles || (await fetchCandles(coin, tf)); // ctx.candles: dipakai !sinyal agar candle tidak diambil dua kali
   const own = buildCoinInputs(candles, ctx.tick.price);
   if (!own) throw new Error("BIAS_DATA_TOO_SHORT");
   const market = await marketInputsFromSnapshot(ctx.snapshot, coin);
@@ -439,10 +439,13 @@ function formatBias(lang, { coin, price, rows, reasonTf, reasonResult, limitedAn
  * @param {string} coin
  * @param {string[]} tfs
  * @param {{ lang: string, tick: {price:number} }} ctx
- * @returns {Promise<{tf:string, result:object|null, limited:boolean, err?:Error}[]>}
+ * Tiap baris juga membawa `candles` (candle closed yang dipakai menghitung) supaya 08 (!sinyal)
+ * bisa menghitung ATR / level S/R tanpa fetch kedua.
+ * @returns {Promise<{tf:string, result:object|null, limited:boolean, candles?:object[], err?:Error}[]>}
  */
 async function collectBias(coin, tfs, ctx) {
   const stat = require("./statistik");
+  const { fetchCandles } = require("./market");
   return Promise.all(
     tfs.map(async (tf) => {
       let snapshot = null;
@@ -452,8 +455,9 @@ async function collectBias(coin, tfs, ctx) {
         snapshot = null;
       }
       try {
-        const inputs = await gatherBiasInputs(coin, tf, { lang: ctx.lang, tick: ctx.tick, snapshot });
-        return { tf, result: computeBias(inputs), limited: inputs.limited };
+        const candles = await fetchCandles(coin, tf);
+        const inputs = await gatherBiasInputs(coin, tf, { lang: ctx.lang, tick: ctx.tick, snapshot, candles });
+        return { tf, result: computeBias(inputs), limited: inputs.limited, candles };
       } catch (err) {
         return { tf, result: null, limited: false, err };
       }
