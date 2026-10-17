@@ -39,6 +39,7 @@ const {
   rsi,
   macd,
 } = require("./indicators");
+const { computeProbability, formatProbTable, formatProbBasis, PROB_VERSION } = require("./probability");
 
 // =====================================================================
 // 1. Konstanta: semua nilai dibaca dari config/indicatorConfig.js (BIAS_CONFIG)
@@ -412,6 +413,18 @@ function formatBias(lang, { coin, price, rows, reasonTf, reasonResult, limitedAn
   }
   parts.push("", "```\n" + [header, ...body].join("\n") + "\n```");
 
+  // Item 09: probabilitas bull/bear/sideways dari skor yang sama (tanpa AI), jumlah selalu 100%.
+  const probRows = rows.filter((r) => r.result && !r.result.insufficient).map((r) => ({ label: TF_LABEL[r.tf], prob: computeProbability(r.result) }));
+  if (probRows.length) {
+    const totalProb = overall && !overall.insufficient ? computeProbability(overall) : null;
+    const basis = totalProb || probRows[probRows.length - 1].prob;
+    parts.push(
+      t(lang, "prob.head", { ver: PROB_VERSION }),
+      "```\n" + formatProbTable(lang, probRows, totalProb ? { label: t(lang, "bias.overall.row"), prob: totalProb } : null) + "\n```",
+      t(lang, "prob.basisLine", { basis: formatProbBasis(lang, basis) }),
+    );
+  }
+
   if (reasonResult) {
     const lines = pickReasons(reasonResult, lang);
     if (lines.length) parts.push(t(lang, "bias.reasonsHead", { tf: TF_LABEL[reasonTf] }), ...lines);
@@ -425,6 +438,7 @@ function formatBias(lang, { coin, price, rows, reasonTf, reasonResult, limitedAn
     const weights = BIAS_TFS.map((tf) => `${TF_LABEL[tf]} ${Math.round((BIAS_TF_WEIGHTS[tf] ?? 0) * 100)}%`).join(", ");
     notes.push(t(lang, "bias.overall.note", { weights }));
   }
+  if (probRows.length) notes.push(t(lang, "prob.note"));
   if (limitedAny) notes.push(t(lang, "bias.note.limited"));
   if (failedAny) notes.push(t(lang, "bias.note.failed"));
   if (notes.length) parts.push("", ...notes);

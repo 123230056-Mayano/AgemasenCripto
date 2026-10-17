@@ -101,4 +101,30 @@ const SIGNAL_CONFIG = Object.freeze({
   RANGE_MIN_ATR: 2, // lebar range di bawah ini (kelipatan ATR) ditandai "range sempit"
 });
 
-module.exports = { INDICATOR_CONFIG, BIAS_CONFIG, SIGNAL_CONFIG };
+/**
+ * Item 09 Probabilitas Bull/Bear/Sideways: aturan konversi skor bias -> tiga angka (jumlah 100%).
+ * Input HANYA skor bias (-1..+1) dan keyakinan (0..1) dari computeBias / computeOverallBias (item 07),
+ * jadi tidak ada angka dari AI dan tidak ada jalur hitung kedua. Ubah nilai di sini, lalu naikkan VERSION.
+ *
+ * Langkah (semua murni, lihat features/kripto/probability.js):
+ *   1. Ketegasan   t = min(1, |skor| / FULL_SCORE)               (0 = campur aduk, 1 = sangat tegas)
+ *   2. Sideways    sw = SW_RANGE x (1 - t) + SW_CONF x (1 - keyakinan), dibatasi SW_MIN..SW_MAX
+ *   3. Sisa (1 - sw) dibagi ke bull/bear mengikuti arah skor:
+ *        lean = clamp(skor x SPLIT_GAIN, -1, 1) x SPLIT_MAX ; bull = (1 - sw) x (1 + lean) / 2 ; bear = sisanya
+ *   4. Dibulatkan ke persen bulat dengan metode sisa terbesar, jadi jumlah SELALU tepat 100.
+ *
+ * Ringkas: skor mendekati 0 atau indikator saling bertentangan -> sideways naik; skor tegas dan searah
+ * -> sisi bull/bear mendominasi. Hasil adalah ESTIMASI dari skor indikator, bukan jaminan.
+ */
+const PROB_CONFIG = Object.freeze({
+  VERSION: 1,
+  FULL_SCORE: 0.6, // |skor| >= ini dianggap sinyal sangat tegas
+  SW_RANGE: 0.55, // porsi sideways saat skor 0
+  SW_CONF: 0.15, // tambahan sideways bila keyakinan rendah (komponen saling bertentangan)
+  SW_MIN: 0.1, // sideways tidak pernah di bawah ini
+  SW_MAX: 0.6, // sideways tidak pernah di atas ini
+  SPLIT_GAIN: 2, // skor x ini = kemiringan bull/bear (skor 0.5 sudah miring penuh)
+  SPLIT_MAX: 0.85, // kemiringan maksimum, supaya sisi lawan tidak pernah tepat 0%
+});
+
+module.exports = { INDICATOR_CONFIG, BIAS_CONFIG, SIGNAL_CONFIG, PROB_CONFIG };

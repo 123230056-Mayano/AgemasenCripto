@@ -28,6 +28,7 @@ const { t } = require("../../i18n");
 const { SIGNAL_CONFIG: CFG } = require("../../config/indicatorConfig");
 const { computeEmas, atr: atrSeries } = require("./indicators");
 const { computeOverallBias, collectBias, confidenceLevel, parseBiasArgs } = require("./bias");
+const { computeProbability, formatProbLine, formatProbBasis, PROB_VERSION } = require("./probability");
 
 const SIGNAL_VERSION = CFG.VERSION;
 const TF_LABEL = { "15M": "15m", "1H": "1H", "4H": "4H", "1D": "1D" };
@@ -228,9 +229,13 @@ function formatTfBlock(lang, row, ctx) {
 
   const biasTag = `${t(lang, `bias.label.${row.bias.bias}`)} ${fmtScore(row.bias.score)} · ${t(lang, `bias.conf.${confidenceLevel(row.bias.confidence)}`)}`;
 
+  const prob = computeProbability(row.bias);
+  const probLine = prob ? t(lang, "prob.tfLine", { line: formatProbLine(lang, prob) }) : null;
+
   if (sc.status === "range") {
     const lines = [
       `*${tf}* ⚪ SIDEWAYS | ${biasTag}`,
+      ...(probLine ? [probLine] : []),
       t(lang, "sinyal.range.bounds", { lo: fmtLevel(sc.lower), hi: fmtLevel(sc.upper), pos: Math.round(sc.posPct) }),
       t(lang, "sinyal.range.exit", { tf, hi: fmtLevel(sc.upper), lo: fmtLevel(sc.lower) }),
     ];
@@ -242,6 +247,7 @@ function formatTfBlock(lang, row, ctx) {
   const isLong = sc.status === "long";
   const lines = [
     `*${tf}* ${isLong ? "🟢 LONG" : "🔴 SHORT"} | ${biasTag}`,
+    ...(probLine ? [probLine] : []),
     t(lang, "sinyal.line.entrySl", {
       entry: fmtLevel(sc.entry.price),
       elabel: entryLabel(lang, sc.entry),
@@ -278,6 +284,10 @@ function formatSignal(lang, { coin, price, rows, overall, failedAny, limitedAny 
       }),
     );
   }
+  const overallProb = overall && !overall.insufficient ? computeProbability(overall) : null;
+  if (overallProb) {
+    parts.push(t(lang, "prob.overallLine", { ver: PROB_VERSION, line: formatProbLine(lang, overallProb), basis: formatProbBasis(lang, overallProb) }));
+  }
   parts.push(
     t(lang, "sinyal.style", {
       entry: t(lang, `sinyal.styleName.${CFG.ENTRY_STYLE}`),
@@ -292,6 +302,7 @@ function formatSignal(lang, { coin, price, rows, overall, failedAny, limitedAny 
   const notes = [];
   if (limitedAny) notes.push(t(lang, "bias.note.limited"));
   if (failedAny) notes.push(t(lang, "bias.note.failed"));
+  if (rows.some((r) => r.bias && !r.bias.insufficient)) notes.push(t(lang, "prob.note"));
   notes.push(t(lang, "sinyal.note.method"));
   parts.push("", ...notes, "", t(lang, "sinyal.disclaimer"));
   return parts.join("\n");
