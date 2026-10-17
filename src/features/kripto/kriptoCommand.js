@@ -114,7 +114,7 @@ async function runChart(sock, msg, { jid, lang }, { coin, tf }) {
         tf: TF_LABEL[tf],
         price: fmtUsd(tick.price),
         change: fmtPct(tick.changePct),
-      }),
+      }) + t(lang, "kripto.chart.foot", { win: 3, bars: 20 }),
     },
     { quoted: msg },
   );

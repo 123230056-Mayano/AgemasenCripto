@@ -326,6 +326,7 @@ module.exports = {
   "kripto.busy": "Your previous crypto request is still being processed, hold on a bit.",
   "kripto.cooldown": "Wait {sec} more seconds before using a crypto command again.",
   "kripto.chart.caption": "📈 *{coin}/USDT {tf}*\n{price} ({change})",
+  "kripto.chart.foot": "\n_Blue arrow: R/S from the swing high/low candle ({win}-candle pivot) to the last candle; EMA from its value {bars} candles ago to now. Educational, not investment advice._",
   "kripto.level.body": "📊 *{coin}/USDT {tf} levels*\nPrice: {price}\n\n{rows}\n\n_Not financial advice._",
   "kripto.unsupported": "❌ Coin *{coin}* wasn't found on Binance (USDT pair). Example: *!price eth*.",
   "kripto.timeout": "⏱️ The market data server is slow to respond. Try again in a moment.",

@@ -326,6 +326,7 @@ module.exports = {
   "kripto.busy": "Permintaan kripto kamu yang sebelumnya belum selesai, tunggu dulu ya.",
   "kripto.cooldown": "Tunggu {sec} detik lagi sebelum pakai command kripto lagi ya.",
   "kripto.chart.caption": "📈 *{coin}/USDT {tf}*\n{price} ({change})",
+  "kripto.chart.foot": "\n_Panah biru: R/S dari candle swing high/low (pivot {win} candle) ke candle terakhir; EMA dari nilai {bars} candle lalu ke sekarang. Edukasi, bukan saran investasi._",
   "kripto.level.body": "📊 *Level {coin}/USDT {tf}*\nHarga: {price}\n\n{rows}\n\n_Bukan saran finansial._",
   "kripto.unsupported": "❌ Koin *{coin}* tidak ditemukan di Binance (pasangan USDT). Contoh: *!harga eth*.",
   "kripto.timeout": "⏱️ Server data pasar lambat merespons. Coba lagi sebentar ya.",
