@@ -68,4 +68,37 @@ const BIAS_CONFIG = Object.freeze({
   TF_WEIGHTS: Object.freeze({ "15M": 0.1, "1H": 0.2, "4H": 0.3, "1D": 0.4 }),
 });
 
-module.exports = { INDICATOR_CONFIG, BIAS_CONFIG };
+/**
+ * Item 08 !sinyal: aturan skenario entry / SL / TP / RR di SATU tempat.
+ * Arah skenario mengikuti bias per TF dari computeBias (item 07): bullish -> LONG, bearish -> SHORT,
+ * netral -> SIDEWAYS (range). Semua angka dihitung dari candle closed + ATR + level S/R, tanpa AI.
+ * Naikkan VERSION kalau aturan diubah (tampil di header pesan !sinyal).
+ *
+ * Dua pilihan di bawah menunggu jawaban client (PDF 08, "Pertanyaan ke client"):
+ *   ENTRY_STYLE: "trend"    = ikut tren, entry di harga sekarang                     (default sementara)
+ *                "retest"   = tunggu pullback ke support/EMA20 (long) / resistance/EMA20 (short)
+ *                "breakout" = tunggu tembus resistance (long) / support (short)
+ *   SL_MODE:     "atr" = SL = entry -/+ ATR_SL_MULT x ATR                               (default sementara)
+ *                "sr"  = SL tepat di luar support (long) / resistance (short) terdekat; bila level tidak
+ *                        ada / jaraknya di luar SL_MIN_ATR..SL_MAX_ATR, otomatis pakai ATR dan ditandai.
+ */
+const SIGNAL_CONFIG = Object.freeze({
+  VERSION: 1,
+  ENTRY_STYLE: "trend",
+  SL_MODE: "atr",
+  ATR_SL_MULT: 1.5, // jarak SL mode ATR (kelipatan ATR 14)
+  SR_SL_BUFFER_ATR: 0.25, // jarak ekstra di luar level S/R untuk SL mode "sr"
+  SL_MIN_ATR: 0.5, // SL mode "sr" lebih dekat dari ini = terlalu mepet noise -> pakai ATR
+  SL_MAX_ATR: 4, // SL mode "sr" lebih jauh dari ini = risiko terlalu besar -> pakai ATR
+  // Take profit sebagai kelipatan risiko (R). RR yang ditampilkan SELALU dihitung ulang dari entry/SL/TP.
+  TP_RR: Object.freeze([1.5, 2.5]),
+  // Gaya "breakout": entry = level + buffer; gaya "retest"/"breakout": level lebih jauh dari LEVEL_MAX_ATR
+  // dianggap tidak relevan -> kembali ke entry harga sekarang (ditandai).
+  BREAKOUT_BUFFER_ATR: 0.1,
+  LEVEL_MAX_ATR: 3,
+  // Skenario sideways: range = high tertinggi / low terendah dari RANGE_LOOKBACK candle closed terakhir.
+  RANGE_LOOKBACK: 40,
+  RANGE_MIN_ATR: 2, // lebar range di bawah ini (kelipatan ATR) ditandai "range sempit"
+});
+
+module.exports = { INDICATOR_CONFIG, BIAS_CONFIG, SIGNAL_CONFIG };
