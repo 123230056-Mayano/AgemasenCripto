@@ -10,6 +10,9 @@
  *     ulang tiap 10 menit; notifikasi saat harga mendekati (<= 0.5%) atau
  *     menyentuh level, aktif lagi setelah harga menjauh > 1.5% / level berganti.
  *   - ringkasan harian (!harian): dikirim sekali per hari pada jam pilihan user.
+ *   - alarm indikator lanjutan (!alertind, item 10): bias berubah + crossover baru, mode closed (tiap candle tutup)
+ *     atau live (refresh berkala, candle belum closed ditandai jelas). Mesinnya di advAlertEngine.js; di sini hanya
+ *     dibuat satu engine dan timer-nya. Tidak ada WebSocket (opsi 3 menunggu keputusan client).
  *   - alarm divergence (!alertdivergent): job TERPISAH dari polling harga; pemeriksaan ringan tiap
  *     ~15 dtk hanya membandingkan waktu candle closed terakhir per TF dengan state tersimpan, dan baru
  *     bekerja (fetch + deteksi + kirim) sekali per candle closed per TF. Dedupe & penanda candle yang
@@ -51,6 +54,9 @@ const {
   COIN_WATCHLIST,
 } = require("./divAlertCore");
 
+const { createAdvEngine } = require("./advAlertEngine");
+const { ADV_ALERT_CONFIG: ADV } = require("../../config/indicatorConfig");
+
 const BINANCE = (process.env.BINANCE_BASE || "https://data-api.binance.vision").replace(/\/+$/, "");
 const POLL_MS = Math.max(10_000, Number(process.env.ALERT_POLL_MS) || 30_000);
 const DAILY_CHECK_MS = 30_000;
@@ -65,6 +71,7 @@ let started = false;
 let pricesBusy = false;
 let dailyBusy = false;
 let divBusy = false;
+let advBusy = false;
 
 // ---------- helper ----------
 const langFor = (chat, userJid) => (chat.endsWith("@g.us") ? getLang("group", chat) : getLang("user", userJid));
@@ -529,6 +536,18 @@ async function checkDivergence(now = Date.now()) {
   }
 }
 
+// ---------- alarm indikator lanjutan (!alertind) ----------
+const advEngine = createAdvEngine({
+  store,
+  fetchCandles,
+  notify,
+  langFor,
+  isUnsupported: (err) => err instanceof UnsupportedCoinError,
+});
+
+/** Pemeriksaan alarm indikator lanjutan (closed + live). Dipanggil timer; aman dipanggil manual untuk uji. */
+const checkAdvAlerts = (now) => (sockRef ? advEngine.tick(now) : undefined);
+
 // ---------- start ----------
 /** Dipanggil connection.js tiap socket baru dibuat; timer hanya dibuat sekali. */
 function setAlertSocket(sock) {
@@ -571,6 +590,18 @@ function setAlertSocket(sock) {
       divBusy = false;
     }
   }, ALERT_DIV.CHECK_MS).unref?.();
+
+  setInterval(async () => {
+    if (advBusy) return;
+    advBusy = true;
+    try {
+      await checkAdvAlerts();
+    } catch (err) {
+      console.log("[advalert] pengecekan gagal:", err.message);
+    } finally {
+      advBusy = false;
+    }
+  }, ADV.CHECK_MS).unref?.();
 }
 
-module.exports = { setAlertSocket, checkPriceAlerts, checkDaily, checkDivergence, localNow, fetchPrices };
+module.exports = { setAlertSocket, checkPriceAlerts, checkDaily, checkDivergence, checkAdvAlerts, localNow, fetchPrices };

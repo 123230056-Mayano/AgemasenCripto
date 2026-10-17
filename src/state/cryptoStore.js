@@ -73,6 +73,10 @@ const MAX_ALERTS = 20;
 const posInt = (v, d) => (Number.isInteger(Number(v)) && Number(v) > 0 ? Number(v) : d);
 const MAX_DIV_ALERTS = posInt(process.env.DIV_ALERT_MAX_PER_USER, 10);
 const MAX_DIV_ALERTS_PER_CHAT = posInt(process.env.DIV_ALERT_MAX_PER_CHAT, 20);
+// Batas alarm indikator lanjutan (!alertind, item 10); angka sama dengan ADV_ALERT_CONFIG.
+const { ADV_ALERT_CONFIG } = require("../config/indicatorConfig");
+const MAX_ADV_ALERTS = ADV_ALERT_CONFIG.MAX_PER_USER;
+const MAX_ADV_ALERTS_PER_CHAT = ADV_ALERT_CONFIG.MAX_PER_CHAT;
 // Kunci dedupe harus bertahan lebih lama dari jendela deteksi ulang (LOOKBACK + 1 candle 1D = 4 hari).
 const DIV_SENT_TTL_MS = posInt(process.env.DIV_SENT_TTL_DAYS, 7) * 86_400_000;
 
@@ -114,7 +118,7 @@ let failures = 0;
 let started = false;
 
 // ---------- helper ----------
-const isEmpty = (u) => !u || (!u.watch?.length && !u.alerts?.length && !u.divAlerts?.length && !u.daily && !u.tf);
+const isEmpty = (u) => !u || (!u.watch?.length && !u.alerts?.length && !u.divAlerts?.length && !u.advAlerts?.length && !u.daily && !u.tf);
 const snap = (jid) => (isEmpty(users[jid]) ? null : JSON.stringify(users[jid]));
 const hasPending = () => dirtyUsers.size > 0 || dirtyClosed.size > 0 || dirtySent.size > 0 || pruneBefore != null;
 
@@ -419,6 +423,8 @@ function user(jid) {
   if (!u.nextId) u.nextId = 1;
   if (!Array.isArray(u.divAlerts)) u.divAlerts = [];
   if (!u.nextDivId) u.nextDivId = 1;
+  if (!Array.isArray(u.advAlerts)) u.advAlerts = [];
+  if (!u.nextAdvId) u.nextAdvId = 1;
   return u;
 }
 
@@ -603,6 +609,67 @@ function allDivAlerts() {
   return out;
 }
 
+// ---------- alarm indikator lanjutan (!alertind, item 10) ----------
+/**
+ * advAlerts: [{ id: "a1", chat, coin: "BTC"|"WATCHLIST", tf, types: ["bias","cross"], mode: "closed"|"live",
+ *               createdAt, active: true, state: { BTC: { bias: "bull"|"flat"|"bear"|null } } }]
+ * `state` = bias terakhir yang sudah DIUMUMKAN / di-baseline per koin (supaya restart tidak mengirim ulang).
+ * Penanda cross memakai kunci dedupe yang sama dengan divergence (wasSent / markSent).
+ */
+const getAdvAlerts = (jid) => [...user(jid).advAlerts];
+
+/** @returns {object|"full"|"chatFull"|"exists"} */
+function addAdvAlert(jid, sub) {
+  const u = user(jid);
+  if (u.advAlerts.some((a) => a.chat === sub.chat && a.coin === sub.coin && a.tf === sub.tf && a.mode === sub.mode && sameList(a.types, sub.types))) {
+    return "exists";
+  }
+  if (u.advAlerts.length >= MAX_ADV_ALERTS) return "full";
+  if (countAdvAlertsInChat(sub.chat) >= MAX_ADV_ALERTS_PER_CHAT) return "chatFull";
+  const entry = { ...sub, id: `a${u.nextAdvId++}`, createdAt: Date.now(), active: true, state: {} };
+  u.advAlerts.push(entry);
+  save(jid);
+  return entry;
+}
+
+function countAdvAlertsInChat(chat) {
+  let n = 0;
+  for (const u of Object.values(users)) for (const a of u.advAlerts || []) if (a.chat === chat) n++;
+  return n;
+}
+
+/** id boleh "a3" / "A3" / "3". @returns {boolean} */
+function removeAdvAlert(jid, id) {
+  const u = user(jid);
+  const want = /^\d+$/.test(String(id)) ? `a${id}` : String(id).toLowerCase();
+  const i = u.advAlerts.findIndex((a) => a.id === want);
+  if (i < 0) return false;
+  u.advAlerts.splice(i, 1);
+  prune(jid);
+  save(jid);
+  return true;
+}
+
+/** @returns {number} jumlah alarm yang dihapus */
+function clearAdvAlerts(jid) {
+  const u = user(jid);
+  const n = u.advAlerts.length;
+  if (!n) return 0;
+  u.advAlerts = [];
+  prune(jid);
+  save(jid);
+  return n;
+}
+
+/** Semua alarm indikator aktif semua user (untuk monitor). */
+function allAdvAlerts() {
+  const out = [];
+  for (const [jid, u] of Object.entries(users)) {
+    for (const a of u.advAlerts || []) if (a.active !== false) out.push({ userJid: jid, sub: a });
+  }
+  return out;
+}
+
 const getLastClosed = (tf) => divState.lastClosedByTf[tf] || 0;
 const getLastClosedMap = () => ({ ...divState.lastClosedByTf });
 function setLastClosed(tf, ms) {
@@ -674,6 +741,8 @@ module.exports = {
   MAX_ALERTS,
   MAX_DIV_ALERTS,
   MAX_DIV_ALERTS_PER_CHAT,
+  MAX_ADV_ALERTS,
+  MAX_ADV_ALERTS_PER_CHAT,
   DIV_SENT_TTL_MS,
   initCryptoStore,
   isCryptoStoreEnabled,
@@ -695,6 +764,12 @@ module.exports = {
   clearDivAlerts,
   allDivAlerts,
   countDivAlertsInChat,
+  getAdvAlerts,
+  addAdvAlert,
+  removeAdvAlert,
+  clearAdvAlerts,
+  allAdvAlerts,
+  countAdvAlertsInChat,
   getLastClosed,
   getLastClosedMap,
   setLastClosed,

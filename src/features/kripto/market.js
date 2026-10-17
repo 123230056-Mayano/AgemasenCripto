@@ -51,8 +51,12 @@ async function fetchTicker(coin) {
   }
 }
 
-/** Candle closed saja, urut lama -> baru. */
-async function fetchCandles(coin, tf) {
+/**
+ * Candle closed saja (default), urut lama -> baru.
+ * includeOpen: true -> candle yang sedang berjalan ikut dikembalikan di ujung deret; setiap candle diberi
+ * `closed` (true/false). Dipakai HANYA oleh alarm live (item 10); semua pemanggil lain tidak berubah.
+ */
+async function fetchCandles(coin, tf, { includeOpen = false } = {}) {
   const interval = TIMEFRAMES[tf];
   if (!interval) throw new Error("TF_UNSUPPORTED");
   try {
@@ -61,9 +65,12 @@ async function fetchCandles(coin, tf) {
       timeout: 10_000,
     });
     const now = Date.now();
-    return res.data
-      .filter((k) => k[6] < now)
-      .map((k) => ({ t: k[0], o: +k[1], h: +k[2], l: +k[3], c: +k[4], ct: k[6] })); // ct = waktu tutup (ms), dipakai divergence.js untuk memastikan candle closed
+    const rows = includeOpen ? res.data : res.data.filter((k) => k[6] < now);
+    return rows.map((k) => {
+      const c = { t: k[0], o: +k[1], h: +k[2], l: +k[3], c: +k[4], ct: k[6] }; // ct = waktu tutup (ms), dipakai divergence.js untuk memastikan candle closed
+      if (includeOpen) c.closed = k[6] < now;
+      return c;
+    });
   } catch (err) {
     if (isInvalidSymbol(err)) throw new UnsupportedCoinError(coin);
     throw err;

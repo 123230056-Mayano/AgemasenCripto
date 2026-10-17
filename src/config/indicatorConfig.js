@@ -127,4 +127,44 @@ const PROB_CONFIG = Object.freeze({
   SPLIT_MAX: 0.85, // kemiringan maksimum, supaya sisi lawan tidak pernah tepat 0%
 });
 
-module.exports = { INDICATOR_CONFIG, BIAS_CONFIG, SIGNAL_CONFIG, PROB_CONFIG };
+/**
+ * Item 10 Real-time dan Alarm Lanjutan (!alertind): alarm bias berubah + crossover baru.
+ * (Alarm divergence baru tetap lewat !alertdiv; konfigurasinya di divAlertCore.js.)
+ *
+ * "Real-time" BELUM diputuskan client (PDF 10, opsi 1/2/3). Default sementara = opsi 1 + opsi 2 yang bisa
+ * dipilih per alarm:
+ *   mode "closed" (default) : dievaluasi tiap candle closed (indikator dari candle closed saja, stabil)
+ *   mode "live"             : opsi 1 refresh berkala (LIVE_INTERVAL_MS) memakai candle yang BELUM closed;
+ *                             setiap pesan ditandai jelas, dan perubahan harus bertahan LIVE_CONFIRM kali
+ *                             evaluasi berturut-turut supaya tidak bolak-balik.
+ * Opsi 3 (WebSocket) sengaja belum dibuat: butuh desain khusus dan keputusan client.
+ * Semua angka bisa diubah lewat env tanpa ubah kode; naikkan VERSION kalau aturan diubah.
+ */
+const _posInt = (v, d) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Math.floor(Number(v)) : d);
+const _num = (v, d) => (v !== undefined && v !== "" && Number.isFinite(Number(v)) ? Number(v) : d);
+const ADV_ALERT_CONFIG = Object.freeze({
+  VERSION: 1,
+  CHECK_MS: Math.max(5_000, _posInt(process.env.ADV_CHECK_MS, 15_000)), // pemeriksaan ringan (jadwal candle closed + putaran live)
+  // --- mode live (opsi 1: refresh berkala) ---
+  LIVE_INTERVAL_MS: Math.max(60_000, _posInt(process.env.ADV_LIVE_INTERVAL_MS, 5 * 60_000)), // jeda hitung ulang per koin+TF
+  LIVE_MAX_PAIRS: _posInt(process.env.ADV_LIVE_MAX_PAIRS, 60), // batas koin+TF yang dihitung per putaran (sisanya bergilir)
+  LIVE_CONFIRM: _posInt(process.env.ADV_LIVE_CONFIRM, 2), // perubahan bias harus terlihat N evaluasi berturut-turut
+  // --- aturan sinyal ---
+  BIAS_HYST: _num(process.env.ADV_BIAS_HYST, 0.05), // histeresis: keluar dari bullish/bearish baru saat skor lewat ambang - HYST
+  CROSS_MAX_BARS_AGO_CLOSED: 1, // mode closed: cross sampai 1 candle lalu masih dianggap baru (toleransi retry/restart)
+  CROSS_MAX_BARS_AGO_LIVE: 0, // mode live: hanya cross di candle berjalan
+  // --- anti-spam ---
+  COOLDOWN_LIVE_MS: _posInt(process.env.ADV_COOLDOWN_LIVE_MS, 30 * 60_000), // jeda minimum antar alarm per penerima+koin+TF (live)
+  COOLDOWN_CLOSED_MS: Number.isFinite(Number(process.env.ADV_COOLDOWN_CLOSED_MS)) && process.env.ADV_COOLDOWN_CLOSED_MS !== undefined && process.env.ADV_COOLDOWN_CLOSED_MS !== "" ? Number(process.env.ADV_COOLDOWN_CLOSED_MS) : 0,
+  MAX_MSG_PER_CHAT_HOUR: _posInt(process.env.ADV_MAX_MSG_PER_CHAT_HOUR, 20),
+  LINES_PER_MSG: _posInt(process.env.ADV_LINES_PER_MSG, 20), // lebih dari ini dipecah ke pesan berikutnya (tidak ada yang dibuang)
+  SEND_GAP_MS: _posInt(process.env.ADV_SEND_GAP_MS, 1_000),
+  // --- langganan ---
+  MAX_PER_USER: _posInt(process.env.ADV_ALERT_MAX_PER_USER, 10),
+  MAX_PER_CHAT: _posInt(process.env.ADV_ALERT_MAX_PER_CHAT, 20),
+  CONCURRENCY: _posInt(process.env.ADV_CONCURRENCY, 8),
+  RETRY_MS: 60_000,
+  MAX_ATTEMPTS: 3,
+});
+
+module.exports = { INDICATOR_CONFIG, BIAS_CONFIG, SIGNAL_CONFIG, PROB_CONFIG, ADV_ALERT_CONFIG };
