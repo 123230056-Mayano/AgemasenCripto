@@ -31,6 +31,7 @@ const { getDefaultTf } = require("./defaultTf");
 const { TF_LABEL, UnsupportedCoinError, fetchCandles, computeLevels, fmtUsd, fmtLevel, fmtPct } = require("./market");
 const { DAILY_TZ, DAILY_TZ_LABEL, loadWatchRows, loadWatchRowsBulk, formatWatchCompact, WATCH_PDF_MIN, formatWatchTable } = require("./watchlist");
 const { detectDivergence } = require("./divergence");
+const { buildDivergencePdf } = require("./divPdf");
 const { refreshSnapshot, CONCURRENCY: SCAN_CONCURRENCY } = require("./statistik");
 const {
   TF_MS,
@@ -39,10 +40,13 @@ const {
   dueTfs,
   collectItems,
   groupByRecipient,
-  planMessages,
   ChatRateLimiter,
   buildSingleText,
-  buildSummaryText,
+  buildSections,
+  chooseReportMode,
+  buildPdfIntro,
+  buildGroupedText,
+  fmtCandleTime,
   COIN_ALL,
   COIN_WATCHLIST,
 } = require("./divAlertCore");
@@ -355,60 +359,103 @@ async function gatherDivergences(tf, boundary, subsTf) {
   return { divsByCoin, allCoins, failures, requests };
 }
 
-/** Kirim semua pesan untuk satu tujuan (chat + user). @returns {Promise<{sent:number, failed:number}>} */
-async function deliverDivergence(group) {
-  const lang = langFor(group.chat, group.userJid);
-  const plans = planMessages(group.items, { remaining: divLimiter.remaining(group.chat) });
-  if (!plans.length && group.items.length) {
-    console.log(`[divalert] batas pesan per jam tercapai untuk ${group.chat}; ${group.items.length} sinyal ditunda`);
+/** Kirim dokumen PDF ke chat tujuan. @returns {Promise<boolean>} true kalau terkirim. */
+async function notifyDocument(chat, userJid, buffer, fileName) {
+  if (!sockRef) return false;
+  try {
+    await sockRef.sendMessage(chat, { document: buffer, mimetype: "application/pdf", fileName });
+    return true;
+  } catch (err) {
+    console.log("[alert] gagal kirim PDF:", err.message);
+    return false;
   }
-  let sent = 0;
-  let failed = 0;
-  for (const plan of plans) {
-    if (divLimiter.remaining(group.chat) <= 0) break; // jatah habis di tengah jalan: sisanya ditunda (belum ditandai terkirim)
-    const text = plan.summary ? buildSummaryText(lang, plan.items) : buildSingleText(lang, plan.items[0]);
-    if (await notify(group.chat, group.userJid, text)) {
-      store.markSent(plan.items.map((i) => i.key)); // ditandai SETELAH terkirim (dan langsung disimpan)
-      divLimiter.record(group.chat);
-      sent++;
-      if (ALERT_DIV.SEND_GAP_MS) await sleep(ALERT_DIV.SEND_GAP_MS);
-    } else {
-      failed++;
-    }
-  }
-  return { sent, failed };
 }
 
-/** Proses satu TF yang baru saja closed. */
-async function processDivTf(tf, boundary, attempts, allSubs, now) {
-  const startedAt = Date.now();
-  const retryAt = () => now + (Date.now() - startedAt) + ALERT_DIV.RETRY_MS; // = Date.now() + RETRY_MS di produksi; mengikuti `now` yang disuntik di test
-  const subsTf = allSubs.filter((x) => x.sub.tf === tf);
-  const { divsByCoin, allCoins, failures: fetchFailures, requests } = await gatherDivergences(tf, boundary, subsTf);
+/**
+ * Kirim laporan divergence untuk SATU penerima (chat + user): semua TF yang closed bersamaan, semua koin.
+ *  - sinyal banyak / lintas TF -> pesan pengantar 1 baris + 1 PDF gabungan (maksimal 2 pesan)
+ *  - sinyal sedikit            -> 1 pesan teks singkat (1 sinyal memakai format alarm tunggal)
+ * Sinyal ditandai terkirim hanya kalau semua pesan berhasil. Jatah pesan per jam tidak cukup -> ditunda
+ * (tidak ditandai, dicoba lagi di putaran berikutnya selama masih "baru").
+ * @param {{chat:string,userJid:string,items:object[]}} group
+ * @param {string[]} tfs TF (kunci) yang closed bersamaan dan dilanggan penerima ini
+ * @param {number} closedMs waktu tutup candle (ms) untuk teks pengantar
+ */
+async function deliverDivergence(group, tfs, closedMs) {
+  const lang = langFor(group.chat, group.userJid);
+  const sections = buildSections(group.items, tfs);
+  const mode = chooseReportMode(sections);
+  const res = { sent: 0, failed: 0, deferred: false, mode, pdfMs: 0, pdfBytes: 0 };
+  if (mode === "none") return res;
 
+  let asPdf = mode === "pdf";
+  if (divLimiter.remaining(group.chat) < (asPdf ? 2 : 1)) {
+    res.deferred = true;
+    console.log(`[divalert] batas pesan per jam tercapai untuk ${group.chat}; ${group.items.length} sinyal ditunda`);
+    return res;
+  }
+  const time = fmtCandleTime(lang, closedMs);
+
+  let pdf = null;
+  if (asPdf) {
+    const t0 = Date.now();
+    try {
+      pdf = await buildDivergencePdf({ sections, mode: "alert", time, lang });
+      res.pdfMs = Date.now() - t0;
+      res.pdfBytes = pdf.length;
+    } catch (err) {
+      console.log("[divalert] gagal membuat PDF, kirim sebagai teks:", err.message);
+      asPdf = false; // jangan sampai alarm hilang hanya karena PDF gagal dibuat
+    }
+  }
+
+  const send = async (fn) => {
+    const ok = await fn();
+    if (ok) {
+      divLimiter.record(group.chat);
+      res.sent++;
+      if (ALERT_DIV.SEND_GAP_MS) await sleep(ALERT_DIV.SEND_GAP_MS);
+    }
+    return ok;
+  };
+
+  let ok;
+  if (asPdf) {
+    const stamp = new Date(closedMs).toISOString().slice(0, 16).replace(/[-:T]/g, "");
+    ok = await send(() => notify(group.chat, group.userJid, buildPdfIntro(lang, sections, { mode: "alert", time })));
+    if (ok) {
+      const sendPdf = () => notifyDocument(group.chat, group.userJid, pdf, `Divergence-${stamp}UTC.pdf`);
+      ok = await send(async () => (await sendPdf()) || (await sendPdf())); // satu percobaan ulang langsung
+    }
+  } else {
+    const text = group.items.length === 1 ? buildSingleText(lang, group.items[0]) : buildGroupedText(lang, sections, { mode: "alert", time });
+    ok = await send(() => notify(group.chat, group.userJid, text));
+  }
+
+  if (ok) store.markSent(group.items.map((i) => i.key)); // ditandai SETELAH terkirim (dan langsung disimpan)
+  else res.failed++;
+  return res;
+}
+
+/** Ambil data + cocokkan langganan untuk satu TF (belum mengirim apa pun). */
+async function collectDivTf(tf, boundary, allSubs) {
+  const startedAt = Date.now();
+  const subsTf = allSubs.filter((x) => x.sub.tf === tf);
+  const gathered = await gatherDivergences(tf, boundary, subsTf);
   const items = collectItems({
     subs: subsTf,
     tf,
-    divsByCoin,
-    allCoins,
+    divsByCoin: gathered.divsByCoin,
+    allCoins: gathered.allCoins,
     watchOf: (jid) => store.getWatch(jid),
     isSent: (key) => store.wasSent(key),
   });
+  return { tf, boundary, subsTf, items, ...gathered, ms: Date.now() - startedAt };
+}
 
-  let sent = 0;
-  let sendFailed = 0;
-  for (const group of groupByRecipient(items)) {
-    try {
-      const r = await deliverDivergence(group);
-      sent += r.sent;
-      sendFailed += r.failed;
-    } catch (err) {
-      sendFailed++;
-      console.log("[divalert] gagal mengirim:", err.message);
-    }
-  }
-
-  const problems = fetchFailures + sendFailed;
+/** Tandai TF selesai, atau jadwalkan percobaan ulang (logika sama dengan versi per-TF sebelumnya). */
+function finishDivTf(g, attempts, problems, now, tickStartedAt) {
+  const { tf, boundary } = g;
   if (!problems) {
     store.setLastClosed(tf, boundary); // sukses penuh: tandai selesai
     divRetry.delete(tf);
@@ -417,33 +464,68 @@ async function processDivTf(tf, boundary, attempts, allSubs, now) {
     divRetry.delete(tf);
     console.log(`[divalert] ${tf}: menyerah setelah ${attempts + 1} percobaan (${problems} masalah)`);
   } else {
-    divRetry.set(tf, { boundary, attempts: attempts + 1, nextAt: retryAt() });
+    divRetry.set(tf, { boundary, attempts: attempts + 1, nextAt: now + (Date.now() - tickStartedAt) + ALERT_DIV.RETRY_MS });
   }
-  const pruned = store.pruneSent();
-  console.log(
-    `[divalert] ${tf} candle=${new Date(boundary).toISOString()} langganan=${subsTf.length} koin=${divsByCoin.size} request~${requests} ` +
-      `sinyal=${items.length} terkirim=${sent} masalah=${problems} dedupe=${store.sentCount()}(-${pruned}) durasi=${Date.now() - startedAt}ms`,
-  );
 }
 
-/** Pemeriksaan ringan: kerja berat hanya kalau ada candle closed baru pada TF yang punya langganan. */
+/**
+ * Pemeriksaan ringan: kerja berat hanya kalau ada candle closed baru pada TF yang punya langganan.
+ * TF yang jatuh tempo bersamaan (mis. 1D/4H/1H/15m pukul 07:00 WIB) dikumpulkan dulu, lalu tiap penerima
+ * mendapat SATU laporan gabungan (urut 1D > 4H > 1H > 15m), bukan satu pesan per TF.
+ */
 async function checkDivergence(now = Date.now()) {
   const subs = store.allDivAlerts();
   if (!subs.length || !sockRef) return;
   const tfs = [...new Set(subs.map((x) => x.sub.tf))].filter((tf) => TF_MS[tf]);
   const due = dueTfs({ tfs, now, lastClosed: store.getLastClosedMap(), retry: divRetry });
-  for (const { tf, boundary, attempts } of due) {
-    const startedAt = Date.now();
+  if (!due.length) return;
+
+  const tickStartedAt = Date.now();
+  const gathered = []; // urut TF besar -> kecil (urutan `due`)
+  for (const d of due) {
     try {
-      await processDivTf(tf, boundary, attempts, subs, now);
+      gathered.push({ ...(await collectDivTf(d.tf, d.boundary, subs)), attempts: d.attempts });
     } catch (err) {
-      console.log(`[divalert] ${tf} putaran gagal:`, err.message); // TF lain tetap diproses; dicoba lagi lewat jalur retry
-      divRetry.set(tf, { boundary, attempts: attempts + 1, nextAt: now + (Date.now() - startedAt) + ALERT_DIV.RETRY_MS });
-      if (attempts + 1 >= ALERT_DIV.MAX_ATTEMPTS) {
-        store.setLastClosed(tf, boundary);
-        divRetry.delete(tf);
-      }
+      console.log(`[divalert] ${d.tf} putaran gagal:`, err.message); // TF lain tetap diproses; dicoba lagi lewat jalur retry
+      finishDivTf({ tf: d.tf, boundary: d.boundary }, d.attempts, 1, now, tickStartedAt);
     }
+  }
+  if (!gathered.length) return;
+
+  // Kirim: satu laporan per penerima untuk semua TF yang closed bersamaan.
+  const closedMs = Math.max(...gathered.map((g) => g.boundary));
+  const sendFailedTfs = new Set();
+  const sentByTf = new Map(gathered.map((g) => [g.tf, 0]));
+  for (const group of groupByRecipient(gathered.flatMap((g) => g.items))) {
+    // TF yang datanya gagal diambil (dan belum menghasilkan sinyal) tidak ikut dilaporkan: "0 sinyal" di PDF akan
+    // menyesatkan. TF itu dicoba lagi lewat jalur retry dan dikirim terpisah kalau berhasil.
+    const myTfs = gathered
+      .filter((g) => g.subsTf.some((x) => x.userJid === group.userJid && x.sub.chat === group.chat))
+      .filter((g) => g.failures === 0 || g.items.length > 0)
+      .map((g) => g.tf);
+    try {
+      const r = await deliverDivergence(group, myTfs, closedMs);
+      if (r.failed) for (const it of group.items) sendFailedTfs.add(it.tf);
+      if (r.sent && !r.failed) for (const it of group.items) sentByTf.set(it.tf, sentByTf.get(it.tf) + 1);
+      console.log(
+        `[divalert] kirim penerima=${group.chat} mode=${r.mode} tf=${myTfs.join("+")} sinyal=${group.items.length} pesan=${r.sent} gagal=${r.failed}` +
+          (r.pdfBytes ? ` pdf=${r.pdfMs}ms/${Math.round(r.pdfBytes / 1024)}KB` : "") +
+          (r.deferred ? " ditunda" : ""),
+      );
+    } catch (err) {
+      for (const it of group.items) sendFailedTfs.add(it.tf);
+      console.log("[divalert] gagal mengirim:", err.message);
+    }
+  }
+
+  for (const g of gathered) {
+    const problems = g.failures + (sendFailedTfs.has(g.tf) ? 1 : 0);
+    finishDivTf(g, g.attempts, problems, now, tickStartedAt);
+    const pruned = store.pruneSent();
+    console.log(
+      `[divalert] ${g.tf} candle=${new Date(g.boundary).toISOString()} langganan=${g.subsTf.length} koin=${g.divsByCoin.size} request~${g.requests} ` +
+        `sinyal=${g.items.length} penerima_terkirim=${sentByTf.get(g.tf)} masalah=${problems} dedupe=${store.sentCount()}(-${pruned}) ambil=${g.ms}ms total=${Date.now() - tickStartedAt}ms`,
+    );
   }
 }
 

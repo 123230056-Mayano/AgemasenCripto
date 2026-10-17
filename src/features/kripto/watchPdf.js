@@ -197,4 +197,4 @@ async function buildWatchlistPdf({ rows, tf, lang = "id" }) {
   return Buffer.from(await pdf.save());
 }
 
-module.exports = { buildWatchlistPdf, summarize };
+module.exports = { buildWatchlistPdf, summarize, makeCleaner, wibStamp, PDF_STYLE: { PAGE_W, PAGE_H, MARGIN, ROW_H, HEAD_H, C } };

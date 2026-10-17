@@ -11,7 +11,9 @@
  * Kondisi !scan: diatas_ema200, dibawah_ema200, dekat_support, dekat_resistance,
  *                golden_cross, death_cross, breakout, breakdown,
  *                div_bull, div_bear (divergence RSI/MACD, lihat divergence.js).
- * Alias: !scandivergent (!scandiv) bull|bear [tf] [rsi|macd] [reguler|tersembunyi].
+ * !scandivergent (!scandiv) [tf] [rsi|macd]: TANPA argumen = semua koin, 4 TF, RSI+MACD, reguler+tersembunyi,
+ *   bullish+bearish. Hasil dikelompokkan per TF lalu Bullish/Bearish; banyak sinyal = PDF (format sama dengan
+ *   alarm !alertdiv, divPdf.js). Token lama bull|bear dan reguler|tersembunyi tetap diterima sebagai filter tambahan.
  *
  * Timeframe: !ringkasan [tf] & !stat [tf] (15m/1H/4H/1D). TANPA argumen = tabel padat
  * keempat TF sekaligus (item 03), dibaca dari snapshot cache yang sama (tanpa beban API baru).
@@ -30,6 +32,8 @@ const { getAvailableCoins } = require("./kriptoList");
 const { getMarketRows } = require("./pasar");
 const { computeEmas, classifyTrend, detectCross } = require("./indicators");
 const { detectDivergence, DIV } = require("./divergence");
+const { buildDivergencePdf } = require("./divPdf");
+const { buildSections, chooseReportMode, buildPdfIntro, buildGroupedText, describeFilters, fmtCandleTime } = require("./divAlertCore");
 const { TIMEFRAMES, TF_LABEL, fetchCandles, computeLevels, fmtUsd, fmtLevel, fmtPct, pctFrom } = require("./market");
 
 const SNAPSHOT_TTL_MS = 3 * 60_000;
@@ -534,6 +538,64 @@ async function runScanDiv(sock, msg, ctx, { condition, tf, indicators, kinds }, 
   );
 }
 
+/**
+ * !scandivergent (item 05). Semua koin x (satu TF atau keempat TF), dibaca dari snapshot cache yang sama
+ * dengan !scan. condition null = dua arah. tf null = keempat TF.
+ */
+async function runScanDivergent(sock, msg, ctx, { condition, tf, indicators, kinds }) {
+  const { jid, lang } = ctx;
+  const tfs = tf ? [tf] : ALL_TFS;
+  const entries = await loadSnapshots(sock, msg, ctx, tfs);
+  const inds = indicators && indicators.length ? indicators : ["rsi", "macd"];
+  const kindList = kinds && kinds.length ? kinds : ["regular", "hidden"];
+  const dirs = condition ? [condition === "div_bull" ? "bull" : "bear"] : ["bull", "bear"];
+
+  const items = [];
+  for (const { tf: key, snap } of entries) {
+    if (!snap) continue;
+    for (const c of snap.coins) {
+      for (const d of c.div || []) {
+        if (dirs.includes(d.dir) && inds.includes(d.indicator) && kindList.includes(d.kind)) {
+          items.push({ coin: c.ticker, tf: key, indicator: d.indicator, kind: d.kind, dir: d.dir });
+        }
+      }
+    }
+  }
+  const okTfs = entries.filter((e) => e.snap).map((e) => e.tf);
+  const missing = entries.filter((e) => !e.snap).map((e) => TF_LABEL[e.tf]);
+  const sections = buildSections(items, okTfs);
+  const mode = chooseReportMode(sections);
+  const filters = describeFilters(lang, { indicators: inds, dirs: condition ? dirs : [], kinds: kinds || [] });
+  const time = fmtCandleTime(lang, Date.now());
+  const notes = (missing.length ? "\n" + t(lang, "divreport.scan.missing", { tfs: missing.join(", ") }) : "") + skippedMultiNote(lang, entries);
+  const say = (text) => sock.sendMessage(jid, { text }, { quoted: msg });
+
+  if (mode === "none") {
+    const total = Math.max(...entries.map((e) => (e.snap ? e.snap.coins.length : 0)));
+    await say(t(lang, "divreport.scan.empty", { filters, tfs: okTfs.map((x) => TF_LABEL[x]).join(", "), total, look: DIV.LOOKBACK }) + notes);
+    return;
+  }
+  if (mode === "text") {
+    await say(buildGroupedText(lang, sections, { mode: "scan", time, filters }) + notes);
+    return;
+  }
+
+  // PDF: satu baris pengantar + satu PDF (maksimal 2 pesan, sama dengan alarm).
+  const t0 = Date.now();
+  let pdf;
+  try {
+    pdf = await buildDivergencePdf({ sections, mode: "scan", time, lang });
+  } catch (err) {
+    console.log("[scandiv] gagal membuat PDF, kirim sebagai teks:", err.message);
+    await say(buildGroupedText(lang, sections, { mode: "scan", time, filters }) + notes);
+    return;
+  }
+  console.log(`[scandiv] tf=${okTfs.join("+")} sinyal=${items.length} pdf=${Date.now() - t0}ms/${Math.round(pdf.length / 1024)}KB`);
+  await say(buildPdfIntro(lang, sections, { mode: "scan", time }) + notes);
+  const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, "");
+  await sock.sendMessage(jid, { document: pdf, mimetype: "application/pdf", fileName: `ScanDivergence-${stamp}UTC.pdf` }, { quoted: msg });
+}
+
 async function runScan(sock, msg, ctx, { condition, tf, indicators, kinds }) {
   const { jid, lang } = ctx;
   const snap = await ensureSnapshot(sock, msg, ctx, tf);
@@ -583,22 +645,24 @@ function parseStatArgs(name, raw, defaultTf) {
     return TIMEFRAMES[key] ? { tf: key } : null;
   }
 
-  // !scandivergent <bull|bear> [tf] [rsi|macd] [reguler|tersembunyi]  (arah wajib; urutan token bebas)
+  // !scandivergent [tf] [rsi|macd]  (tanpa argumen = semua koin, 4 TF, RSI+MACD, dua arah, dua jenis).
+  // Token bull|bear dan reguler|tersembunyi tetap diterima sebagai filter tambahan (kompatibel dengan versi lama).
   if (name === "scandivergent") {
     let tf = null;
     let condition = null;
     const inds = [];
     const kinds = [];
+    const dirs = new Set();
     for (const tok of text.split(/\s+/).filter(Boolean)) {
       const low = tok.toLowerCase();
       if (TIMEFRAMES[tok.toUpperCase()]) tf = tok.toUpperCase();
-      else if (DIV_DIR_TOKENS[low]) condition = DIV_DIR_TOKENS[low];
+      else if (DIV_DIR_TOKENS[low]) dirs.add(DIV_DIR_TOKENS[low]);
       else if (DIV_IND_TOKENS[low]) inds.push(DIV_IND_TOKENS[low]);
       else if (DIV_KIND_TOKENS[low]) kinds.push(DIV_KIND_TOKENS[low]);
       else return null; // token tidak dikenal -> tampilkan penjelasan command
     }
-    if (!condition) return null;
-    return { condition, tf: tf || defaultTf, indicators: [...new Set(inds)], kinds: [...new Set(kinds)] };
+    if (dirs.size === 1) condition = [...dirs][0]; // dua arah sekaligus = semua arah
+    return { condition, tf, indicators: [...new Set(inds)], kinds: [...new Set(kinds)] };
   }
 
   // scan: token timeframe dikenali di mana saja, sisanya digabung jadi nama kondisi
@@ -627,8 +691,8 @@ function parseStatArgs(name, raw, defaultTf) {
   return res;
 }
 
-// !scandivergent memakai mesin !scan yang sama (hanya alias yang memetakan ke div_bull / div_bear).
-const STAT_RUNNERS = { ringkasan: runRingkasan, stat: runStat, scan: runScan, scandivergent: runScan };
+// !scandivergent punya runner sendiri (semua TF, Bullish+Bearish, PDF); !scan div_bull|div_bear tetap lewat runScan.
+const STAT_RUNNERS = { ringkasan: runRingkasan, stat: runStat, scan: runScan, scandivergent: runScanDivergent };
 
 module.exports = {
   STAT_COMMANDS,
@@ -648,4 +712,5 @@ module.exports = {
   moodOf,
   scanCoins,
   runScanDiv,
+  runScanDivergent,
 };

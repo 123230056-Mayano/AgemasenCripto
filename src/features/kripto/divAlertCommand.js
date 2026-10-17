@@ -10,12 +10,14 @@
  *   !alertdiv semua 4h macd         -> semua koin (hanya 1H/4H/1D, lihat DIV_ALERT_ALL_TFS)
  *   !alertdiv watchlist 1d          -> semua koin di watchlist kamu (dibaca saat tiap putaran)
  *   !alertdiv btc 4h bull reguler   -> filter arah / jenis (opsional)
+ *   !alertdiv on [tf] [rsi|macd]    -> jalan pintas: semua koin (1H/4H/1D) + watchlist untuk 15m
+ *   !alertdiv off                   -> matikan semua alarm saya (sama dengan hapus semua)
  *   !alertdiv list                  -> alarm milik saya
  *   !alertdiv hapus <id>            -> hapus satu alarm
  *   !alertdiv hapus semua           -> hapus semua alarm saya
  *
  * Hanya membuat/melihat/menghapus langganan (state/cryptoStore.js). Pemeriksaan candle closed
- * dan pengiriman alarm ada di alertMonitor.js; logika murninya di divAlertCore.js.
+ * dan pengiriman alarm (PDF gabungan per penutupan candle) ada di alertMonitor.js; logika murninya di divAlertCore.js.
  */
 
 const { t } = require("../../i18n");
@@ -25,6 +27,7 @@ const { DIV } = require("./divergence");
 const { fetchTicker } = require("./market");
 const {
   TF_LABEL,
+  TF_ORDER,
   ALERT_DIV,
   ALL_COINS_TFS,
   COIN_ALL,
@@ -52,6 +55,15 @@ const targetLabel = (lang, coin) => {
   return coin;
 };
 
+/**
+ * Kalau ini satu-satunya alarm di TF tsb, mulai dari candle closed terakhir (tidak mengejar candle yang sudah lewat).
+ * Kalau sudah ada alarm lain di TF itu, penanda yang dikelola monitor tidak disentuh.
+ */
+function armLastClosed(tf) {
+  const activeInTf = store.allDivAlerts().filter((x) => x.sub.tf === tf).length;
+  if (activeInTf <= 1 || !store.hasLastClosed(tf)) store.setLastClosed(tf, lastClosedBoundary(tf, Date.now()));
+}
+
 async function runCreate(sock, msg, { jid, lang, senderId }, args) {
   const { coin, tf, indicators, dirs, kinds } = args;
 
@@ -67,10 +79,7 @@ async function runCreate(sock, msg, { jid, lang, senderId }, args) {
   if (entry === "full") return say(sock, jid, msg, t(lang, "divalert.full", { max: store.MAX_DIV_ALERTS }));
   if (entry === "chatFull") return say(sock, jid, msg, t(lang, "divalert.chatFull", { max: store.MAX_DIV_ALERTS_PER_CHAT }));
 
-  // Kalau ini satu-satunya alarm di TF tsb, mulai dari candle closed terakhir (tidak mengejar candle yang sudah lewat).
-  // Kalau sudah ada alarm lain di TF itu, penanda yang dikelola monitor tidak disentuh.
-  const activeInTf = store.allDivAlerts().filter((x) => x.sub.tf === tf).length;
-  if (activeInTf <= 1 || !store.hasLastClosed(tf)) store.setLastClosed(tf, lastClosedBoundary(tf, Date.now()));
+  armLastClosed(tf);
 
   await say(
     sock,
@@ -87,6 +96,41 @@ async function runCreate(sock, msg, { jid, lang, senderId }, args) {
       tz: DAILY_TZ_LABEL,
     }),
   );
+}
+
+/**
+ * !alertdiv on [tf] [rsi|macd] [bull|bear] [reguler|tersembunyi]
+ * Jalan pintas menyalakan alarm untuk SEMUA koin. Tanpa [tf] = keempat TF: 1H/4H/1D untuk semua koin, sedangkan
+ * 15m hanya untuk watchlist (semua koin di 15m terlalu berat, lihat ALL_COINS_TFS). Memakai addDivAlert yang sama
+ * dengan sintaks langganan, jadi batas alarm dan dedupe tidak berubah.
+ */
+async function runOn(sock, msg, { jid, lang, senderId }, args) {
+  const { tf, indicators, dirs, kinds } = args;
+  const tfs = tf ? [tf] : [...TF_ORDER].reverse(); // 15M, 1H, 4H, 1D (urutan tampil sama seperti menu)
+  const created = [];
+  let skipped = 0;
+  let full = null;
+  for (const x of tfs) {
+    const coin = ALL_COINS_TFS.includes(x) ? COIN_ALL : COIN_WATCHLIST;
+    const entry = store.addDivAlert(senderId, { chat: jid, coin, tf: x, indicators, dirs, kinds });
+    if (typeof entry === "string") {
+      skipped++;
+      if (entry !== "exists") full = entry;
+      continue;
+    }
+    armLastClosed(x);
+    created.push(entry);
+  }
+  if (!created.length) {
+    if (full === "full") return say(sock, jid, msg, t(lang, "divalert.full", { max: store.MAX_DIV_ALERTS }));
+    if (full === "chatFull") return say(sock, jid, msg, t(lang, "divalert.chatFull", { max: store.MAX_DIV_ALERTS_PER_CHAT }));
+    return say(sock, jid, msg, t(lang, "divalert.exists"));
+  }
+  const lines = created.map((a) => t(lang, "divalert.on.line", { target: targetLabel(lang, a.coin), tf: TF_LABEL[a.tf], filters: describeFilters(lang, a) })).join("\n");
+  const text =
+    t(lang, "divalert.on.created", { lines, dest: t(lang, isGroup(jid) ? "divalert.dest.group" : "divalert.dest.private") }) +
+    (skipped ? "\n" + t(lang, "divalert.on.skipped", { n: skipped }) : "");
+  await say(sock, jid, msg, text);
 }
 
 async function runList(sock, msg, { jid, lang, senderId }) {
@@ -109,9 +153,10 @@ async function runDelete(sock, msg, { jid, lang, senderId }, { id }) {
   await say(sock, jid, msg, t(lang, ok ? "divalert.deleted" : "divalert.notFound", { id }));
 }
 
-async function runDeleteAll(sock, msg, { jid, lang, senderId }) {
+async function runDeleteAll(sock, msg, { jid, lang, senderId }, args = {}) {
   const n = store.clearDivAlerts(senderId);
-  await say(sock, jid, msg, t(lang, n ? "divalert.deletedAll" : "divalert.list.empty", { n }));
+  const key = !n ? "divalert.list.empty" : args.viaOff ? "divalert.off.done" : "divalert.deletedAll";
+  await say(sock, jid, msg, t(lang, key, { n }));
 }
 
 async function runAlertDiv(sock, msg, ctx, args) {
@@ -121,7 +166,9 @@ async function runAlertDiv(sock, msg, ctx, args) {
     case "delete":
       return runDelete(sock, msg, ctx, args);
     case "deleteAll":
-      return runDeleteAll(sock, msg, ctx);
+      return runDeleteAll(sock, msg, ctx, args);
+    case "on":
+      return runOn(sock, msg, ctx, args);
     default:
       return runCreate(sock, msg, ctx, args);
   }

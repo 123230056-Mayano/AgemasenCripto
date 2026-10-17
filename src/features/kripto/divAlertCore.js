@@ -34,8 +34,10 @@ const ALERT_DIV = {
   DELAY_MS: posInt(process.env.DIV_DELAY_MS, 10_000), // tunggu setelah candle tutup agar data Binance final (5-15 dtk)
   RETRY_MS: 60_000, // jeda antar percobaan ulang kalau sebagian gagal
   MAX_ATTEMPTS: 3, // total percobaan per candle closed sebelum menyerah (dedupe mencegah ganda)
-  SUMMARY_THRESHOLD: posInt(process.env.DIV_SUMMARY_THRESHOLD, 5), // > ini -> satu pesan ringkasan
-  SUMMARY_MAX_ROWS: 25, // baris maksimum di pesan ringkasan
+  // Ambang teks vs PDF (usulan PDF 17 Okt, BELUM diputuskan client): PDF bila sinyal > PDF_MIN_SIGNALS
+  // ATAU jumlah TF yang punya sinyal >= PDF_MIN_TFS (0 = aturan TF dimatikan). Selain itu teks singkat.
+  PDF_MIN_SIGNALS: posInt(process.env.DIV_PDF_MIN_SIGNALS ?? process.env.DIV_SUMMARY_THRESHOLD, 5),
+  PDF_MIN_TFS: Number.isInteger(Number(process.env.DIV_PDF_MIN_TFS)) && Number(process.env.DIV_PDF_MIN_TFS) >= 0 ? Number(process.env.DIV_PDF_MIN_TFS) : 2,
   MAX_MSG_PER_CHAT_HOUR: posInt(process.env.DIV_MAX_MSG_PER_CHAT_HOUR, 20), // pengaman terakhir
   SEND_GAP_MS: posInt(process.env.DIV_SEND_GAP_MS, 1_000), // jeda antar pesan supaya tidak terlihat spam
   FRESH_RATIO: 0.8, // minimal 80% koin snapshot sudah memuat candle closed terbaru
@@ -163,18 +165,67 @@ function groupByRecipient(items) {
 }
 
 // =====================================================================
-// 3. Perencanaan pesan + pembatas laju
+// 3. Laporan gabungan (teks singkat atau PDF) + pembatas laju
 // =====================================================================
+const DIR_ORDER = ["bull", "bear"];
+const cmpRow = (a, b) => a.coin.localeCompare(b.coin) || a.indicator.localeCompare(b.indicator) || a.kind.localeCompare(b.kind);
+
 /**
- * Banyak sinyal -> satu ringkasan; sedikit -> satu pesan per sinyal. Kalau sisa jatah pesan chat
- * tidak cukup untuk pesan satuan, dipakai satu ringkasan; kalau jatah habis, tidak ada pesan
- * (sinyal TIDAK ditandai terkirim, jadi dicoba lagi di putaran berikutnya selama masih baru).
- * @returns {Array<{items: object[], summary: boolean}>} daftar pesan yang akan dikirim
+ * Kelompokkan sinyal per TF (urut TF_ORDER: 1D > 4H > 1H > 15m), lalu Bullish / Bearish.
+ * TF di `tfs` tanpa sinyal tetap muncul (bagian kosong), supaya jelas TF itu sudah dicek.
+ * @param {Array<{tf:string, coin:string, indicator:string, kind:string, dir:'bull'|'bear'}>} items
+ * @param {string[]} tfs kunci TF yang dilaporkan ("1D", "4H", "1H", "15M")
+ * @returns {Array<{tf:string, key:string, bull:object[], bear:object[]}>} tf = label tampil ("15m")
  */
-function planMessages(items, { threshold = ALERT_DIV.SUMMARY_THRESHOLD, remaining }) {
-  if (!items.length || remaining <= 0) return [];
-  if (items.length <= threshold && items.length <= remaining) return items.map((it) => ({ items: [it], summary: false }));
-  return [{ items, summary: true }];
+function buildSections(items, tfs) {
+  return TF_ORDER.filter((k) => tfs.includes(k)).map((k) => {
+    const mine = items.filter((it) => it.tf === k);
+    const pick = (dir) => mine.filter((it) => it.dir === dir).map((it) => ({ coin: it.coin, indicator: it.indicator, kind: it.kind })).sort(cmpRow);
+    return { key: k, tf: TF_LABEL[k], bull: pick("bull"), bear: pick("bear") };
+  });
+}
+
+const sectionCount = (s) => s.bull.length + s.bear.length;
+const totalSignals = (sections) => sections.reduce((n, s) => n + sectionCount(s), 0);
+
+/**
+ * @returns {"none"|"text"|"pdf"} none = tidak ada sinyal.
+ */
+function chooseReportMode(sections, { minSignals = ALERT_DIV.PDF_MIN_SIGNALS, minTfs = ALERT_DIV.PDF_MIN_TFS } = {}) {
+  const n = totalSignals(sections);
+  if (!n) return "none";
+  const tfsWithSignals = sections.filter((s) => sectionCount(s) > 0).length;
+  if (n > minSignals || (minTfs > 0 && tfsWithSignals >= minTfs)) return "pdf";
+  return "text";
+}
+
+/** "1D 3, 4H 2, 1H 0" (hanya dipakai di teks pengantar). */
+const countsLabel = (sections) => sections.map((s) => `${s.tf}: ${sectionCount(s)}`).join(", ");
+
+/** Pesan pengantar SATU baris sebelum PDF. mode: "alert" | "scan". */
+function buildPdfIntro(lang, sections, { mode = "alert", time }) {
+  return t(lang, `divreport.intro.${mode}`, { time, counts: countsLabel(sections), n: totalSignals(sections) });
+}
+
+/**
+ * Teks singkat (sinyal sedikit): dikelompokkan per TF lalu Bullish / Bearish. Tidak ada batas baris
+ * (kalau sinyalnya banyak, chooseReportMode sudah memilih PDF).
+ */
+function buildGroupedText(lang, sections, { mode = "alert", time, filters = "" }) {
+  const blocks = [];
+  for (const s of sections) {
+    const n = sectionCount(s);
+    if (!n) continue;
+    const lines = [t(lang, "divreport.tfHead", { tf: s.tf, n })];
+    for (const dir of DIR_ORDER) {
+      const rows = s[dir];
+      if (!rows.length) continue;
+      lines.push(t(lang, `divreport.group.${dir}`));
+      for (const r of rows) lines.push(t(lang, "divreport.row", { coin: r.coin, ind: indLabel(r.indicator), kind: t(lang, `div.kind.${r.kind}`) }));
+    }
+    blocks.push(lines.join("\n"));
+  }
+  return t(lang, `divreport.head.${mode}`, { n: totalSignals(sections), time, filters }) + "\n\n" + blocks.join("\n\n") + "\n\n" + t(lang, "divreport.foot");
 }
 
 /** Batas pesan per chat per jam (jendela bergeser, di memori; reset saat bot restart). */
@@ -210,10 +261,14 @@ const LIST_TOKENS = new Set(["list", "daftar", "ls"]);
 const DELETE_TOKENS = new Set(["hapus", "delete", "del", "remove", "rm"]);
 const ALL_TOKENS = new Set(["semua", "all"]);
 const WATCH_TOKENS = new Set(["watchlist", "wl"]);
+const ON_TOKENS = new Set(["on", "aktif", "nyala"]);
+const OFF_TOKENS = new Set(["off", "mati", "matikan"]);
 const COIN_RE = /^[A-Z0-9]{1,15}$/;
 
 /**
  * !alertdiv <koin|semua|watchlist> [tf] [rsi|macd] [bull|bear] [reguler|tersembunyi]
+ * !alertdiv on [tf] [rsi|macd] [bull|bear] [reguler|tersembunyi]   (semua koin; 15m lewat watchlist)
+ * !alertdiv off                                                      (matikan semua alarm saya)
  * !alertdiv list
  * !alertdiv hapus <id|semua>
  * @returns {object|null} null kalau format salah (-> tampilkan penjelasan command)
@@ -224,6 +279,13 @@ function parseAlertDivArgs(raw, defaultTf) {
   const first = tokens[0].toLowerCase();
 
   if (LIST_TOKENS.has(first)) return tokens.length === 1 ? { action: "list" } : null;
+
+  // on/off (item 05): on = jalan pintas "semua koin", off = hapus semua alarm milik saya.
+  if (OFF_TOKENS.has(first)) return tokens.length === 1 ? { action: "deleteAll", viaOff: true } : null;
+  if (ON_TOKENS.has(first)) {
+    const parsed = parseAlertDivArgs(["semua", ...tokens.slice(1)].join(" "), null);
+    return parsed && parsed.action === "create" ? { ...parsed, action: "on" } : null;
+  }
 
   if (DELETE_TOKENS.has(first)) {
     if (tokens.length !== 2) return null;
@@ -295,20 +357,6 @@ function buildSingleText(lang, it) {
   });
 }
 
-function buildSummaryText(lang, items, maxRows = ALERT_DIV.SUMMARY_MAX_ROWS) {
-  const shown = items.slice(0, maxRows);
-  const rows = shown.map((it, i) =>
-    t(lang, "divalert.msg.row", { i: i + 1, coin: it.coin, ind: indLabel(it.indicator), kd: kindDir(lang, it.kind, it.dir), tf: TF_LABEL[it.tf] || it.tf }),
-  );
-  const more = items.length > shown.length ? "\n" + t(lang, "divalert.msg.more", { n: items.length - shown.length }) : "";
-  const latest = Math.max(...items.map((it) => it.confirmedCloseTime));
-  return t(lang, "divalert.msg.summary", {
-    n: items.length,
-    time: fmtCandleTime(lang, latest),
-    rows: rows.join("\n") + more,
-  });
-}
-
 /** Ringkasan filter alarm: "RSI/MACD" + arah + jenis kalau dibatasi. */
 function describeFilters(lang, sub) {
   const parts = [sub.indicators.map((i) => i.toUpperCase()).join("/")];
@@ -333,11 +381,14 @@ module.exports = {
   dedupeKey,
   collectItems,
   groupByRecipient,
-  planMessages,
+  buildSections,
+  totalSignals,
+  chooseReportMode,
+  buildPdfIntro,
+  buildGroupedText,
   ChatRateLimiter,
   parseAlertDivArgs,
   fmtCandleTime,
   buildSingleText,
-  buildSummaryText,
   describeFilters,
 };
