@@ -69,6 +69,9 @@ function ema(values, period) {
 // ---------- gaya & helper bersama (sama dengan chart !scandivergent) ----------
 const { C, fontFamily, fmtPrice, niceStep, tickLabel, arrow, dot, chip } = require("../kripto/chartKit");
 
+const { macd: calcMacd, rsi: calcRsi } = require("../kripto/indicators");
+const { alignToCandles, getDominance } = require("../kripto/dominance");
+
 const SWING_WIN = 3; // sama dengan computeLevels() di kripto/market.js (swing high/low +-3 candle)
 const SWING_LOOKBACK = 150; // sama dengan computeLevels()
 const EMA_SLOPE_BARS = 20; // panah EMA: dari nilai EMA 20 candle lalu ke nilai terakhir
@@ -117,9 +120,10 @@ function findSwingIdx(candles, level, isHigh) {
  * @param {string} o.tf                    "15M" | "1H" | "4H" | "1D"
  * @param {number[]} [o.resistance]
  * @param {number[]} [o.support]
+ * @param {{now:object|null, series:Array|null}|null} [o.dominance]  hasil getDominance(); null = panel dominance dilewati
  * @returns {Buffer} PNG
  */
-function renderChart({ candles, coin, tf, resistance = [], support = [] }) {
+function renderChart({ candles, coin, tf, resistance = [], support = [], dominance = null }) {
   if (!candles || candles.length < 10) throw new Error("CANDLES_TOO_FEW");
   const family = fontFamily();
 
@@ -162,15 +166,26 @@ function renderChart({ candles, coin, tf, resistance = [], support = [] }) {
   const T = 74;
   const hP = 700;
   const B = 52;
-  const H = T + hP + B;
+  const gap = 16;
+  const hSub = 200; // tinggi tiap panel bawah (MACD, RSI, Dominance)
+  const withDom = !!(dominance && (dominance.series || dominance.now));
+  const nSub = withDom ? 3 : 2;
+  const H = T + hP + nSub * (gap + hSub) + B;
   const cw = W - Lm - Rm;
   const canvas = createCanvas(W, H);
   const g = canvas.getContext("2d");
   g.fillStyle = C.bg;
   g.fillRect(0, 0, W, H);
   const pPrice = { x: Lm, y: T, w: cw, h: hP };
-  g.fillStyle = C.panel;
-  g.fillRect(pPrice.x, pPrice.y, pPrice.w, pPrice.h);
+  const pMacd = { x: Lm, y: T + hP + gap, w: cw, h: hSub };
+  const pRsi = { x: Lm, y: pMacd.y + hSub + gap, w: cw, h: hSub };
+  const pDom = withDom ? { x: Lm, y: pRsi.y + hSub + gap, w: cw, h: hSub } : null;
+  const lastPanel = pDom || pRsi;
+  const panelsBottom = lastPanel.y + lastPanel.h;
+  for (const p of [pPrice, pMacd, pRsi, ...(pDom ? [pDom] : [])]) {
+    g.fillStyle = C.panel;
+    g.fillRect(p.x, p.y, p.w, p.h);
+  }
 
   const Yp = (p) => pPrice.y + ((hi - p) / (hi - lo)) * pPrice.h;
   const slot = cw / nb;
@@ -202,11 +217,14 @@ function renderChart({ candles, coin, tf, resistance = [], support = [] }) {
     const xx = Math.round(X(from + i)) + 0.5;
     g.strokeStyle = C.grid;
     g.beginPath();
-    g.moveTo(xx, T);
-    g.lineTo(xx, pPrice.y + pPrice.h);
-    g.stroke();
+    for (const p of [pPrice, pMacd, pRsi, ...(pDom ? [pDom] : [])]) {
+      g.beginPath();
+      g.moveTo(xx, p.y);
+      g.lineTo(xx, p.y + p.h);
+      g.stroke();
+    }
     g.fillStyle = C.axis;
-    g.fillText(tickLabel(bars[i].t, tf), xx, pPrice.y + pPrice.h + 14);
+    g.fillText(tickLabel(bars[i].t, tf), xx, panelsBottom + 14);
   }
 
   // ----- garis support / resistance (di bawah candle) -----
@@ -349,6 +367,160 @@ function renderChart({ candles, coin, tf, resistance = [], support = [] }) {
   }
   for (const [txt, cx, cy, color] of chips) chip(g, family, txt, cx, cy, pPrice, color, placed);
 
+  // ----- panel MACD / RSI / Dominance (susunan sama dengan screenshot referensi klien) -----
+  const frame = (p) => {
+    g.strokeStyle = "#2a303c";
+    g.lineWidth = 1;
+    g.strokeRect(p.x + 0.5, p.y + 0.5, p.w, p.h);
+  };
+  const axisTag = (txt, yy, color) => {
+    g.save();
+    g.font = `bold 18px ${family}`;
+    g.fillStyle = color;
+    g.fillRect(Lm + cw + 4, yy - 12, Rm - 8, 24);
+    g.fillStyle = "#fff";
+    g.textAlign = "left";
+    g.textBaseline = "middle";
+    g.fillText(txt, Lm + cw + 10, yy + 1);
+    g.restore();
+  };
+  const line = (arr, Y, color, width = 2) => {
+    g.strokeStyle = color;
+    g.lineWidth = width;
+    g.beginPath();
+    let on = false;
+    for (let i = from; i < n; i++) {
+      if (arr[i] == null) continue;
+      if (!on) {
+        g.moveTo(X(i), Y(arr[i]));
+        on = true;
+      } else g.lineTo(X(i), Y(arr[i]));
+    }
+    g.stroke();
+  };
+  const panelLabel = (p, parts) => {
+    g.font = `20px ${family}`;
+    g.textAlign = "left";
+    g.textBaseline = "middle";
+    let x = p.x + 10;
+    for (const [txt, color] of parts) {
+      g.fillStyle = color;
+      g.fillText(txt, x, p.y + 18);
+      x += g.measureText(txt).width + 22;
+    }
+  };
+  const f2 = (v) => (v == null ? "-" : Math.abs(v) >= 100 ? v.toFixed(1) : Math.abs(v) >= 1 ? v.toFixed(2) : v.toFixed(4));
+
+  // MACD (12, 26, 9)
+  {
+    const m = calcMacd(closes);
+    let mLo = 0;
+    let mHi = 0;
+    for (let i = from; i < n; i++) for (const v of [m.hist[i], m.macd[i], m.signal[i]]) if (v != null) { mLo = Math.min(mLo, v); mHi = Math.max(mHi, v); }
+    if (mHi === mLo) { mLo = -1; mHi = 1; }
+    const mp = (mHi - mLo) * 0.12;
+    mLo -= mp;
+    mHi += mp;
+    const Ym = (v) => pMacd.y + ((mHi - v) / (mHi - mLo)) * pMacd.h;
+    g.strokeStyle = "#2a303c";
+    g.beginPath();
+    g.moveTo(pMacd.x, Math.round(Ym(0)) + 0.5);
+    g.lineTo(pMacd.x + pMacd.w, Math.round(Ym(0)) + 0.5);
+    g.stroke();
+    for (let i = from; i < n; i++) {
+      const h = m.hist[i];
+      if (h == null) continue;
+      g.fillStyle = h >= 0 ? C.up : C.down;
+      g.globalAlpha = 0.75;
+      g.fillRect(X(i) - bodyW / 2, Math.min(Ym(0), Ym(h)), bodyW, Math.max(1, Math.abs(Ym(h) - Ym(0))));
+    }
+    g.globalAlpha = 1;
+    line(m.macd, Ym, C.macdLine);
+    line(m.signal, Ym, C.macdSig);
+    panelLabel(pMacd, [
+      ["MACD close 12 26 9", C.axis],
+      [f2(m.macd[n - 1]), C.macdLine],
+      [f2(m.signal[n - 1]), C.macdSig],
+      [f2(m.hist[n - 1]), (m.hist[n - 1] ?? 0) >= 0 ? C.up : C.down],
+    ]);
+    frame(pMacd);
+  }
+
+  // RSI 14 (skala tetap 0..100, garis 70 / 30)
+  {
+    const r = calcRsi(closes);
+    const Yr = (v) => pRsi.y + ((104 - v) / 108) * pRsi.h;
+    g.save();
+    g.fillStyle = "rgba(167,139,250,0.07)";
+    g.fillRect(pRsi.x, Yr(70), pRsi.w, Yr(30) - Yr(70));
+    g.setLineDash([6, 6]);
+    g.strokeStyle = "#3a4152";
+    for (const lv of [70, 50, 30]) {
+      g.beginPath();
+      g.moveTo(pRsi.x, Math.round(Yr(lv)) + 0.5);
+      g.lineTo(pRsi.x + pRsi.w, Math.round(Yr(lv)) + 0.5);
+      g.stroke();
+    }
+    g.restore();
+    line(r, Yr, C.rsiLine);
+    g.fillStyle = C.axis;
+    g.font = `18px ${family}`;
+    g.textAlign = "left";
+    g.textBaseline = "middle";
+    for (const lv of [70, 50, 30]) g.fillText(String(lv), pRsi.x + pRsi.w + 10, Yr(lv));
+    panelLabel(pRsi, [["RSI 14 close", C.axis], [f2(r[n - 1]), C.rsiLine]]);
+    frame(pRsi);
+  }
+
+  // Dominance: BTC.D (utama) + ETH.D bila ada deretnya. Deret waktu dari CoinMarketCap; kalau hanya angka terkini yang
+  // tersedia, panel tetap tampil dengan nilai terkini saja (tanpa garis).
+  if (pDom) {
+    const al = alignToCandles(dominance.series, candles);
+    const btcS = al.map((q) => (q ? q.btc : null));
+    const ethS = al.map((q) => (q && q.eth != null ? q.eth : null));
+    const hasLine = btcS.slice(from).some((v) => v != null);
+    const now = dominance.now;
+    if (hasLine) {
+      // BTC.D di sumbu kiri-kanan panel sendiri; ETH.D digambar di skala yang sama bila rentangnya ikut masuk
+      const vals = [...btcS.slice(from), ...ethS.slice(from)].filter((v) => v != null);
+      let dLo = Math.min(...btcS.slice(from).filter((v) => v != null));
+      let dHi = Math.max(...btcS.slice(from).filter((v) => v != null));
+      const ethVals = ethS.slice(from).filter((v) => v != null);
+      const showEth = ethVals.length > 1 && Math.max(...vals) - Math.min(...vals) < 45;
+      if (showEth) { dLo = Math.min(dLo, ...ethVals); dHi = Math.max(dHi, ...ethVals); }
+      if (dHi === dLo) { dLo -= 0.5; dHi += 0.5; }
+      const dp = (dHi - dLo) * 0.15;
+      dLo -= dp;
+      dHi += dp;
+      const Yd = (v) => pDom.y + ((dHi - v) / (dHi - dLo)) * pDom.h;
+      const stepD = niceStep(dHi - dLo, 4);
+      g.font = `18px ${family}`;
+      g.textAlign = "left";
+      g.textBaseline = "middle";
+      for (let v = Math.ceil(dLo / stepD) * stepD; v <= dHi; v += stepD) {
+        const yy = Math.round(Yd(v)) + 0.5;
+        g.strokeStyle = C.grid;
+        g.beginPath();
+        g.moveTo(pDom.x, yy);
+        g.lineTo(pDom.x + pDom.w, yy);
+        g.stroke();
+        g.fillStyle = C.axis;
+        g.fillText(`${v.toFixed(stepD < 1 ? 1 : 0)}%`, pDom.x + pDom.w + 10, yy);
+      }
+      line(btcS, Yd, "#f59e0b", 2.4);
+      if (showEth) line(ethS, Yd, "#60a5fa", 1.8);
+      const lastBtc = [...btcS].reverse().find((v) => v != null);
+      axisTag(`${lastBtc.toFixed(2)}%`, Yd(lastBtc), "#f59e0b");
+    }
+    const parts = [[hasLine ? "Dominance (CoinMarketCap)" : "Dominance (CoinGecko)", C.axis]];
+    parts.push([`BTC.D ${now?.btc != null ? now.btc.toFixed(2) + "%" : "-"}`, "#f59e0b"]);
+    if (now?.eth != null) parts.push([`ETH.D ${now.eth.toFixed(2)}%`, "#60a5fa"]);
+    if (now?.usdt != null) parts.push([`USDT.D ${now.usdt.toFixed(2)}%`, "#9ca3af"]);
+    if (!hasLine) parts.push(["(histori tidak tersedia, hanya nilai terkini)", C.axis]);
+    panelLabel(pDom, parts);
+    frame(pDom);
+  }
+
   // ----- judul + legenda (sama dengan chart divergence) -----
   g.textAlign = "left";
   g.textBaseline = "middle";
@@ -389,10 +561,12 @@ async function buildChartPng(data, { candles } = {}) {
   const coin = main.coin || report.asset;
   const tf = data.backend?.timeframe || report.timeframe;
   const cs = candles || (await fetchCandles(coin, tf));
+  const dominance = await getDominance(tf, cs[Math.max(0, cs.length - VISIBLE)].t).catch(() => null);
   return renderChart({
     candles: cs,
     coin,
     tf,
+    dominance,
     resistance: (report.key_levels?.resistance || []).filter((v) => typeof v === "number"),
     support: (report.key_levels?.support || []).filter((v) => typeof v === "number"),
   });

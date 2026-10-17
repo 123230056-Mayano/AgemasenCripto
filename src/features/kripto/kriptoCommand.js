@@ -34,6 +34,7 @@ const { t } = require("../../i18n");
 const { sendCommandDetail } = require("../menu/menu");
 const { getSenderJid } = require("../../utils/whatsapp");
 const { renderChart } = require("../analisis/analisisChart");
+const { getDominance } = require("./dominance");
 const { getDefaultTf } = require("./defaultTf");
 const { getAvailableCoins, filterCoins, buildMessages } = require("./kriptoList");
 const { PASAR_COMMANDS, PASAR_RUNNERS, parsePasarArgs } = require("./pasar");
@@ -104,7 +105,8 @@ async function runHarga(sock, msg, { jid, lang }, { coin }) {
 async function runChart(sock, msg, { jid, lang }, { coin, tf }) {
   const [candles, tick] = await Promise.all([fetchCandles(coin, tf), fetchTicker(coin)]);
   const { resistance, support } = computeLevels(candles, tick.price);
-  const png = renderChart({ candles, coin, tf: TF_LABEL[tf], resistance, support });
+  const dominance = await getDominance(TF_LABEL[tf].toUpperCase(), candles[Math.max(0, candles.length - 110)].t).catch(() => null);
+  const png = renderChart({ candles, coin, tf: TF_LABEL[tf], resistance, support, dominance });
   await sock.sendMessage(
     jid,
     {

@@ -14,6 +14,7 @@
 
 const { PDFDocument, StandardFonts, rgb } = require("pdf-lib");
 const { buildChartPng } = require("./analisisChart");
+const { getDominance } = require("../kripto/dominance");
 
 const PAGE_W = 595.28;
 const PAGE_H = 841.89;
@@ -116,6 +117,17 @@ async function buildAnalysisPdf(data, fx, opts = {}) {
   } catch (err) {
     console.log("[analisis] grafik dilewati:", err.response?.status || err.message);
   }
+
+  // Dominance: pakai angka dari web analyst bila ada, kalau tidak ambil langsung (CoinGecko). Gagal -> "-".
+  const domNow = ctx.btc_dominance?.btc_dominance_pct != null
+    ? { btc: Number(ctx.btc_dominance.btc_dominance_pct), eth: null, usdt: null }
+    : null;
+  let dom = null;
+  try {
+    dom = await getDominance(data.backend?.timeframe || report.timeframe, Date.now() - 30 * 86_400_000);
+  } catch { /* abaikan */ }
+  const domBtc = domNow?.btc ?? dom?.now?.btc ?? null;
+  const pctOrDash = (v) => (typeof v === "number" && isFinite(v) ? `${v.toFixed(2)}%` : "-");
 
   pdf.setTitle(`Analisis ${main.coin || ""} ${data.backend?.timeframe || ""}`.trim());
   pdf.setAuthor("AGEMASEN Crypto Analyst");
@@ -238,7 +250,7 @@ async function buildAnalysisPdf(data, fx, opts = {}) {
     page.drawImage(chartImg, { x: MARGIN, y: y - h, width: w, height: h });
     y -= h + 4;
     text(
-      "Candle yang sudah tutup, zona waktu WIB. Garis R/S adalah level kunci dari analisis; EMA dihitung dari data yang sama dengan indikator di bawah.",
+      "Candle yang sudah tutup, zona waktu WIB. Garis R/S adalah level kunci dari analisis; EMA dihitung dari data yang sama dengan indikator di bawah. Panel bawah: MACD (12,26,9), RSI 14, dan dominance (BTC.D / ETH.D) dari CoinMarketCap + CoinGecko.",
       { size: 8, color: C.muted },
     );
   }
@@ -256,7 +268,8 @@ async function buildAnalysisPdf(data, fx, opts = {}) {
     ["MACD / Signal / Histogram", ind.macd ? `${fmtNum(ind.macd.macd)} / ${fmtNum(ind.macd.signal)} / ${fmtNum(ind.macd.histogram)}` : "-"],
     ["ATR 14", fmtNum(ind.atr14)],
     ["Fear & Greed", ctx.fear_greed ? `${ctx.fear_greed.value} (${ctx.fear_greed.label})` : "-"],
-    ["Dominasi BTC", ctx.btc_dominance ? `${ctx.btc_dominance.btc_dominance_pct}%` : "-"],
+    ["Dominasi BTC (BTC.D)", `${pctOrDash(domBtc)}  (sumber: ${domNow ? "web analyst" : "CoinGecko"})`],
+    ["Dominasi ETH / USDT", `${pctOrDash(dom?.now?.eth)} / ${pctOrDash(dom?.now?.usdt)}`],
   ]);
 
   // ================= LEVEL KUNCI =================
