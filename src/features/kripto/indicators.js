@@ -11,7 +11,7 @@
 const { INDICATOR_CONFIG: CFG } = require("../../config/indicatorConfig");
 
 const EMA_PERIODS = [...CFG.EMA_PERIODS];
-const CROSS_LOOKBACK = 10; // golden/death cross dianggap "baru" kalau terjadi <= 10 candle lalu
+const CROSS_LOOKBACK = CFG.CROSS_LOOKBACK; // golden/death cross dianggap "baru" kalau terjadi <= CROSS_LOOKBACK candle lalu (config)
 
 function ema(values, period) {
   const k = 2 / (period + 1);
@@ -99,6 +99,27 @@ function detectCross(series, lookback = CROSS_LOOKBACK) {
   return detectCrossPair(series, 50, 200, lookback);
 }
 
+
+/**
+ * Status crossover semua pasangan di CFG.CROSS_PAIRS (default 20/50 dan 50/200) untuk !mtf.
+ * Membedakan tiga keadaan per pasangan:
+ *   { pair, status: "cross", type, barsAgo }  cross terjadi dalam lookback
+ *   { pair, status: "none" }                  data cukup, tidak ada cross dalam lookback  (tampil "-")
+ *   { pair, status: "na" }                    EMA lambat belum terisi / data kurang       (tampil "n/a", bukan error)
+ * @param {Record<number,(number|null)[]>} series hasil computeEmas().series
+ * @returns {{ pair: string, status: "cross"|"none"|"na", type?: string, barsAgo?: number }[]}
+ */
+function detectCrossStatuses(series, lookback = CROSS_LOOKBACK, pairs = CFG.CROSS_PAIRS) {
+  return pairs.map(([fastP, slowP]) => {
+    const pair = `${fastP}/${slowP}`;
+    const fast = series[fastP];
+    const slow = series[slowP];
+    const ready = (arr) => Array.isArray(arr) && arr.length > 0 && arr[arr.length - 1] != null;
+    if (!ready(fast) || !ready(slow)) return { pair, status: "na" };
+    const c = detectCrossPair(series, fastP, slowP, lookback);
+    return c ? { pair, status: "cross", type: c.type, barsAgo: c.barsAgo } : { pair, status: "none" };
+  });
+}
 
 /**
  * Status tren cadangan untuk koin baru (< 200 candle): hanya EMA 20 dan 50.
@@ -261,6 +282,7 @@ module.exports = {
   latestIndicators,
   detectCross,
   detectCrossPair,
+  detectCrossStatuses,
   strengthScore,
   rsi,
   macd,

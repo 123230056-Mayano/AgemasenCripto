@@ -40,7 +40,7 @@ const { BIAS_COMMANDS, BIAS_RUNNERS, parseBiasArgs } = require("./bias");
 const { DIVALERT_COMMANDS, DIVALERT_RUNNERS, parseDivAlertArgs } = require("./divAlertCommand");
 const { WATCH_COMMANDS, WATCH_RUNNERS, parseWatchArgs } = require("./watchlist");
 const { UTIL_COMMANDS, UTIL_RUNNERS, parseUtilArgs } = require("./utilitas");
-const { EMA_PERIODS, computeEmas, classifyTrendAuto, detectCross } = require("./indicators");
+const { EMA_PERIODS, CROSS_LOOKBACK, computeEmas, classifyTrendAuto, detectCross, detectCrossStatuses } = require("./indicators");
 const {
   TIMEFRAMES,
   TF_LABEL,
@@ -148,7 +148,7 @@ async function analyze(coin, tf, tick) {
   const [candles, ticker] = await Promise.all([fetchCandles(coin, tf), tick ? Promise.resolve(tick) : fetchTicker(coin)]);
   const { series, latest } = computeEmas(candles);
   const info = classifyTrendAuto(ticker.price, latest);
-  return { candles, tick: ticker, series, latest, info, cross: detectCross(series) };
+  return { candles, tick: ticker, series, latest, info, cross: detectCross(series), crosses: detectCrossStatuses(series) };
 }
 
 const capTrend = (trend) => trend.charAt(0).toUpperCase() + trend.slice(1); // Bullish / Bearish / Sideways
@@ -209,6 +209,25 @@ async function runTren(sock, msg, { jid, lang }, { coin, tf }) {
 }
 
 const MTF_TFS = ["15M", "1H", "4H", "1D"];
+
+/** Sel tabel crossover: "Golden 3c" / "Death baru" / "-" (tidak ada) / "n/a" (data kurang). */
+function crossCell(lang, c) {
+  if (c.status === "na") return "n/a";
+  if (c.status === "none") return "-";
+  const name = c.type === "golden" ? "Golden" : "Death";
+  return c.barsAgo === 0 ? `${name} ${t(lang, "kripto.mtf.crossNow")}` : `${name} ${c.barsAgo}c`;
+}
+
+/** Tabel crossover per TF (kolom = CROSS_PAIRS). results sejajar dengan MTF_TFS. */
+function buildCrossTable(lang, results) {
+  const pairs = results[0].crosses.map((c) => c.pair);
+  const w = 11; // "Golden baru" = 11 karakter
+  const header = `${pad(t(lang, "kripto.mtf.colTf"), 4)} ${pairs.map((p) => pad(p, w)).join(" ")}`.trimEnd();
+  const rows = results.map(
+    (r, i) => `${pad(TF_LABEL[MTF_TFS[i]], 4)} ${r.crosses.map((c) => pad(crossCell(lang, c), w)).join(" ")}`.trimEnd(),
+  );
+  return "```\n" + [header, ...rows].join("\n") + "\n```\n" + t(lang, "kripto.mtf.crossLegend", { n: CROSS_LOOKBACK });
+}
 const pad = (s, n) => String(s).padEnd(n, " ");
 
 /** Level terdekat (R1 atau S1, mana yang lebih dekat ke harga). */
@@ -250,6 +269,8 @@ async function runMtf(sock, msg, { jid, lang }, { coin }) {
         coin,
         price: fmtUsd(tick.price),
         table: "```\n" + [header, ...rows].join("\n") + "\n```",
+        crossTitle: t(lang, "kripto.mtf.crossTitle"),
+        cross: buildCrossTable(lang, results),
         verdict,
       }),
     },

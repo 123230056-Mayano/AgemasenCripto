@@ -19,6 +19,10 @@ const INDICATOR_CONFIG = Object.freeze({
   // Jumlah candle closed minimum agar indikator terisi penuh.
   EMA_FULL_MIN: 200, // EMA 200 + klasifikasi tren penuh
   EMA_LIMITED_MIN: 50, // di bawah EMA_FULL_MIN: tren cadangan EMA 20/50
+  // Item 02 EMA Crossover. Cross dianggap "baru" bila terjadi <= CROSS_LOOKBACK candle closed lalu.
+  CROSS_LOOKBACK: 10,
+  // Pasangan [cepat, lambat] yang ditampilkan di !mtf (urutan = urutan kolom).
+  CROSS_PAIRS: Object.freeze([Object.freeze([20, 50]), Object.freeze([50, 200])]),
 });
 
 module.exports = { INDICATOR_CONFIG };
