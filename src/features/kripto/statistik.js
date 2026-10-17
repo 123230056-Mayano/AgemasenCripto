@@ -13,8 +13,9 @@
  *                div_bull, div_bear (divergence RSI/MACD, lihat divergence.js).
  * Alias: !scandivergent (!scandiv) bull|bear [tf] [rsi|macd] [reguler|tersembunyi].
  *
- * Timeframe: !ringkasan & !stat memakai default pengguna (!tf, awal 4H);
- * !scan memakai [tf] kalau diisi.
+ * Timeframe: !ringkasan [tf] & !stat [tf] (15m/1H/4H/1D). TANPA argumen = tabel padat
+ * keempat TF sekaligus (item 03), dibaca dari snapshot cache yang sama (tanpa beban API baru).
+ * !scan memakai [tf] kalau diisi, kalau tidak default pengguna (!tf, awal 4H).
  *
  * Cara kerja: satu "snapshot" per timeframe = candle semua koin yang tersedia
  * (lihat kriptoList.js) diambil dari Binance dengan konkurensi terbatas, lalu
@@ -238,9 +239,118 @@ async function ensureSnapshot(sock, msg, { jid, lang }, tf) {
   return getSnapshot(lang, tf);
 }
 
+// ---------- !ringkasan & !stat: banyak TF (item 03) ----------
+const ALL_TFS = Object.keys(TIMEFRAMES); // 15M, 1H, 4H, 1D (urutan tampil)
+
+/**
+ * Ambil snapshot beberapa TF berurutan (konkurensi tetap 8, tidak dikali jumlah TF).
+ * TF yang sudah di cache langsung kembali; hanya yang dingin yang memindai ulang.
+ * Satu TF gagal tidak menggagalkan yang lain (baris itu tampil "belum tersedia"); semua gagal -> lempar error.
+ * @returns {Promise<{tf: string, snap: object|null}[]>}
+ */
+async function loadSnapshots(sock, msg, { jid, lang }, tfs) {
+  const cold = tfs.filter((tf) => !hasFreshSnapshot(tf) && !building.has(tf));
+  if (cold.length) {
+    await sock.sendMessage(
+      jid,
+      { text: t(lang, cold.length > 1 ? "stat.scanning.multi" : "stat.scanning", { tf: cold.map((x) => TF_LABEL[x]).join(", ") }) },
+      { quoted: msg },
+    );
+  }
+  const out = [];
+  let lastErr = null;
+  for (const tf of tfs) {
+    try {
+      out.push({ tf, snap: await getSnapshot(lang, tf) });
+    } catch (err) {
+      lastErr = err;
+      out.push({ tf, snap: null });
+    }
+  }
+  if (out.every((e) => !e.snap)) throw lastErr || new Error("SNAPSHOT_INCOMPLETE");
+  return out;
+}
+
+/** Catatan "data kurang" per TF: koin yang dilewati (candle < 201 / gagal diambil). "" kalau tidak ada. */
+function skippedMultiNote(lang, entries) {
+  const parts = entries.filter((e) => e.snap && e.snap.skipped > 0).map((e) => `${TF_LABEL[e.tf]}: ${e.snap.skipped}`);
+  return parts.length ? "\n" + t(lang, "stat.skipped.multi", { list: parts.join(" | ") }) : "";
+}
+
+const pad = (v, n) => String(v).padStart(n);
+
+/** Teks !ringkasan untuk banyak TF. entries = [{tf, snap|null}]. Murni (tanpa I/O), mudah diuji. */
+function buildRingkasanMulti(lang, entries) {
+  const rows = [];
+  let btcLine = null;
+  for (const { tf, snap } of entries) {
+    if (!snap) {
+      rows.push(t(lang, "stat.ringkasan.rowNone", { tf: TF_LABEL[tf] }));
+      continue;
+    }
+    const s = computeStats(snap.coins);
+    const abovePct = s.n ? (s.above200 / s.n) * 100 : 0;
+    const mood = moodOf(abovePct);
+    const btc = snap.coins.find((c) => c.ticker === "BTC");
+    const btcRow = btc
+      ? t(lang, "stat.ringkasan.rowBtc", {
+          icon: TREND_ICON[btc.info.trend],
+          trend: t(lang, `stat.mood.${btc.info.trend}`),
+          pct: fmtPct(pctFrom(btc.latest[200], btc.price)),
+        })
+      : t(lang, "stat.ringkasan.rowBtcNone");
+    if (btc && !btcLine) {
+      btcLine = t(lang, "stat.ringkasan.btcPrice", { price: fmtUsd(btc.price), change: btc.pct24 == null ? "-" : fmtPct(btc.pct24) });
+    }
+    rows.push(
+      t(lang, "stat.ringkasan.row", {
+        icon: MOOD_ICON[mood],
+        tf: TF_LABEL[tf],
+        mood: t(lang, `stat.mood.${mood}`),
+        above: s.above200,
+        total: s.n,
+        pct: abovePct.toFixed(0),
+        btc: btcRow,
+      }),
+    );
+  }
+  return t(lang, "stat.ringkasan.multi.body", {
+    rows: rows.join("\n"),
+    btc: btcLine || t(lang, "stat.ringkasan.btcNone"),
+    note: skippedMultiNote(lang, entries),
+  });
+}
+
+/** Teks !stat untuk banyak TF: dua blok monospace (tren, lalu posisi terhadap EMA). Murni, mudah diuji. */
+function buildStatMulti(lang, entries) {
+  const trend = [t(lang, "stat.stat.multi.hdrTrend")];
+  const ema = [t(lang, "stat.stat.multi.hdrEma")];
+  for (const { tf, snap } of entries) {
+    const label = TF_LABEL[tf].padEnd(3);
+    if (!snap) {
+      trend.push(`${label} n/a`);
+      ema.push(`${label} n/a`);
+      continue;
+    }
+    const s = computeStats(snap.coins);
+    trend.push(`${label} ${pad(s.n, 4)} ${pad(s.bullish, 5)} ${pad(s.bearish, 5)} ${pad(s.sideways, 5)}`);
+    ema.push(`${label} ${pad(s.above50, 5)} ${pad(s.below50, 5)} ${pad(s.above200, 5)} ${pad(s.below200, 5)}`);
+  }
+  return t(lang, "stat.stat.multi.body", {
+    trend: trend.join("\n"),
+    ema: ema.join("\n"),
+    note: skippedMultiNote(lang, entries),
+  });
+}
+
 // ---------- !ringkasan ----------
 async function runRingkasan(sock, msg, ctx, { tf }) {
   const { jid, lang } = ctx;
+  if (!tf) {
+    const entries = await loadSnapshots(sock, msg, ctx, ALL_TFS);
+    await sock.sendMessage(jid, { text: buildRingkasanMulti(lang, entries) }, { quoted: msg });
+    return;
+  }
   const snap = await ensureSnapshot(sock, msg, ctx, tf);
   const s = computeStats(snap.coins);
   const abovePct = (s.above200 / s.n) * 100;
@@ -283,6 +393,11 @@ async function runRingkasan(sock, msg, ctx, { tf }) {
 // ---------- !stat ----------
 async function runStat(sock, msg, ctx, { tf }) {
   const { jid, lang } = ctx;
+  if (!tf) {
+    const entries = await loadSnapshots(sock, msg, ctx, ALL_TFS);
+    await sock.sendMessage(jid, { text: buildStatMulti(lang, entries) }, { quoted: msg });
+    return;
+  }
   const snap = await ensureSnapshot(sock, msg, ctx, tf);
   const s = computeStats(snap.coins);
   await sock.sendMessage(
@@ -461,7 +576,12 @@ const STAT_COMMANDS = {
 /** @returns {object|null} argumen terurai, atau null kalau format salah (-> tampilkan penjelasan command). */
 function parseStatArgs(name, raw, defaultTf) {
   const text = String(raw || "").trim();
-  if (name === "ringkasan" || name === "stat") return text ? null : { tf: defaultTf };
+  // !ringkasan / !stat: tanpa argumen = semua TF (tf: null); satu token TF = hanya TF itu; selain itu -> penjelasan command.
+  if (name === "ringkasan" || name === "stat") {
+    if (!text) return { tf: null };
+    const key = text.toUpperCase();
+    return TIMEFRAMES[key] ? { tf: key } : null;
+  }
 
   // !scandivergent <bull|bear> [tf] [rsi|macd] [reguler|tersembunyi]  (arah wajib; urutan token bebas)
   if (name === "scandivergent") {
@@ -521,6 +641,8 @@ module.exports = {
   CONCURRENCY,
   // diekspor untuk pengujian
   matchCondition,
+  buildRingkasanMulti,
+  buildStatMulti,
   analyzeCoin,
   computeStats,
   moodOf,
