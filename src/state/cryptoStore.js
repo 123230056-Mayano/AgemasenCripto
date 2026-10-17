@@ -64,7 +64,9 @@ const { supabaseRest } = require("./subscriptionStore");
 
 const FILE = process.env.CRYPTO_STATE_FILE || path.join(BOT_STATE_DATA_DIR, "crypto_watch.json");
 
-const MAX_WATCH = 20;
+// Batas watchlist per user. Default 300 supaya !watch all muat semua koin yang didukung (hasilnya dikirim sebagai PDF,
+// lihat watchPdf.js). Bisa diubah lewat env WATCH_MAX.
+const MAX_WATCH = Number.isInteger(Number(process.env.WATCH_MAX)) && Number(process.env.WATCH_MAX) > 0 ? Number(process.env.WATCH_MAX) : 300;
 const MAX_ALERTS = 20;
 
 // Batas alarm divergence (usulan PDF 5.5: 10 per user). Bisa diubah lewat env.
@@ -445,6 +447,30 @@ function addWatch(jid, coin) {
   return "added";
 }
 
+/**
+ * Tambah banyak koin sekaligus dengan satu kali simpan. MAX_WATCH dicek sebelum menyimpan:
+ * koin yang masih muat ditambahkan (urut sesuai input), sisanya dilaporkan, tidak dibuang diam-diam.
+ * @param {string[]} coins ticker huruf besar (duplikat dalam input diabaikan)
+ * @returns {{added:string[], exists:string[], full:string[]}}
+ */
+function addWatchMany(jid, coins) {
+  const u = user(jid);
+  const out = { added: [], exists: [], full: [] };
+  const seen = new Set();
+  for (const coin of coins) {
+    if (seen.has(coin)) continue;
+    seen.add(coin);
+    if (u.watch.includes(coin)) out.exists.push(coin);
+    else if (u.watch.length >= MAX_WATCH) out.full.push(coin);
+    else {
+      u.watch.push(coin);
+      out.added.push(coin);
+    }
+  }
+  if (out.added.length) save(jid);
+  return out;
+}
+
 /** @returns {boolean} true kalau ada yang dihapus */
 function removeWatch(jid, coin) {
   const u = user(jid);
@@ -644,6 +670,7 @@ loadLocal();
 
 module.exports = {
   MAX_WATCH,
+  addWatchMany,
   MAX_ALERTS,
   MAX_DIV_ALERTS,
   MAX_DIV_ALERTS_PER_CHAT,

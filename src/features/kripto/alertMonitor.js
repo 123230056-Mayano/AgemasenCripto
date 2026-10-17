@@ -29,7 +29,7 @@ const { binanceSymbol } = require("../analisis/analisisChart");
 const { getMarketRows } = require("./pasar");
 const { getDefaultTf } = require("./defaultTf");
 const { TF_LABEL, UnsupportedCoinError, fetchCandles, computeLevels, fmtUsd, fmtLevel, fmtPct } = require("./market");
-const { DAILY_TZ, DAILY_TZ_LABEL, loadWatchRows, formatWatchTable } = require("./watchlist");
+const { DAILY_TZ, DAILY_TZ_LABEL, loadWatchRows, loadWatchRowsBulk, formatWatchCompact, WATCH_PDF_MIN, formatWatchTable } = require("./watchlist");
 const { detectDivergence } = require("./divergence");
 const { refreshSnapshot, CONCURRENCY: SCAN_CONCURRENCY } = require("./statistik");
 const {
@@ -261,8 +261,15 @@ async function checkDaily() {
       let watchPart = t(lang, "daily.noWatch");
       const coins = store.getWatch(userJid);
       if (coins.length) {
-        const rows = await loadWatchRows(coins, getDefaultTf(userJid));
-        watchPart = t(lang, "daily.watch", { table: formatWatchTable(lang, rows) });
+        const tf = getDefaultTf(userJid);
+        if (coins.length > WATCH_PDF_MIN) {
+          // Watchlist panjang: ringkasan pendek (jumlah per tren + naik/turun terbesar); daftar lengkap lewat !watchlist (PDF).
+          const rows = await loadWatchRowsBulk(lang, coins, tf);
+          watchPart = t(lang, "daily.watchBig", { summary: formatWatchCompact(lang, rows, tf) });
+        } else {
+          const rows = await loadWatchRows(coins, tf);
+          watchPart = t(lang, "daily.watch", { table: formatWatchTable(lang, rows) });
+        }
       }
 
       const text = t(lang, "daily.body", { tz: DAILY_TZ_LABEL, market: marketByLang.get(lang), watch: watchPart });

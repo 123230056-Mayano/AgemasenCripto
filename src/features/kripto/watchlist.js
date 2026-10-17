@@ -4,9 +4,9 @@
  * features/kripto/watchlist.js
  * ------------------------------------------------------------------
  * Watchlist & alert (Command Kripto - Bagian 5). Pantauan pribadi per user:
- *   !watch <koin>          -> tambah koin ke watchlist
+ *   !watch <koin ...>      -> tambah satu/beberapa koin (!watch BTC ETH SOL), atau !watch all
  *   !unwatch <koin>        -> hapus koin dari watchlist
- *   !watchlist             -> watchlist + harga, % 24 jam, tren singkat
+ *   !watchlist [pdf]       -> watchlist + harga, % 24 jam, tren singkat (lebih dari WATCH_PDF_MIN koin = PDF)
  *   !alert <koin> <harga>  -> alert harga (arah naik/turun ditentukan dari harga sekarang)
  *   !alertlevel <koin>     -> alert otomatis dekat support/resistance terdekat
  *   !alerts                -> semua alert aktif + ID
@@ -23,7 +23,11 @@ const store = require("../../state/cryptoStore");
 const { withSyncNotice } = require("./syncNotice");
 const { getDefaultTf } = require("./defaultTf");
 const { computeEmas, classifyTrendAuto } = require("./indicators");
-const { TF_LABEL, fetchTicker, fetchCandles, computeLevels, fmtUsd, fmtLevel, fmtPct } = require("./market");
+const { TF_LABEL, UnsupportedCoinError, fetchTicker, fetchCandles, computeLevels, fmtUsd, fmtLevel, fmtPct } = require("./market");
+const { getAvailableCoins } = require("./kriptoList");
+const { COINS } = require("./coinList");
+const stat = require("./statistik"); // snapshot cache bersama (dipanggil lewat stat.getSnapshot supaya mudah diuji)
+const { buildWatchlistPdf, summarize } = require("./watchPdf");
 
 // Zona waktu ringkasan harian. Default WIB; ganti lewat env DAILY_TZ (nama zona IANA).
 const DAILY_TZ = process.env.DAILY_TZ || "Asia/Jakarta";
@@ -31,6 +35,13 @@ const DAILY_TZ_LABEL = process.env.DAILY_TZ_LABEL || (DAILY_TZ === "Asia/Jakarta
 const DAILY_DEFAULT = { hour: 8, minute: 0 };
 
 const COIN_RE = /^[A-Z0-9]{1,15}$/;
+const WATCH_ALL_TOKENS = new Set(["ALL", "SEMUA"]);
+const WATCH_MAX_TOKENS = 50; // batas koin per perintah !watch (melindungi API Binance dari satu pesan raksasa)
+const WATCH_LIST_CAP = 40; // maksimal ticker yang dirinci per baris balasan
+// Watchlist lebih panjang dari ini dikirim sebagai PDF (bukan tabel teks). Default 20 = kapasitas tabel teks lama.
+const WATCH_PDF_MIN = Number.isInteger(Number(process.env.WATCHLIST_PDF_MIN)) && Number(process.env.WATCHLIST_PDF_MIN) > 0 ? Number(process.env.WATCHLIST_PDF_MIN) : 20;
+const WATCH_FALLBACK_MAX = 40; // koin di luar snapshot yang boleh diambil satu per satu (sisanya ditandai gagal)
+const NAME_OF = new Map(COINS.map(([ticker, name]) => [ticker, name]));
 const pad = (s, n) => String(s).padEnd(n, " ");
 const hhmm = (h, m) => `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 const TREND_ICON = { bullish: "🟢", bearish: "🔴", sideways: "🟡", nodata: "⚪" };
@@ -74,7 +85,14 @@ function parseWatchArgs(name, raw) {
   const coinOf = (tok) => (tok && COIN_RE.test(tok.toUpperCase()) ? tok.toUpperCase() : null);
 
   switch (name) {
-    case "watch":
+    case "watch": {
+      const toks = tokens.flatMap((tok) => tok.split(/[,;]+/)).filter(Boolean);
+      if (!toks.length || toks.length > WATCH_MAX_TOKENS) return null;
+      if (toks.length === 1 && WATCH_ALL_TOKENS.has(toks[0].toUpperCase())) return { all: true };
+      const coins = [...new Set(toks.map((tok) => tok.toUpperCase()))];
+      if (coins.some((c) => WATCH_ALL_TOKENS.has(c))) return null; // "all" tidak bisa dicampur dengan koin lain
+      return { coins };
+    }
     case "unwatch":
     case "alertlevel": {
       const coin = tokens.length === 1 ? coinOf(tokens[0]) : null;
@@ -95,7 +113,10 @@ function parseWatchArgs(name, raw) {
       if (tokens.length > 1) return null;
       return parseTime(tokens[0]);
     }
-    default: // watchlist, alerts, stopharian: tanpa argumen
+    case "watchlist":
+      if (!tokens.length) return {};
+      return tokens.length === 1 && tokens[0].toLowerCase() === "pdf" ? { pdf: true } : null;
+    default: // alerts, stopharian: tanpa argumen
       return tokens.length ? null : {};
   }
 }
@@ -129,6 +150,44 @@ async function loadWatchRows(coins, tf) {
   });
 }
 
+/**
+ * Versi massal untuk watchlist panjang: pakai snapshot cache (satu pembangunan untuk semua koin, bersama !ringkasan,
+ * !stat, !scan), bukan 2 panggilan API per koin. Koin yang tidak ada di snapshot (di luar daftar atau candle < 201)
+ * diambil satu per satu, maksimal WATCH_FALLBACK_MAX; sisanya ditandai gagal.
+ * @returns {Promise<Array<{coin,name?,price?,pct?,trend?,limited?,error?}>>} urut sama dengan `coins`
+ */
+async function loadWatchRowsBulk(lang, coins, tf) {
+  let byTicker = new Map();
+  try {
+    const snap = await stat.getSnapshot(lang, tf);
+    byTicker = new Map(snap.coins.map((c) => [c.ticker, c]));
+  } catch (err) {
+    console.log("[watchlist] snapshot gagal, pakai pengambilan per koin:", err.message);
+  }
+  const rows = new Array(coins.length);
+  const missing = [];
+  coins.forEach((coin, i) => {
+    const c = byTicker.get(coin);
+    if (c) rows[i] = { coin, name: c.name, price: c.price, pct: c.pct24, trend: c.info.trend, limited: false };
+    else missing.push(i);
+  });
+  const todo = missing.slice(0, WATCH_FALLBACK_MAX);
+  const got = await loadWatchRows(todo.map((i) => coins[i]), tf);
+  todo.forEach((i, k) => (rows[i] = { ...got[k], name: NAME_OF.get(coins[i]) || "" }));
+  missing.slice(WATCH_FALLBACK_MAX).forEach((i) => (rows[i] = { coin: coins[i], error: true }));
+  return rows;
+}
+
+/** Ringkasan teks pendek untuk watchlist panjang (ringkasan harian): jumlah per tren + naik/turun terbesar 24 jam. */
+function formatWatchCompact(lang, rows, tf) {
+  const s = summarize(rows);
+  const movers = rows.filter((r) => !r.error && typeof r.pct === "number" && isFinite(r.pct)).sort((a, b) => b.pct - a.pct);
+  const fmt = (list) => list.map((r) => `${r.coin} ${fmtPct(r.pct)}`).join(", ") || "-";
+  const up = fmt(movers.filter((r) => r.pct > 0).slice(0, 5));
+  const down = fmt(movers.filter((r) => r.pct < 0).slice(-5).reverse());
+  return t(lang, "watch.compact", { n: rows.length, tf: TF_LABEL[tf] || tf, bull: s.bullish, bear: s.bearish, side: s.sideways, nodata: s.nodata + s.error, up, down });
+}
+
 /** Tabel monospace: koin | harga | % | tren. */
 function formatWatchTable(lang, rows) {
   const prices = rows.map((r) => (r.error ? "-" : fmtUsd(r.price)));
@@ -145,11 +204,84 @@ function formatWatchTable(lang, rows) {
 // ---------- runner ----------
 const say = (sock, jid, msg, text) => sock.sendMessage(jid, { text }, { quoted: msg });
 
-async function runWatch(sock, msg, { jid, lang, senderId }, { coin }) {
-  await fetchTicker(coin); // koin tidak ada di Binance -> UnsupportedCoinError (ditangani pemanggil)
-  const res = store.addWatch(senderId, coin);
-  const key = { added: "watch.added", exists: "watch.exists", full: "watch.full" }[res];
-  await say(sock, jid, msg, t(lang, key, { coin, max: store.MAX_WATCH }));
+/** Ubah daftar ticker jadi teks "A, B, C (+N lainnya)". */
+function listCoins(lang, coins) {
+  const shown = coins.slice(0, WATCH_LIST_CAP).join(", ");
+  const rest = coins.length - WATCH_LIST_CAP;
+  return rest > 0 ? `${shown} ${t(lang, "watch.multi.more", { n: rest })}` : shown;
+}
+
+/** Ticker mentah dari user -> aman ditampilkan (tanpa karakter format WhatsApp). */
+const safeTicker = (c) => c.replace(/[^A-Z0-9]/g, "").slice(0, 15) || "?";
+
+/**
+ * Pisahkan koin valid / tidak dikenal / gagal dicek.
+ * Pakai daftar koin yang didukung (cache 1 jam, tanpa panggilan API per koin). Koin di luar daftar
+ * dicek langsung ke Binance (seperti perilaku !watch satu koin sebelumnya), konkurensi 4.
+ */
+async function resolveWatchCoins(lang, coins) {
+  const supported = new Set((await getAvailableCoins(lang)).map((c) => c.ticker));
+  const valid = [];
+  const unknown = [];
+  const failed = [];
+  const probe = [];
+  for (const c of coins) {
+    if (!COIN_RE.test(c)) unknown.push(safeTicker(c));
+    else if (supported.has(c)) valid.push(c);
+    else probe.push(c);
+  }
+  const results = await mapLimit(probe, 4, async (c) => {
+    try {
+      await fetchTicker(c);
+      return "ok";
+    } catch (err) {
+      return err instanceof UnsupportedCoinError ? "unknown" : "failed";
+    }
+  });
+  probe.forEach((c, i) => (results[i] === "ok" ? valid : results[i] === "unknown" ? unknown : failed).push(c));
+  // Pertahankan urutan input untuk koin valid.
+  const order = new Map(coins.map((c, i) => [c, i]));
+  valid.sort((a, b) => order.get(a) - order.get(b));
+  return { valid, unknown, failed };
+}
+
+/** Balasan rinci: ditambah / sudah ada / melebihi batas / tidak dikenal / gagal dicek. */
+function formatWatchSummary(lang, senderId, res, { unknown, failed }) {
+  const lines = [t(lang, "watch.multi.head", { n: store.getWatch(senderId).length, max: store.MAX_WATCH })];
+  const add = (key, coins) => coins.length && lines.push(t(lang, key, { n: coins.length, list: listCoins(lang, coins) }));
+  add("watch.multi.added", res.added);
+  add("watch.multi.exists", res.exists);
+  add("watch.multi.over", res.full);
+  add("watch.multi.unknown", unknown);
+  add("watch.multi.failed", failed);
+  if (res.full.length) lines.push(t(lang, "watch.multi.overHint", { max: store.MAX_WATCH }));
+  if (store.getWatch(senderId).length > WATCH_PDF_MIN) lines.push(t(lang, "watch.multi.pdfHint"));
+  return lines.join("\n");
+}
+
+async function runWatch(sock, msg, { jid, lang, senderId }, { coin, coins, all }) {
+  let input = coins || (coin ? [coin] : []);
+
+  // Satu koin: perilaku lama (balasan singkat, error Binance diteruskan ke pemanggil).
+  if (!all && input.length === 1) {
+    const only = input[0];
+    if (!COIN_RE.test(only)) throw new UnsupportedCoinError(safeTicker(only));
+    await fetchTicker(only); // koin tidak ada di Binance -> UnsupportedCoinError (ditangani pemanggil)
+    const res = store.addWatch(senderId, only);
+    const key = { added: "watch.added", exists: "watch.exists", full: "watch.full" }[res];
+    await say(sock, jid, msg, t(lang, key, { coin: only, max: store.MAX_WATCH }));
+    return;
+  }
+
+  let unknown = [];
+  let failed = [];
+  if (all) {
+    input = (await getAvailableCoins(lang)).map((c) => c.ticker);
+  } else {
+    ({ valid: input, unknown, failed } = await resolveWatchCoins(lang, input));
+  }
+  const res = store.addWatchMany(senderId, input);
+  await say(sock, jid, msg, formatWatchSummary(lang, senderId, res, { unknown, failed }));
 }
 
 async function runUnwatch(sock, msg, { jid, lang, senderId }, { coin }) {
@@ -157,13 +289,34 @@ async function runUnwatch(sock, msg, { jid, lang, senderId }, { coin }) {
   await say(sock, jid, msg, t(lang, ok ? "watch.removed" : "watch.notFound", { coin }));
 }
 
-async function runWatchlist(sock, msg, { jid, lang, senderId }) {
+async function runWatchlist(sock, msg, { jid, lang, senderId }, args = {}) {
   const coins = store.getWatch(senderId);
   if (!coins.length) {
     await say(sock, jid, msg, t(lang, "watch.empty"));
     return;
   }
   const tf = getDefaultTf(senderId);
+
+  // Panjang (atau diminta "pdf"): satu PDF berisi semua koin, dari snapshot cache.
+  if (args.pdf || coins.length > WATCH_PDF_MIN) {
+    if (!stat.isSnapshotWarm(tf)) await say(sock, jid, msg, t(lang, "watch.pdf.working", { n: coins.length }));
+    const rows = await loadWatchRowsBulk(lang, coins, tf);
+    if (rows.every((r) => r.error)) throw new Error("WATCHLIST_FETCH_FAILED");
+    const pdf = await buildWatchlistPdf({ rows, tf: TF_LABEL[tf], lang });
+    const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, "");
+    await sock.sendMessage(
+      jid,
+      {
+        document: pdf,
+        mimetype: "application/pdf",
+        fileName: `Watchlist-${TF_LABEL[tf]}-${stamp}.pdf`,
+        caption: t(lang, "watch.pdf.caption", { n: coins.length, max: store.MAX_WATCH, tf: TF_LABEL[tf] }),
+      },
+      { quoted: msg },
+    );
+    return;
+  }
+
   const rows = await loadWatchRows(coins, tf);
   if (rows.every((r) => r.error)) throw new Error("WATCHLIST_FETCH_FAILED");
   await say(
@@ -287,6 +440,9 @@ module.exports = {
   DAILY_TZ,
   DAILY_TZ_LABEL,
   loadWatchRows,
+  loadWatchRowsBulk,
+  formatWatchCompact,
+  WATCH_PDF_MIN,
   formatWatchTable,
   hhmm,
   // diekspor untuk pengujian
