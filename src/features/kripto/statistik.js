@@ -295,7 +295,7 @@ function buildRingkasanMulti(lang, entries) {
     const btcRow = btc
       ? t(lang, "stat.ringkasan.rowBtc", {
           icon: TREND_ICON[btc.info.trend],
-          trend: t(lang, `stat.mood.${btc.info.trend}`),
+          trend: t(lang, `stat.trend.${btc.info.trend}`),
           pct: fmtPct(pctFrom(btc.latest[200], btc.price)),
         })
       : t(lang, "stat.ringkasan.rowBtcNone");
