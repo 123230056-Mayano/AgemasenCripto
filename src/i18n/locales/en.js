@@ -436,6 +436,10 @@ module.exports = {
   "div.tag.hidden.bear": "Hidden Bearish (continuation down)",
   "div.conflict.chart": "CONFLICT: Bullish + Bearish",
   "div.conflict.line": "⚠️ *CONFLICT*: {coin} {tf} has both Bullish and Bearish signals. Read both, not just one direction.",
+  "div.early.prefix": "[EARLY]",
+  "div.early.chart": "EARLY, NOT CONFIRMED",
+  "div.early.chartNote": "dashed arrow = early signal (pivot not fully confirmed yet, can still fail)",
+  "div.early.ago": "early: {seen} of {win} confirmation candles",
   "div.scan.body": "🔀 *DIV SCAN {dir} {tf}* ({filters})\n{n} of {total} coins match\n\n{rows}\n\n_Regular = possible reversal, Hidden = possible trend continuation. Based on closed candles; a pivot needs {win} confirming candles, so signals appear slightly after the actual peak/trough._\n_Educational, not investment advice._",
   "div.scan.empty": "🔀 No new {dir} divergence ({filters}) on {tf} ({total} coins scanned). Only divergences confirmed within the last {look} closed candles are counted.\n_Educational, not investment advice._",
   "divchart.caption.head": "🔀 *{coin}/USDT {tf}* {price}\n_{filters}_\n",
@@ -622,6 +626,12 @@ module.exports = {
   "divalert.deleted": "🗑️ Divergence alert {id} deleted.",
   "divalert.notFound": "❓ Divergence alert {id} not found. See the list with !alertdiv list.",
   "divalert.deletedAll": "🗑️ {n} divergence alerts deleted.",
+  "divalert.filter.early": "early",
+  "divalert.msg.early": "⏳ *EARLY DIVERGENCE ALERT* (not confirmed yet)\n*{coin}* {tf} | {ind} | {kd}\n{desc}{conflict}\nCandle closed: {time}\n_Early: the pivot has only {seen} of {win} confirmation candles, so it can fail if a candle closes through the pivot. Do not treat it as a final signal. Educational, not investment advice._",
+  "divalert.created.early": "⏳ EARLY mode is on: you also get signals whose pivot is not fully confirmed yet (labelled \"early, not confirmed\"), 1 to {win} candles sooner. They can fail. If one is confirmed later, it is not sent again.",
+  "divreport.group.early.bull": "⏳ Bullish EARLY (not confirmed, potential reversal up)",
+  "divreport.group.early.bear": "⏳ Bearish EARLY (not confirmed, potential reversal down)",
+  "divreport.foot.early": "⏳ EARLY = pivot not fully confirmed yet (confirmation candles incomplete, {win} needed), can fail. If confirmed later, it is not sent again.",
 
   // ---------- !alertind (alarm indikator lanjutan: bias berubah, crossover baru; item 10) ----------
   "advalert.bias.bull": "Bullish",

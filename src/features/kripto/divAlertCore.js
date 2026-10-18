@@ -18,9 +18,13 @@
  * (default WIB, sama dengan ringkasan harian); ubah lewat env DAILY_TZ / DAILY_TZ_LABEL.
  *
  * Changelog parameter: v1 (2026-10-16) nilai awal usulan PDF 5.4-5.6.
+ *   v2 (2026-10-18) Revisi bagian 4: opsi `dini` (sub.early, default mati). Sinyal dini (status "early") memakai
+ *       kunci dedupe YANG SAMA dengan versi terkonfirmasinya (koin|tf|indikator|jenis|arah|waktu pivot kedua),
+ *       jadi sinyal dini yang kemudian terkonfirmasi tidak dikirim lagi sebagai kejadian baru.
  */
 
 const { t } = require("../../i18n");
+const { DIV } = require("./divergence");
 
 // ---------- konstanta (satu tempat) ----------
 const posInt = (v, d) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Math.floor(Number(v)) : d);
@@ -111,12 +115,18 @@ function subCoins(sub, { allCoins, watchOf, userJid }) {
  * Aturan "baru": divergence harus terkonfirmasi (candle konfirmasi tutup) SETELAH alarm dibuat, jadi
  * membuat alarm tidak memicu sinyal lama yang sudah ada.
  *
+ *
+ * Sinyal DINI (earlyByCoin, hasil detectDivergenceAll().early) hanya dicocokkan ke langganan dengan sub.early = true.
+ * Kuncinya sama dengan sinyal terkonfirmasi, jadi: (a) dini yang sama tidak dikirim berulang tiap candle, dan
+ * (b) setelah dini terkirim, versi terkonfirmasinya dilewati (isSent). "Baru" untuk sinyal dini = candle pivot
+ * sudah tutup SETELAH alarm dibuat (pivot2.time + TF > createdAt).
+ *
  * @param {{subs:Array<{userJid:string, sub:object}>, tf:string,
- *   divsByCoin:Map<string,object[]>, allCoins:Iterable<string>,
+ *   divsByCoin:Map<string,object[]>, earlyByCoin?:Map<string,object[]>, allCoins:Iterable<string>,
  *   watchOf:(jid:string)=>string[], isSent:(key:string)=>boolean}} p
- * @returns {Array<{key,chat,userJid,coin,tf,indicator,kind,dir,pivot2Time,conflict,confirmedCloseTime,barsAgo}>}
+ * @returns {Array<{key,chat,userJid,coin,tf,indicator,kind,dir,status,pivot2Time,conflict,confirmedCloseTime,barsAgo,rightSeen?}>}
  */
-function collectItems({ subs, tf, divsByCoin, allCoins, watchOf, isSent }) {
+function collectItems({ subs, tf, divsByCoin, earlyByCoin = new Map(), allCoins, watchOf, isSent }) {
   const items = new Map(); // key -> item (dedupe dalam putaran)
   const tfMs = TF_MS[tf];
   const all = allCoins instanceof Set ? allCoins : new Set(allCoins || []);
@@ -142,9 +152,35 @@ function collectItems({ subs, tf, divsByCoin, allCoins, watchOf, isSent }) {
           kind: d.kind,
           dir: d.dir,
           pivot2Time: d.pivot2.time,
+          status: "confirmed",
           conflict: !!d.conflict, // koin + TF ini juga punya sinyal arah berlawanan (lihat markConflict)
           confirmedCloseTime,
           barsAgo: d.barsAgo,
+        });
+      }
+      if (!sub.early) continue;
+      for (const d of earlyByCoin.get(coin) || []) {
+        if (!sub.indicators.includes(d.indicator)) continue;
+        if (sub.dirs && sub.dirs.length && !sub.dirs.includes(d.dir)) continue;
+        if (sub.kinds && sub.kinds.length && !sub.kinds.includes(d.kind)) continue;
+        if (d.pivot2.time + tfMs <= sub.createdAt) continue; // pivot sudah terbentuk sebelum alarm dibuat
+        const key = dedupeKey(sub.chat, userJid, coin, tf, d.indicator, d.kind, d.dir, d.pivot2.time);
+        if (items.has(key) || isSent(key)) continue;
+        items.set(key, {
+          key,
+          chat: sub.chat,
+          userJid,
+          coin,
+          tf,
+          indicator: d.indicator,
+          kind: d.kind,
+          dir: d.dir,
+          pivot2Time: d.pivot2.time,
+          status: "early",
+          conflict: !!d.conflict,
+          confirmedCloseTime: d.pivot2.time + (d.rightSeen + 1) * tfMs, // penutupan candle terakhir yang dipakai (bukan konfirmasi)
+          barsAgo: d.barsAgo,
+          rightSeen: d.rightSeen,
         });
       }
     }
@@ -170,12 +206,12 @@ function groupByRecipient(items) {
 // =====================================================================
 const DIR_ORDER = ["bull", "bear"];
 const KIND_ORDER = ["regular", "hidden"]; // reguler (pembalikan) selalu di atas tersembunyi (lanjutan)
-const cmpRow = (a, b) => a.coin.localeCompare(b.coin) || a.indicator.localeCompare(b.indicator) || a.kind.localeCompare(b.kind);
+const cmpRow = (a, b) => a.coin.localeCompare(b.coin) || a.indicator.localeCompare(b.indicator) || a.kind.localeCompare(b.kind) || Number(!!a.early) - Number(!!b.early);
 
 /**
  * Kelompokkan sinyal per TF (urut TF_ORDER: 1D > 4H > 1H > 15m), lalu Bullish / Bearish.
  * TF di `tfs` tanpa sinyal tetap muncul (bagian kosong), supaya jelas TF itu sudah dicek.
- * @param {Array<{tf:string, coin:string, indicator:string, kind:string, dir:'bull'|'bear'}>} items
+ * @param {Array<{tf:string, coin:string, indicator:string, kind:string, dir:'bull'|'bear', status?:'confirmed'|'early'}>} items
  * @param {string[]} tfs kunci TF yang dilaporkan ("1D", "4H", "1H", "15M")
  * @returns {Array<{tf:string, key:string, bull:object[], bear:object[]}>} tf = label tampil ("15m")
  */
@@ -185,7 +221,7 @@ function buildSections(items, tfs) {
     const pick = (dir) =>
       mine
         .filter((it) => it.dir === dir)
-        .map((it) => ({ coin: it.coin, indicator: it.indicator, kind: it.kind, dir: it.dir, conflict: !!it.conflict }))
+        .map((it) => ({ coin: it.coin, indicator: it.indicator, kind: it.kind, dir: it.dir, conflict: !!it.conflict, early: it.status === "early" }))
         .sort(cmpRow);
     return { key: k, tf: TF_LABEL[k], bull: pick("bull"), bear: pick("bear") };
   });
@@ -228,15 +264,29 @@ function buildGroupedText(lang, sections, { mode = "alert", time, filters = "" }
       if (!rows.length) continue;
       // Reguler dan tersembunyi dipisah jelas, masing-masing dengan judul yang menyebut arah + bias.
       for (const kind of KIND_ORDER) {
-        const part = rows.filter((r) => r.kind === kind);
+        const part = rows.filter((r) => r.kind === kind && !r.early);
         if (!part.length) continue;
         lines.push(t(lang, `divreport.group.${kind}.${dir}`));
         for (const r of part) lines.push(t(lang, "divreport.row", { coin: r.coin, ind: indLabel(r.indicator), flag: r.conflict ? " ⚠️" : "" }));
       }
+      // Sinyal DINI selalu di grup sendiri, berjudul tegas "dini, belum terkonfirmasi" (tidak bercampur dengan yang final).
+      const earlyRows = rows.filter((r) => r.early);
+      if (earlyRows.length) {
+        lines.push(t(lang, `divreport.group.early.${dir}`));
+        for (const r of earlyRows) lines.push(t(lang, "divreport.row", { coin: r.coin, ind: indLabel(r.indicator), flag: r.conflict ? " ⚠️" : "" }));
+      }
     }
     blocks.push(lines.join("\n"));
   }
-  return t(lang, `divreport.head.${mode}`, { n: totalSignals(sections), time, filters }) + "\n\n" + blocks.join("\n\n") + "\n\n" + t(lang, "divreport.foot");
+  const hasEarly = sections.some((s) => [...s.bull, ...s.bear].some((r) => r.early));
+  return (
+    t(lang, `divreport.head.${mode}`, { n: totalSignals(sections), time, filters }) +
+    "\n\n" +
+    blocks.join("\n\n") +
+    "\n\n" +
+    t(lang, "divreport.foot") +
+    (hasEarly ? "\n" + t(lang, "divreport.foot.early", { win: DIV.PIVOT_RIGHT }) : "")
+  );
 }
 
 /** Batas pesan per chat per jam (jendela bergeser, di memori; reset saat bot restart). */
@@ -268,6 +318,7 @@ class ChatRateLimiter {
 const IND_TOKENS = { rsi: "rsi", macd: "macd" };
 const KIND_TOKENS = { reguler: "regular", regular: "regular", tersembunyi: "hidden", hidden: "hidden" };
 const DIR_TOKENS = { bull: "bull", bullish: "bull", naik: "bull", bear: "bear", bearish: "bear", turun: "bear" };
+const EARLY_TOKENS = new Set(["dini", "early"]);
 const LIST_TOKENS = new Set(["list", "daftar", "ls"]);
 const DELETE_TOKENS = new Set(["hapus", "delete", "del", "remove", "rm"]);
 const ALL_TOKENS = new Set(["semua", "all"]);
@@ -277,8 +328,9 @@ const OFF_TOKENS = new Set(["off", "mati", "matikan"]);
 const COIN_RE = /^[A-Z0-9]{1,15}$/;
 
 /**
- * !alertdiv <koin|semua|watchlist> [tf] [rsi|macd] [bull|bear] [reguler|tersembunyi]
- * !alertdiv on [tf] [rsi|macd] [bull|bear] [reguler|tersembunyi]   (semua koin; 15m lewat watchlist)
+ * !alertdiv <koin|semua|watchlist> [tf] [rsi|macd] [bull|bear] [reguler|tersembunyi] [dini]
+ * !alertdiv on [tf] [rsi|macd] [bull|bear] [reguler|tersembunyi] [dini]   (semua koin; 15m lewat watchlist)
+ * `dini` (alias `early`) = tambahan: kirim juga sinyal DINI (pivot belum penuh terkonfirmasi). Default mati.
  * !alertdiv off                                                      (matikan semua alarm saya)
  * !alertdiv list
  * !alertdiv hapus <id|semua>
@@ -311,10 +363,12 @@ function parseAlertDivArgs(raw, defaultTf) {
   const inds = [];
   const dirs = [];
   const kinds = [];
+  let early = false;
   for (const tok of tokens) {
     const low = tok.toLowerCase();
     const up = tok.toUpperCase();
     if (TF_MS[up]) tf = up;
+    else if (EARLY_TOKENS.has(low)) early = true;
     else if (IND_TOKENS[low]) inds.push(IND_TOKENS[low]);
     else if (DIR_TOKENS[low]) dirs.push(DIR_TOKENS[low]);
     else if (KIND_TOKENS[low]) kinds.push(KIND_TOKENS[low]);
@@ -333,6 +387,7 @@ function parseAlertDivArgs(raw, defaultTf) {
     indicators: inds.length ? [...new Set(inds)] : ["rsi", "macd"], // default RSI + MACD (PDF 5.2)
     dirs: [...new Set(dirs)].length === 2 ? [] : [...new Set(dirs)], // dua arah = semua arah
     kinds: [...new Set(kinds)].length === 2 ? [] : [...new Set(kinds)],
+    early, // sinyal dini: default mati supaya tidak spam
   };
 }
 
@@ -358,6 +413,19 @@ const kindDir = (lang, kind, dir) => t(lang, `div.tag.${kind}.${dir}`);
 const indLabel = (indicator) => indicator.toUpperCase();
 
 function buildSingleText(lang, it) {
+  if (it.status === "early") {
+    return t(lang, "divalert.msg.early", {
+      coin: it.coin,
+      tf: TF_LABEL[it.tf] || it.tf,
+      ind: indLabel(it.indicator),
+      kd: kindDir(lang, it.kind, it.dir),
+      desc: t(lang, `divalert.desc.${it.kind}.${it.dir}`, { ind: t(lang, `divalert.indDesc.${it.indicator}`) }),
+      conflict: it.conflict ? "\n" + t(lang, "div.conflict.line", { coin: it.coin, tf: TF_LABEL[it.tf] || it.tf }) : "",
+      time: fmtCandleTime(lang, it.confirmedCloseTime),
+      seen: it.rightSeen,
+      win: DIV.PIVOT_RIGHT,
+    });
+  }
   return t(lang, "divalert.msg.single", {
     coin: it.coin,
     tf: TF_LABEL[it.tf] || it.tf,
@@ -374,6 +442,7 @@ function describeFilters(lang, sub) {
   const parts = [sub.indicators.map((i) => i.toUpperCase()).join("/")];
   if (sub.dirs && sub.dirs.length) parts.push(sub.dirs.map((d) => t(lang, `div.dir.${d}`)).join("/"));
   if (sub.kinds && sub.kinds.length) parts.push(sub.kinds.map((k) => t(lang, `div.kind.${k}`)).join("/"));
+  if (sub.early) parts.push(t(lang, "divalert.filter.early"));
   return parts.join(", ");
 }
 

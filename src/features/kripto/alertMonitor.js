@@ -33,7 +33,7 @@ const { getMarketRows } = require("./pasar");
 const { getDefaultTf } = require("./defaultTf");
 const { TF_LABEL, UnsupportedCoinError, fetchCandles, computeLevels, fmtUsd, fmtLevel, fmtPct } = require("./market");
 const { DAILY_TZ, DAILY_TZ_LABEL, loadWatchRows, loadWatchRowsBulk, formatWatchCompact, WATCH_PDF_MIN, formatWatchTable } = require("./watchlist");
-const { detectDivergence } = require("./divergence");
+const { detectDivergenceAll } = require("./divergence");
 const { buildDivergencePdf } = require("./divPdf");
 const { refreshSnapshot, CONCURRENCY: SCAN_CONCURRENCY } = require("./statistik");
 const {
@@ -313,11 +313,13 @@ async function runPool(items, limit, fn) {
  *  - Langganan "semua": satu snapshot yang dibangun ulang (bukan cache 3 menit yang mungkin sebelum candle tutup).
  *  - Koin tertentu / watchlist: kalau sudah ada di snapshot dipakai ulang, kalau tidak diambil langsung
  *    (konkurensi sama dengan scan). Satu koin tidak pernah diambil dua kali.
- * @returns {Promise<{divsByCoin: Map, allCoins: Set, failures: number, requests: number}>}
+ * divsByCoin = sinyal terkonfirmasi; earlyByCoin = sinyal DINI (hanya dipakai langganan dengan opsi `dini`).
+ * @returns {Promise<{divsByCoin: Map, earlyByCoin: Map, allCoins: Set, failures: number, requests: number}>}
  */
 async function gatherDivergences(tf, boundary, subsTf) {
   const expectedOpen = lastCandleOpen(tf, boundary);
   const divsByCoin = new Map();
+  const earlyByCoin = new Map();
   const allCoins = new Set();
   let failures = 0;
   let requests = 0;
@@ -333,6 +335,7 @@ async function gatherDivergences(tf, boundary, subsTf) {
       } else {
         for (const c of snap.coins) {
           divsByCoin.set(c.ticker, c.div || []);
+          earlyByCoin.set(c.ticker, c.divEarly || []);
           allCoins.add(c.ticker);
         }
       }
@@ -357,13 +360,15 @@ async function gatherDivergences(tf, boundary, subsTf) {
         failures++; // candle terbaru belum final / koin berhenti diperdagangkan
         return;
       }
-      divsByCoin.set(coin, detectDivergence(candles, { indicators: ["rsi", "macd"] }));
+      const dv = detectDivergenceAll(candles, { indicators: ["rsi", "macd"] });
+      divsByCoin.set(coin, dv.confirmed);
+      earlyByCoin.set(coin, dv.early);
     } catch (err) {
       if (err instanceof UnsupportedCoinError) return; // koin sudah tidak ada di Binance: dilewati, bukan kegagalan putaran
       failures++;
     }
   });
-  return { divsByCoin, allCoins, failures, requests };
+  return { divsByCoin, earlyByCoin, allCoins, failures, requests };
 }
 
 /** Kirim dokumen PDF ke chat tujuan. @returns {Promise<boolean>} true kalau terkirim. */
@@ -453,6 +458,7 @@ async function collectDivTf(tf, boundary, allSubs) {
     subs: subsTf,
     tf,
     divsByCoin: gathered.divsByCoin,
+    earlyByCoin: gathered.earlyByCoin,
     allCoins: gathered.allCoins,
     watchOf: (jid) => store.getWatch(jid),
     isSent: (key) => store.wasSent(key),

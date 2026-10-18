@@ -40,7 +40,8 @@ const fmtSigned = (v) => (v > 0 ? "+" : v < 0 ? "-" : "") + fmtInd(Math.abs(v));
  * @param {string} o.coin
  * @param {string} o.tf        "15m" | "1H" | "4H" | "1D"
  * @param {Array} o.divs       hasil detectDivergence() yang sudah difilter
- * @param {{bull:string,bear:string,regular:string,hidden:string,reversal?:string,continuation?:string,conflict?:string}} [o.labels]
+ * @param {{bull:string,bear:string,regular:string,hidden:string,reversal?:string,continuation?:string,conflict?:string,early?:string,earlyNote?:string}} [o.labels]
+ *   Sinyal DINI (d.status === "early"): panah putus-putus + label diawali labels.early, dan header memuat labels.earlyNote.
  * @returns {Buffer} PNG
  */
 function renderDivChart({ candles, coin, tf, divs = [], labels = {} }) {
@@ -54,6 +55,16 @@ function renderDivChart({ candles, coin, tf, divs = [], labels = {} }) {
     reversal: labels.reversal || "reversal",
     continuation: labels.continuation || "continuation",
     conflict: labels.conflict || "CONFLICT: Bullish + Bearish",
+    early: labels.early || "EARLY, NOT CONFIRMED",
+    earlyNote: labels.earlyNote || "dashed arrow = early signal (pivot not fully confirmed yet, can still fail)",
+  };
+  const anyEarly = divs.some((d) => d.status === "early");
+  // Panah putus-putus untuk sinyal dini; panah penuh untuk yang terkonfirmasi.
+  const drawArrow = (early, ...pts) => {
+    g.save();
+    if (early) g.setLineDash([12, 14]);
+    arrow(g, ...pts);
+    g.restore();
   };
 
   const n = candles.length;
@@ -238,14 +249,15 @@ function renderDivChart({ candles, coin, tf, divs = [], labels = {} }) {
     const off = bull ? 14 : -14; // titik panah sedikit di luar wick
 
     // harga
-    const pk = `${d.dir}:${p1.idx}:${p2.idx}`;
+    const isEarly = d.status === "early";
+    const pk = `${d.dir}:${p1.idx}:${p2.idx}:${isEarly ? "e" : "c"}`;
     if (!drawn.has(pk)) {
       drawn.add(pk);
       const ax = X(p1.idx);
       const ay = Yp(candles[p1.idx][key]) + off;
       const bx = X(p2.idx);
       const by = Yp(candles[p2.idx][key]) + off;
-      arrow(g, ax, ay, bx, by);
+      drawArrow(isEarly, ax, ay, bx, by);
       dot(g, ax, ay);
       const chg = ((p2.price - p1.price) / p1.price) * 100;
       chip(g, family, `${fmtPrice(p1.price)} → ${fmtPrice(p2.price)} (${chg >= 0 ? "+" : ""}${chg.toFixed(2)}%)`, (ax + bx) / 2, Math.max(ay, by) + (bull ? 34 : -34), pPrice, col);
@@ -260,12 +272,12 @@ function renderDivChart({ candles, coin, tf, divs = [], labels = {} }) {
     const ay = Yi(p1.ind);
     const bx = X(p2.indIdx ?? p2.idx);
     const by = Yi(p2.ind);
-    arrow(g, ax, ay, bx, by);
+    drawArrow(isEarly, ax, ay, bx, by);
     dot(g, ax, ay);
     const diff = p2.ind - p1.ind;
     // arah tegas (Bullish/Bearish) + jenis + bias, supaya "Bearish hidden" tidak terbaca sebagai pembalikan turun
     const biasWord = L[d.bias || (d.kind === "regular" ? "reversal" : "continuation")];
-    const lbl = `${L[d.dir]} ${L[d.kind]} (${biasWord}) · ${isRsi ? "RSI" : "MACD"} ${fmtInd(p1.ind)} → ${fmtInd(p2.ind)} (${fmtSigned(diff)})`;
+    const lbl = `${isEarly ? `${L.early} · ` : ""}${L[d.dir]} ${L[d.kind]} (${biasWord}) · ${isRsi ? "RSI" : "MACD"} ${fmtInd(p1.ind)} → ${fmtInd(p2.ind)} (${fmtSigned(diff)})`;
     const slotN = used.get(box) || 0; // label bertumpuk? geser ke bawah/atas per divergence
     used.set(box, slotN + 1);
     const cy = bull ? Math.max(ay, by) + 30 + slotN * 30 : Math.min(ay, by) - 26 - slotN * 30;
@@ -290,13 +302,16 @@ function renderDivChart({ candles, coin, tf, divs = [], labels = {} }) {
   g.fillStyle = C.axis;
   const sub = `Close candle only · pivot ${DIV.PIVOT_LEFT} left / ${DIV.PIVOT_RIGHT} right`;
   g.fillText(sub, Lm, 56);
-  if (divs.some((d) => d.conflict)) {
-    // bull dan bear sekaligus: tulis tegas di header, tanpa emoji (font canvas belum tentu punya)
-    const subW = g.measureText(sub).width;
+  // Peringatan di baris sub-judul: sinyal dini (kuning-oranye) lalu konflik, berurutan ke kanan supaya tidak menimpa.
+  let warnX = Lm + g.measureText(sub).width + 24;
+  const warn = (text, color) => {
     g.font = `bold 20px ${family}`;
-    g.fillStyle = "#facc15";
-    g.fillText(L.conflict, Lm + subW + 24, 56);
-  }
+    g.fillStyle = color;
+    g.fillText(text, warnX, 56);
+    warnX += g.measureText(text).width + 24;
+  };
+  if (anyEarly) warn(L.earlyNote, "#f59e0b");
+  if (divs.some((d) => d.conflict)) warn(L.conflict, "#facc15"); // tanpa emoji (font canvas belum tentu punya)
 
   const ml = (txt, x, y, color) => {
     g.font = `20px ${family}`;

@@ -10,6 +10,7 @@
  *   !alertdiv semua 4h macd         -> semua koin (hanya 1H/4H/1D, lihat DIV_ALERT_ALL_TFS)
  *   !alertdiv watchlist 1d          -> semua koin di watchlist kamu (dibaca saat tiap putaran)
  *   !alertdiv btc 4h bull reguler   -> filter arah / jenis (opsional)
+ *   !alertdiv btc 4h dini           -> tambah sinyal DINI (pivot belum penuh terkonfirmasi, berlabel "dini"); default mati
  *   !alertdiv on [tf] [rsi|macd]    -> jalan pintas: semua koin (1H/4H/1D) + watchlist untuk 15m
  *   !alertdiv off                   -> matikan semua alarm saya (sama dengan hapus semua)
  *   !alertdiv list                  -> alarm milik saya
@@ -65,7 +66,7 @@ function armLastClosed(tf) {
 }
 
 async function runCreate(sock, msg, { jid, lang, senderId }, args) {
-  const { coin, tf, indicators, dirs, kinds } = args;
+  const { coin, tf, indicators, dirs, kinds, early } = args;
 
   if (coin === COIN_ALL && !ALL_COINS_TFS.includes(tf)) {
     await say(sock, jid, msg, t(lang, "divalert.allTf", { tfs: ALL_COINS_TFS.map((x) => TF_LABEL[x]).join(", ") }));
@@ -74,7 +75,7 @@ async function runCreate(sock, msg, { jid, lang, senderId }, args) {
   // Koin tidak ada di Binance -> UnsupportedCoinError (ditangani pemanggil, sama dengan !watch).
   if (coin !== COIN_ALL && coin !== COIN_WATCHLIST) await fetchTicker(coin);
 
-  const entry = store.addDivAlert(senderId, { chat: jid, coin, tf, indicators, dirs, kinds });
+  const entry = store.addDivAlert(senderId, { chat: jid, coin, tf, indicators, dirs, kinds, early: !!early });
   if (entry === "exists") return say(sock, jid, msg, t(lang, "divalert.exists"));
   if (entry === "full") return say(sock, jid, msg, t(lang, "divalert.full", { max: store.MAX_DIV_ALERTS }));
   if (entry === "chatFull") return say(sock, jid, msg, t(lang, "divalert.chatFull", { max: store.MAX_DIV_ALERTS_PER_CHAT }));
@@ -94,7 +95,7 @@ async function runCreate(sock, msg, { jid, lang, senderId }, args) {
       delay: Math.round(ALERT_DIV.DELAY_MS / 1000),
       win: DIV.PIVOT_RIGHT,
       tz: DAILY_TZ_LABEL,
-    }),
+    }) + (early ? "\n\n" + t(lang, "divalert.created.early", { win: DIV.PIVOT_RIGHT }) : ""),
   );
 }
 
@@ -105,14 +106,14 @@ async function runCreate(sock, msg, { jid, lang, senderId }, args) {
  * dengan sintaks langganan, jadi batas alarm dan dedupe tidak berubah.
  */
 async function runOn(sock, msg, { jid, lang, senderId }, args) {
-  const { tf, indicators, dirs, kinds } = args;
+  const { tf, indicators, dirs, kinds, early } = args;
   const tfs = tf ? [tf] : [...TF_ORDER].reverse(); // 15M, 1H, 4H, 1D (urutan tampil sama seperti menu)
   const created = [];
   let skipped = 0;
   let full = null;
   for (const x of tfs) {
     const coin = ALL_COINS_TFS.includes(x) ? COIN_ALL : COIN_WATCHLIST;
-    const entry = store.addDivAlert(senderId, { chat: jid, coin, tf: x, indicators, dirs, kinds });
+    const entry = store.addDivAlert(senderId, { chat: jid, coin, tf: x, indicators, dirs, kinds, early: !!early });
     if (typeof entry === "string") {
       skipped++;
       if (entry !== "exists") full = entry;

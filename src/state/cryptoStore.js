@@ -560,7 +560,7 @@ const sameList = (a, b) => a.length === b.length && [...a].sort().join() === [..
  */
 function addDivAlert(jid, sub) {
   const u = user(jid);
-  if (u.divAlerts.some((a) => a.chat === sub.chat && a.coin === sub.coin && a.tf === sub.tf && sameList(a.indicators, sub.indicators) && sameList(a.dirs || [], sub.dirs || []) && sameList(a.kinds || [], sub.kinds || []))) {
+  if (u.divAlerts.some((a) => a.chat === sub.chat && a.coin === sub.coin && a.tf === sub.tf && sameList(a.indicators, sub.indicators) && sameList(a.dirs || [], sub.dirs || []) && sameList(a.kinds || [], sub.kinds || []) && !!a.early === !!sub.early)) {
     return "exists";
   }
   if (u.divAlerts.length >= MAX_DIV_ALERTS) return "full";

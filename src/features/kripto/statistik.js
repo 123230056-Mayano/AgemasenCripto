@@ -32,7 +32,7 @@ const { t } = require("../../i18n");
 const { getAvailableCoins } = require("./kriptoList");
 const { getMarketRows } = require("./pasar");
 const { computeEmas, classifyTrend, detectCross } = require("./indicators");
-const { detectDivergence, DIV, DEFAULT_INDICATORS } = require("./divergence");
+const { detectDivergence, detectDivergenceAll, DIV, DEFAULT_INDICATORS } = require("./divergence");
 const { buildDivergencePdf } = require("./divPdf");
 const { renderDivChart } = require("./divChart");
 const { buildSections, chooseReportMode, buildPdfIntro, buildGroupedText, describeFilters, fmtCandleTime } = require("./divAlertCore");
@@ -67,6 +67,7 @@ const isDivCondition = (cond) => cond === "div_bull" || cond === "div_bear";
 // Modifier khusus scan divergence (token terpisah, tidak pernah bagian dari nama kondisi lain).
 const DIV_IND_TOKENS = { rsi: "rsi", macd: "macd" };
 const DIV_KIND_TOKENS = { reguler: "regular", regular: "regular", reg: "regular", tersembunyi: "hidden", hidden: "hidden", hid: "hidden" };
+const DIV_EARLY_TOKENS = new Set(["dini", "early"]); // hanya untuk chart satu koin: tampilkan juga sinyal DINI
 const DIV_DIR_TOKENS = { bull: "div_bull", bullish: "div_bull", naik: "div_bull", bear: "div_bear", bearish: "div_bear", turun: "div_bear" };
 
 function matchCondition(raw) {
@@ -84,6 +85,7 @@ function matchCondition(raw) {
  */
 function analyzeCoin(ticker, name, candles, live) {
   if (!candles || candles.length < 201) return null;
+  const dv = detectDivergenceAll(candles); // sekali hitung: terkonfirmasi + dini
   const { series, latest } = computeEmas(candles);
   if (latest[200] == null) return null;
 
@@ -111,7 +113,9 @@ function analyzeCoin(ticker, name, candles, live) {
     breakout: lastClose > prevHigh ? { level: prevHigh } : null,
     breakdown: lastClose < prevLow ? { level: prevLow } : null,
     // Divergence RSI/MACD dari candle closed (field terpisah dari field lama). [] kalau tidak ada.
-    div: detectDivergence(candles),
+    div: dv.confirmed,
+    // Sinyal DINI (pivot belum penuh terkonfirmasi). Scan/!scandiv TIDAK memakainya; hanya alarm !alertdiv dengan opsi `dini`.
+    divEarly: dv.early,
   };
 }
 
@@ -546,14 +550,17 @@ async function runScanDiv(sock, msg, ctx, { condition, tf, indicators, kinds }, 
  * Chart satu koin: harga + MACD + RSI, panah biru di pivot divergence beserta perubahan nilainya.
  * Memakai detectDivergence() yang sama dengan scan, jadi hasilnya konsisten dengan daftar !scandivergent.
  */
-async function runScanDivergentCoin(sock, msg, ctx, { coin, tf, condition, indicators, kinds }) {
+async function runScanDivergentCoin(sock, msg, ctx, { coin, tf, condition, indicators, kinds, early = false }) {
   const { jid, lang } = ctx;
   const inds = indicators && indicators.length ? indicators : [...DEFAULT_INDICATORS];
   const kindList = kinds && kinds.length ? kinds : ["regular", "hidden"];
   const dirs = condition ? [condition === "div_bull" ? "bull" : "bear"] : ["bull", "bear"];
 
   const candles = await fetchCandles(coin, tf); // closed saja; koin tak dikenal -> UnsupportedCoinError (ditangani pemanggil)
-  const divs = detectDivergence(candles, { indicators: inds }).filter((d) => dirs.includes(d.dir) && kindList.includes(d.kind));
+  // `dini`: sinyal dini (pivot belum penuh terkonfirmasi) ikut digambar & dilabeli; tanpa itu hasilnya sama persis dengan scan.
+  const all = detectDivergenceAll(candles, { indicators: inds });
+  const pool = early ? [...all.early, ...all.confirmed] : all.confirmed;
+  const divs = pool.filter((d) => dirs.includes(d.dir) && kindList.includes(d.kind));
   const labels = {
     bull: t(lang, "div.dir.bull"),
     bear: t(lang, "div.dir.bear"),
@@ -562,6 +569,8 @@ async function runScanDivergentCoin(sock, msg, ctx, { coin, tf, condition, indic
     reversal: t(lang, "div.bias.reversal"),
     continuation: t(lang, "div.bias.continuation"),
     conflict: t(lang, "div.conflict.chart"),
+    early: t(lang, "div.early.chart"),
+    earlyNote: t(lang, "div.early.chartNote"),
   };
   const png = renderDivChart({ candles, coin, tf: TF_LABEL[tf], divs, labels });
 
@@ -574,11 +583,12 @@ async function runScanDivergentCoin(sock, msg, ctx, { coin, tf, condition, indic
     // Reguler (pembalikan) dulu, baru tersembunyi (lanjutan); sort stabil menjaga urutan terbaru-dulu dalam tiap jenis.
     const byKind = [...divs].sort((x, y) => (x.kind === y.kind ? 0 : x.kind === "regular" ? -1 : 1));
     const rows = byKind.map((d) => {
-      const ago = d.barsAgo === 0 ? t(lang, "kripto.tren.justNow") : t(lang, "kripto.tren.barsAgo", { n: d.barsAgo });
+      const isEarly = d.status === "early";
+      const ago = isEarly ? t(lang, "div.early.ago", { seen: d.rightSeen, win: DIV.PIVOT_RIGHT }) : d.barsAgo === 0 ? t(lang, "kripto.tren.justNow") : t(lang, "kripto.tren.barsAgo", { n: d.barsAgo });
       const pct = ((d.pivot2.price - d.pivot1.price) / d.pivot1.price) * 100;
       return t(lang, "divchart.caption.row", {
         icon: d.dir === "bull" ? "🟢" : "🔴",
-        tag: t(lang, `div.tag.${d.kind}.${d.dir}`),
+        tag: (isEarly ? t(lang, "div.early.prefix") + " " : "") + t(lang, `div.tag.${d.kind}.${d.dir}`),
         ind: d.indicator.toUpperCase(),
         p1: fmtLevel(d.pivot1.price),
         p2: fmtLevel(d.pivot2.price),
@@ -592,7 +602,8 @@ async function runScanDivergentCoin(sock, msg, ctx, { coin, tf, condition, indic
     body = rows.join("\n");
     if (divs.some((d) => d.conflict)) body += "\n" + t(lang, "div.conflict.line", { coin, tf: TF_LABEL[tf] });
   }
-  await sock.sendMessage(jid, { image: png, caption: `${head}\n${body}\n${t(lang, "divchart.caption.foot", { win: DIV.PIVOT_RIGHT })}` }, { quoted: msg });
+  const earlyFoot = divs.some((d) => d.status === "early") ? "\n" + t(lang, "divreport.foot.early", { win: DIV.PIVOT_RIGHT }) : "";
+  await sock.sendMessage(jid, { image: png, caption: `${head}\n${body}\n${t(lang, "divchart.caption.foot", { win: DIV.PIVOT_RIGHT })}${earlyFoot}` }, { quoted: msg });
 }
 
 // Nilai indikator di caption: 2 desimal; MACD koin murah bisa sangat kecil.
@@ -608,8 +619,8 @@ function fmtIndVal(v) {
  * !scandivergent (item 05). Semua koin x (satu TF atau keempat TF), dibaca dari snapshot cache yang sama
  * dengan !scan. condition null = dua arah. tf null = keempat TF.
  */
-async function runScanDivergent(sock, msg, ctx, { coin, condition, tf, indicators, kinds }) {
-  if (coin) return runScanDivergentCoin(sock, msg, ctx, { coin, tf, condition, indicators, kinds });
+async function runScanDivergent(sock, msg, ctx, { coin, condition, tf, indicators, kinds, early = false }) {
+  if (coin) return runScanDivergentCoin(sock, msg, ctx, { coin, tf, condition, indicators, kinds, early });
   const { jid, lang } = ctx;
   const tfs = tf ? [tf] : ALL_TFS;
   const entries = await loadSnapshots(sock, msg, ctx, tfs);
@@ -718,21 +729,24 @@ function parseStatArgs(name, raw, defaultTf) {
     let tf = null;
     let coin = null;
     let condition = null;
+    let early = false;
     const inds = [];
     const kinds = [];
     const dirs = new Set();
     for (const tok of text.split(/\s+/).filter(Boolean)) {
       const low = tok.toLowerCase();
       if (TIMEFRAMES[tok.toUpperCase()]) tf = tok.toUpperCase();
+      else if (DIV_EARLY_TOKENS.has(low)) early = true;
       else if (DIV_DIR_TOKENS[low]) dirs.add(DIV_DIR_TOKENS[low]);
       else if (DIV_IND_TOKENS[low]) inds.push(DIV_IND_TOKENS[low]);
       else if (DIV_KIND_TOKENS[low]) kinds.push(DIV_KIND_TOKENS[low]);
       else if (!coin && /^[A-Za-z0-9]{1,15}$/.test(tok)) coin = tok.toUpperCase(); // !scandivergent <koin>: chart satu koin
       else return null; // token tidak dikenal -> tampilkan penjelasan command
     }
+    if (early && !coin) return null; // `dini` hanya untuk chart satu koin (scan semua koin hanya memuat sinyal terkonfirmasi)
     if (dirs.size === 1) condition = [...dirs][0]; // dua arah sekaligus = semua arah
     // Mode per koin menggambar SATU chart, jadi TF kosong = default pengguna (bukan keempat TF seperti scan semua koin).
-    return { coin, condition, tf: coin ? tf || defaultTf : tf, indicators: [...new Set(inds)], kinds: [...new Set(kinds)] };
+    return { coin, condition, tf: coin ? tf || defaultTf : tf, indicators: [...new Set(inds)], kinds: [...new Set(kinds)], early };
   }
 
   // scan: token timeframe dikenali di mana saja, sisanya digabung jadi nama kondisi

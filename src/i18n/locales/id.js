@@ -436,6 +436,10 @@ module.exports = {
   "div.tag.hidden.bear": "Tersembunyi Bearish (lanjutan turun)",
   "div.conflict.chart": "KONFLIK: Bullish + Bearish",
   "div.conflict.line": "⚠️ *KONFLIK*: {coin} {tf} punya sinyal Bullish dan Bearish sekaligus. Baca keduanya, jangan hanya satu arah.",
+  "div.early.prefix": "[DINI]",
+  "div.early.chart": "DINI, BELUM TERKONFIRMASI",
+  "div.early.chartNote": "panah putus-putus = sinyal dini (pivot belum penuh terkonfirmasi, bisa gugur)",
+  "div.early.ago": "dini: {seen} dari {win} candle konfirmasi",
   "div.scan.body": "🔀 *SCAN DIV {dir} {tf}* ({filters})\n{n} dari {total} koin cocok\n\n{rows}\n\n_Reguler = potensi pembalikan, Tersembunyi = potensi lanjutan tren. Dihitung dari candle closed; pivot butuh {win} candle konfirmasi, jadi sinyal muncul sedikit setelah puncak/lembah._\n_Edukasi, bukan saran investasi._",
   "div.scan.empty": "🔀 Tidak ada divergence {dir} ({filters}) yang baru di {tf} (dari {total} koin dipindai). Hanya yang terkonfirmasi dalam {look} candle closed terakhir yang dihitung.\n_Edukasi, bukan saran investasi._",
   "divchart.caption.head": "🔀 *{coin}/USDT {tf}* {price}\n_{filters}_\n",
@@ -622,6 +626,12 @@ module.exports = {
   "divalert.deleted": "🗑️ Alarm divergence {id} dihapus.",
   "divalert.notFound": "❓ Alarm divergence {id} tidak ditemukan. Lihat daftar dengan !alertdiv list.",
   "divalert.deletedAll": "🗑️ {n} alarm divergence dihapus.",
+  "divalert.filter.early": "dini",
+  "divalert.msg.early": "⏳ *ALARM DIVERGENCE DINI* (belum terkonfirmasi)\n*{coin}* {tf} | {ind} | {kd}\n{desc}{conflict}\nCandle closed: {time}\n_Dini: pivot baru punya {seen} dari {win} candle konfirmasi, jadi bisa gugur kalau ada candle yang close menembus pivot. Jangan diperlakukan sebagai sinyal final. Edukasi, bukan saran investasi._",
+  "divalert.created.early": "⏳ Mode DINI aktif: kamu juga dapat sinyal yang pivotnya belum penuh terkonfirmasi (berlabel \"dini, belum terkonfirmasi\"), 1 sampai {win} candle lebih awal. Bisa gugur. Kalau kemudian terkonfirmasi, tidak dikirim lagi.",
+  "divreport.group.early.bull": "⏳ Bullish DINI (belum terkonfirmasi, potensi pembalikan naik)",
+  "divreport.group.early.bear": "⏳ Bearish DINI (belum terkonfirmasi, potensi pembalikan turun)",
+  "divreport.foot.early": "⏳ DINI = pivot belum penuh terkonfirmasi ({win} candle konfirmasi belum lengkap), bisa gugur. Kalau kemudian terkonfirmasi, tidak dikirim lagi.",
 
   // ---------- !alertind (alarm indikator lanjutan: bias berubah, crossover baru; item 10) ----------
   "advalert.bias.bull": "Bullish",

@@ -11,7 +11,7 @@
  * Tersembunyi = lanjutan) dengan judul tegas: Koin | Indikator | Jenis. Baris konflik (bull + bear sekaligus) diberi tanda.
  * Gaya (font, warna, margin, footer) memakai ulang watchPdf.js, tanpa dependensi baru.
  *
- * @typedef {{coin:string, indicator:'rsi'|'macd', kind:'regular'|'hidden', conflict?:boolean}} DivRow
+ * @typedef {{coin:string, indicator:'rsi'|'macd', kind:'regular'|'hidden', conflict?:boolean, early?:boolean}} DivRow
  * @typedef {{tf:string, bull:DivRow[], bear:DivRow[]}} DivSection  (tf = label tampil, mis. "1H", "15m")
  */
 
@@ -35,9 +35,11 @@ const L = {
     cols: ["No", "Koin", "Indikator", "Jenis"],
     kind: { regular: "Reguler (pembalikan)", hidden: "Tersembunyi (lanjutan)" },
     conflict: "KONFLIK",
+    early: "DINI",
+    earlyGroup: { bull: "Bullish DINI (belum terkonfirmasi, potensi pembalikan naik)", bear: "Bearish DINI (belum terkonfirmasi, potensi pembalikan turun)" },
     none: "Tidak ada",
     noneTf: "Tidak ada divergence baru di timeframe ini.",
-    note: "Reguler = potensi pembalikan, Tersembunyi = potensi lanjutan tren. KONFLIK = koin punya sinyal bull dan bear sekaligus di TF itu. Dari candle closed.",
+    note: "Reguler = potensi pembalikan, Tersembunyi = potensi lanjutan tren. KONFLIK = koin punya sinyal bull dan bear sekaligus di TF itu. DINI = pivot belum penuh terkonfirmasi, bisa gugur. Dari candle closed.",
     foot: "Edukasi, bukan ajakan beli/jual.",
     page: (p, n) => `Hal. ${p}/${n}`,
   },
@@ -55,9 +57,11 @@ const L = {
     cols: ["No", "Coin", "Indicator", "Type"],
     kind: { regular: "Regular (reversal)", hidden: "Hidden (continuation)" },
     conflict: "CONFLICT",
+    early: "EARLY",
+    earlyGroup: { bull: "Bullish EARLY (not confirmed yet, potential reversal up)", bear: "Bearish EARLY (not confirmed yet, potential reversal down)" },
     none: "None",
     noneTf: "No new divergence on this timeframe.",
-    note: "Regular = potential reversal, Hidden = potential trend continuation. CONFLICT = coin has both bull and bear signals on that TF. From closed candles.",
+    note: "Regular = potential reversal, Hidden = potential trend continuation. CONFLICT = coin has both bull and bear signals on that TF. EARLY = pivot not fully confirmed yet, may fail. From closed candles.",
     foot: "Educational, not buy/sell advice.",
     page: (p, n) => `Page ${p}/${n}`,
   },
@@ -145,7 +149,7 @@ async function buildDivergencePdf({ sections, mode = "alert", time, lang = "id" 
       put(page, String(i + 1), cols[0], y, font, 8.5, C.muted);
       put(page, clean(r.coin), cols[1], y, bold, 8.5, C.ink);
       put(page, String(r.indicator).toUpperCase(), cols[2], y, font, 8.5, C.ink);
-      put(page, (tx.kind[r.kind] || r.kind) + (r.conflict ? `  [${tx.conflict}]` : ""), cols[3], y, r.conflict ? bold : font, 8.5, r.conflict ? C.bearish : C.ink);
+      put(page, (tx.kind[r.kind] || r.kind) + (r.early ? `  [${tx.early}]` : "") + (r.conflict ? `  [${tx.conflict}]` : ""), cols[3], y, r.conflict ? bold : font, 8.5, r.conflict ? C.bearish : C.ink);
       y -= ROW_H;
     });
   };
@@ -173,9 +177,15 @@ async function buildDivergencePdf({ sections, mode = "alert", time, lang = "id" 
         continue;
       }
       for (const kind of ["regular", "hidden"]) {
-        const part = rows.filter((r) => r.kind === kind);
+        const part = rows.filter((r) => r.kind === kind && !r.early);
         if (!part.length) continue;
         drawGroup(part, `${tx.group[kind][dir]} (${part.length})`, color);
+        y -= GROUP_GAP;
+      }
+      // Sinyal DINI: tabel sendiri berjudul tegas, dan tiap baris diberi tanda [DINI].
+      const earlyPart = rows.filter((r) => r.early);
+      if (earlyPart.length) {
+        drawGroup(earlyPart, `${tx.earlyGroup[dir]} (${earlyPart.length})`, color);
         y -= GROUP_GAP;
       }
     }
