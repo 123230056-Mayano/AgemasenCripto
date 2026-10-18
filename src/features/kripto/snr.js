@@ -66,22 +66,40 @@ function computeSnr(candles, price, { count = PER_SIDE } = {}) {
   return { resistance, support };
 }
 
-/** 1 sentuhan = lemah, 2 = sedang, 3+ = kuat. */
+/**
+ * Skala kekuatan 5 bulatan (jumlah pantulan = berapa pivot yang menumpuk di zona itu):
+ *   1x   -> ●○○○○ lemah
+ *   2x   -> ●●○○○ sedang
+ *   3-4x -> ●●●○○ sedang
+ *   5-8x -> ●●●●○ kuat
+ *   9x+  -> ●●●●● sangat kuat
+ * Skala 5 tingkat supaya level 6x dan 12x tidak tampil sama.
+ */
+function strengthLevel(touches) {
+  if (touches >= 9) return 5;
+  if (touches >= 5) return 4;
+  if (touches >= 3) return 3;
+  if (touches === 2) return 2;
+  return 1;
+}
+
 function strengthKey(touches) {
-  if (touches >= 3) return "strong";
-  if (touches === 2) return "medium";
+  const lv = strengthLevel(touches);
+  if (lv === 5) return "vstrong";
+  if (lv === 4) return "strong";
+  if (lv >= 2) return "medium";
   return "weak";
 }
 
 /**
- * Baris level, mis. "🔴 R1  $152.30 (+1.80%)  ●●○ sedang (2x)"
- * Titik: ●●● = kuat, ●●○ = sedang, ●○○ = lemah.
+ * Baris level, mis. "🔴 R1  $152.30 (+1.80%)  ●●○○○ sedang (2x)"
+ * Bulat isi = kekuatan, bulat kosong = bagian yang belum terisi (bukan sinyal negatif).
  */
 function levelLine(lang, label, icon, zone, price) {
   if (!zone) return `${icon} ${label}  -`;
-  const key = strengthKey(zone.touches);
-  const dots = key === "strong" ? "●●●" : key === "medium" ? "●●○" : "●○○";
-  const name = t(lang, `kripto.snr.str.${key}`);
+  const lv = strengthLevel(zone.touches);
+  const dots = "●".repeat(lv) + "○".repeat(5 - lv);
+  const name = t(lang, `kripto.snr.str.${strengthKey(zone.touches)}`);
   return `${icon} ${label}  ${fmtLevel(zone.price)} (${fmtPct(pctFrom(price, zone.price))})  ${dots} ${name} (${zone.touches}x)`;
 }
 
@@ -138,4 +156,4 @@ async function runSnr(sock, msg, { jid, lang }, { coin, tf }) {
   else await sock.sendMessage(jid, { text: caption }, { quoted: msg });
 }
 
-module.exports = { runSnr, computeSnr, findZones, strengthKey };
+module.exports = { runSnr, computeSnr, findZones, strengthKey, strengthLevel };
