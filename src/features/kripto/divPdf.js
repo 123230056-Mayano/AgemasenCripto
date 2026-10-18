@@ -7,10 +7,11 @@
  * beberapa TF yang closed bersamaan digabung) dan hasil !scandivergent.
  *
  * Susunan: judul + ringkasan, lalu satu bagian per TF (urut 1D > 4H > 1H > 15m, sesuai urutan `sections`),
- * tiap bagian berisi tabel Bullish dan tabel Bearish: Koin | Indikator | Jenis.
+ * tiap bagian berisi tabel Bullish dan tabel Bearish, masing-masing dipecah per jenis (Reguler = pembalikan,
+ * Tersembunyi = lanjutan) dengan judul tegas: Koin | Indikator | Jenis. Baris konflik (bull + bear sekaligus) diberi tanda.
  * Gaya (font, warna, margin, footer) memakai ulang watchPdf.js, tanpa dependensi baru.
  *
- * @typedef {{coin:string, indicator:'rsi'|'macd', kind:'regular'|'hidden'}} DivRow
+ * @typedef {{coin:string, indicator:'rsi'|'macd', kind:'regular'|'hidden', conflict?:boolean}} DivRow
  * @typedef {{tf:string, bull:DivRow[], bear:DivRow[]}} DivSection  (tf = label tampil, mis. "1H", "15m")
  */
 
@@ -25,13 +26,18 @@ const L = {
     sub: { alert: (time) => `Candle closed ${time}`, scan: (time) => `Dipindai ${time}` },
     summary: (list) => `Sinyal per TF: ${list}`,
     tfHead: (tf, n) => `${tf}  |  ${n} sinyal`,
-    bull: (n) => `Bullish (${n})`,
-    bear: (n) => `Bearish (${n})`,
+    group: {
+      regular: { bull: "Bullish Reguler (pembalikan naik)", bear: "Bearish Reguler (pembalikan turun)" },
+      hidden: { bull: "Bullish Tersembunyi (lanjutan naik)", bear: "Bearish Tersembunyi (lanjutan turun)" },
+    },
+    bullEmpty: "Bullish",
+    bearEmpty: "Bearish",
     cols: ["No", "Koin", "Indikator", "Jenis"],
-    kind: { regular: "Reguler", hidden: "Tersembunyi" },
+    kind: { regular: "Reguler (pembalikan)", hidden: "Tersembunyi (lanjutan)" },
+    conflict: "KONFLIK",
     none: "Tidak ada",
     noneTf: "Tidak ada divergence baru di timeframe ini.",
-    note: "Reguler = potensi pembalikan, Tersembunyi = potensi lanjutan tren. Dari candle closed; sinyal muncul beberapa candle setelah pivot.",
+    note: "Reguler = potensi pembalikan, Tersembunyi = potensi lanjutan tren. KONFLIK = koin punya sinyal bull dan bear sekaligus di TF itu. Dari candle closed.",
     foot: "Edukasi, bukan ajakan beli/jual.",
     page: (p, n) => `Hal. ${p}/${n}`,
   },
@@ -40,13 +46,18 @@ const L = {
     sub: { alert: (time) => `Candle closed ${time}`, scan: (time) => `Scanned ${time}` },
     summary: (list) => `Signals per TF: ${list}`,
     tfHead: (tf, n) => `${tf}  |  ${n} signals`,
-    bull: (n) => `Bullish (${n})`,
-    bear: (n) => `Bearish (${n})`,
+    group: {
+      regular: { bull: "Bullish Regular (reversal up)", bear: "Bearish Regular (reversal down)" },
+      hidden: { bull: "Bullish Hidden (continuation up)", bear: "Bearish Hidden (continuation down)" },
+    },
+    bullEmpty: "Bullish",
+    bearEmpty: "Bearish",
     cols: ["No", "Coin", "Indicator", "Type"],
-    kind: { regular: "Regular", hidden: "Hidden" },
+    kind: { regular: "Regular (reversal)", hidden: "Hidden (continuation)" },
+    conflict: "CONFLICT",
     none: "None",
     noneTf: "No new divergence on this timeframe.",
-    note: "Regular = potential reversal, Hidden = potential trend continuation. From closed candles; signals appear a few candles after the pivot.",
+    note: "Regular = potential reversal, Hidden = potential trend continuation. CONFLICT = coin has both bull and bear signals on that TF. From closed candles.",
     foot: "Educational, not buy/sell advice.",
     page: (p, n) => `Page ${p}/${n}`,
   },
@@ -134,7 +145,7 @@ async function buildDivergencePdf({ sections, mode = "alert", time, lang = "id" 
       put(page, String(i + 1), cols[0], y, font, 8.5, C.muted);
       put(page, clean(r.coin), cols[1], y, bold, 8.5, C.ink);
       put(page, String(r.indicator).toUpperCase(), cols[2], y, font, 8.5, C.ink);
-      put(page, tx.kind[r.kind] || r.kind, cols[3], y, font, 8.5, C.ink);
+      put(page, (tx.kind[r.kind] || r.kind) + (r.conflict ? `  [${tx.conflict}]` : ""), cols[3], y, r.conflict ? bold : font, 8.5, r.conflict ? C.bearish : C.ink);
       y -= ROW_H;
     });
   };
@@ -151,10 +162,24 @@ async function buildDivergencePdf({ sections, mode = "alert", time, lang = "id" 
       y -= ROW_H + GROUP_GAP;
       continue;
     }
-    drawGroup(s.bull, tx.bull(s.bull.length), C.bullish);
-    y -= GROUP_GAP;
-    drawGroup(s.bear, tx.bear(s.bear.length), C.bearish);
-    y -= GROUP_GAP + 6;
+    // Tiap arah dipecah per jenis: reguler (pembalikan) lalu tersembunyi (lanjutan), masing-masing tabel sendiri.
+    for (const [dir, rows, color, emptyLabel] of [
+      ["bull", s.bull, C.bullish, tx.bullEmpty],
+      ["bear", s.bear, C.bearish, tx.bearEmpty],
+    ]) {
+      if (!rows.length) {
+        drawGroup(rows, `${emptyLabel} (0)`, color);
+        y -= GROUP_GAP;
+        continue;
+      }
+      for (const kind of ["regular", "hidden"]) {
+        const part = rows.filter((r) => r.kind === kind);
+        if (!part.length) continue;
+        drawGroup(part, `${tx.group[kind][dir]} (${part.length})`, color);
+        y -= GROUP_GAP;
+      }
+    }
+    y -= 6;
   }
 
   pages.forEach((p, i) => {

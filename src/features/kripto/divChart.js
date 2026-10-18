@@ -40,7 +40,7 @@ const fmtSigned = (v) => (v > 0 ? "+" : v < 0 ? "-" : "") + fmtInd(Math.abs(v));
  * @param {string} o.coin
  * @param {string} o.tf        "15m" | "1H" | "4H" | "1D"
  * @param {Array} o.divs       hasil detectDivergence() yang sudah difilter
- * @param {{bull:string,bear:string,regular:string,hidden:string}} [o.labels]
+ * @param {{bull:string,bear:string,regular:string,hidden:string,reversal?:string,continuation?:string,conflict?:string}} [o.labels]
  * @returns {Buffer} PNG
  */
 function renderDivChart({ candles, coin, tf, divs = [], labels = {} }) {
@@ -51,6 +51,9 @@ function renderDivChart({ candles, coin, tf, divs = [], labels = {} }) {
     bear: labels.bear || "Bearish",
     regular: labels.regular || "Regular",
     hidden: labels.hidden || "Hidden",
+    reversal: labels.reversal || "reversal",
+    continuation: labels.continuation || "continuation",
+    conflict: labels.conflict || "CONFLICT: Bullish + Bearish",
   };
 
   const n = candles.length;
@@ -260,7 +263,9 @@ function renderDivChart({ candles, coin, tf, divs = [], labels = {} }) {
     arrow(g, ax, ay, bx, by);
     dot(g, ax, ay);
     const diff = p2.ind - p1.ind;
-    const lbl = `${L[d.dir]} ${L[d.kind]} · ${isRsi ? "RSI" : "MACD"} ${fmtInd(p1.ind)} → ${fmtInd(p2.ind)} (${fmtSigned(diff)})`;
+    // arah tegas (Bullish/Bearish) + jenis + bias, supaya "Bearish hidden" tidak terbaca sebagai pembalikan turun
+    const biasWord = L[d.bias || (d.kind === "regular" ? "reversal" : "continuation")];
+    const lbl = `${L[d.dir]} ${L[d.kind]} (${biasWord}) · ${isRsi ? "RSI" : "MACD"} ${fmtInd(p1.ind)} → ${fmtInd(p2.ind)} (${fmtSigned(diff)})`;
     const slotN = used.get(box) || 0; // label bertumpuk? geser ke bawah/atas per divergence
     used.set(box, slotN + 1);
     const cy = bull ? Math.max(ay, by) + 30 + slotN * 30 : Math.min(ay, by) - 26 - slotN * 30;
@@ -283,7 +288,15 @@ function renderDivChart({ candles, coin, tf, divs = [], labels = {} }) {
   g.fillText(`${fmtPrice(last.c)}  (${chgLast >= 0 ? "+" : ""}${chgLast.toFixed(2)}%)`, Lm + titleW + 20, 27);
   g.font = `19px ${family}`;
   g.fillStyle = C.axis;
-  g.fillText(`Close candle only · pivot ${DIV.PIVOT_LEFT} left / ${DIV.PIVOT_RIGHT} right`, Lm, 56);
+  const sub = `Close candle only · pivot ${DIV.PIVOT_LEFT} left / ${DIV.PIVOT_RIGHT} right`;
+  g.fillText(sub, Lm, 56);
+  if (divs.some((d) => d.conflict)) {
+    // bull dan bear sekaligus: tulis tegas di header, tanpa emoji (font canvas belum tentu punya)
+    const subW = g.measureText(sub).width;
+    g.font = `bold 20px ${family}`;
+    g.fillStyle = "#facc15";
+    g.fillText(L.conflict, Lm + subW + 24, 56);
+  }
 
   const ml = (txt, x, y, color) => {
     g.font = `20px ${family}`;

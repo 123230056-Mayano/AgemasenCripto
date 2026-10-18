@@ -114,7 +114,7 @@ function subCoins(sub, { allCoins, watchOf, userJid }) {
  * @param {{subs:Array<{userJid:string, sub:object}>, tf:string,
  *   divsByCoin:Map<string,object[]>, allCoins:Iterable<string>,
  *   watchOf:(jid:string)=>string[], isSent:(key:string)=>boolean}} p
- * @returns {Array<{key,chat,userJid,coin,tf,indicator,kind,dir,pivot2Time,confirmedCloseTime,barsAgo}>}
+ * @returns {Array<{key,chat,userJid,coin,tf,indicator,kind,dir,pivot2Time,conflict,confirmedCloseTime,barsAgo}>}
  */
 function collectItems({ subs, tf, divsByCoin, allCoins, watchOf, isSent }) {
   const items = new Map(); // key -> item (dedupe dalam putaran)
@@ -142,6 +142,7 @@ function collectItems({ subs, tf, divsByCoin, allCoins, watchOf, isSent }) {
           kind: d.kind,
           dir: d.dir,
           pivot2Time: d.pivot2.time,
+          conflict: !!d.conflict, // koin + TF ini juga punya sinyal arah berlawanan (lihat markConflict)
           confirmedCloseTime,
           barsAgo: d.barsAgo,
         });
@@ -168,6 +169,7 @@ function groupByRecipient(items) {
 // 3. Laporan gabungan (teks singkat atau PDF) + pembatas laju
 // =====================================================================
 const DIR_ORDER = ["bull", "bear"];
+const KIND_ORDER = ["regular", "hidden"]; // reguler (pembalikan) selalu di atas tersembunyi (lanjutan)
 const cmpRow = (a, b) => a.coin.localeCompare(b.coin) || a.indicator.localeCompare(b.indicator) || a.kind.localeCompare(b.kind);
 
 /**
@@ -180,7 +182,11 @@ const cmpRow = (a, b) => a.coin.localeCompare(b.coin) || a.indicator.localeCompa
 function buildSections(items, tfs) {
   return TF_ORDER.filter((k) => tfs.includes(k)).map((k) => {
     const mine = items.filter((it) => it.tf === k);
-    const pick = (dir) => mine.filter((it) => it.dir === dir).map((it) => ({ coin: it.coin, indicator: it.indicator, kind: it.kind })).sort(cmpRow);
+    const pick = (dir) =>
+      mine
+        .filter((it) => it.dir === dir)
+        .map((it) => ({ coin: it.coin, indicator: it.indicator, kind: it.kind, dir: it.dir, conflict: !!it.conflict }))
+        .sort(cmpRow);
     return { key: k, tf: TF_LABEL[k], bull: pick("bull"), bear: pick("bear") };
   });
 }
@@ -220,8 +226,13 @@ function buildGroupedText(lang, sections, { mode = "alert", time, filters = "" }
     for (const dir of DIR_ORDER) {
       const rows = s[dir];
       if (!rows.length) continue;
-      lines.push(t(lang, `divreport.group.${dir}`));
-      for (const r of rows) lines.push(t(lang, "divreport.row", { coin: r.coin, ind: indLabel(r.indicator), kind: t(lang, `div.kind.${r.kind}`) }));
+      // Reguler dan tersembunyi dipisah jelas, masing-masing dengan judul yang menyebut arah + bias.
+      for (const kind of KIND_ORDER) {
+        const part = rows.filter((r) => r.kind === kind);
+        if (!part.length) continue;
+        lines.push(t(lang, `divreport.group.${kind}.${dir}`));
+        for (const r of part) lines.push(t(lang, "divreport.row", { coin: r.coin, ind: indLabel(r.indicator), flag: r.conflict ? " ⚠️" : "" }));
+      }
     }
     blocks.push(lines.join("\n"));
   }
@@ -340,8 +351,8 @@ function fmtCandleTime(lang, ms, tz = DAILY_TZ, tzLabel = DAILY_TZ_LABEL) {
   return `${date} ${time} ${tzLabel}`;
 }
 
-/** "Reguler Bullish" */
-const kindDir = (lang, kind, dir) => `${t(lang, `div.kind.${kind}`)} ${t(lang, `div.dir.${dir}`)}`;
+/** "Reguler Bullish (pembalikan naik)" / "Tersembunyi Bearish (lanjutan turun)": jenis + arah + bias dalam satu label. */
+const kindDir = (lang, kind, dir) => t(lang, `div.tag.${kind}.${dir}`);
 
 /** "RSI" / "MACD" */
 const indLabel = (indicator) => indicator.toUpperCase();
@@ -353,6 +364,7 @@ function buildSingleText(lang, it) {
     ind: indLabel(it.indicator),
     kd: kindDir(lang, it.kind, it.dir),
     desc: t(lang, `divalert.desc.${it.kind}.${it.dir}`, { ind: t(lang, `divalert.indDesc.${it.indicator}`) }),
+    conflict: it.conflict ? "\n" + t(lang, "div.conflict.line", { coin: it.coin, tf: TF_LABEL[it.tf] || it.tf }) : "",
     time: fmtCandleTime(lang, it.confirmedCloseTime),
   });
 }
@@ -391,4 +403,6 @@ module.exports = {
   fmtCandleTime,
   buildSingleText,
   describeFilters,
+  kindDir,
+  KIND_ORDER,
 };

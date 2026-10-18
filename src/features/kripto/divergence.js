@@ -28,6 +28,12 @@
  *     "price" = perilaku lama (v1, v2): nilai indikator di candle pivot HARGA yang sama.
  *   - Kebaruan: pivot kedua harus terkonfirmasi <= LOOKBACK candle terakhir (inklusif, jadi
  *     barsAgo 0..LOOKBACK; sesuai contoh PDF yang menampilkan "3 candle").
+ *   - Pasangan pivot (revisi bagian 3): pivot TERBARU dibandingkan dengan SEMUA pivot sejenis sebelumnya yang
+ *     jaraknya MIN_BARS..MAX_BARS. Per (indikator, sisi low/high) diambil SATU pasangan yang paling jelas =
+ *     selisih nilai indikator terbesar (seri: pivot lawan yang paling dekat). Satu pivot kecil baru tidak lagi
+ *     menggeser pasangan dan membuat divergence yang tadinya valid hilang.
+ *   - Tiap hasil punya `bias`: "reversal" (regular) | "continuation" (hidden), supaya "Bearish hidden" tidak
+ *     terbaca sebagai pembalikan turun. `conflict` = true pada SEMUA hasil bila bull dan bear muncul bersamaan.
  *
  * Changelog parameter:
  *   v1 (2026-10-16) nilai awal usulan PDF. Setel setelah dibandingkan dengan chart.
@@ -39,18 +45,23 @@
  *       ekstrem itu, pivot.indIdx = indeks candle-nya (dipakai divChart untuk menaruh panah). Opsi IND_PIVOT: "own"
  *       (default) | "price" (v1/v2, indIdx = idx). Pasangan yang jendelanya saling menimpa sampai indIdx2 <= indIdx1
  *       dibuang. Untuk meniru v2 persis: { IND_PIVOT: "price" }.
+ *   v4 (2026-10-18) Revisi bagian 3: pivot terbaru dibandingkan dengan beberapa pivot sebelumnya dalam MAX_BARS
+ *       (bukan hanya satu pivot sebelumnya), diambil pasangan dengan selisih indikator terbesar. Tambah field
+ *       `bias` (reversal | continuation) dan `conflict` (bull + bear sekaligus). Untuk meniru v3 (hanya dua pivot
+ *       terakhir): { PAIR_MODE: "last" }.
  */
 
 const { rsi, macd, atr } = require("./indicators");
 const { INDICATOR_CONFIG } = require("../../config/indicatorConfig");
 
-const DIV_VERSION = 3;
+const DIV_VERSION = 4;
 const DIV = {
   PIVOT_LEFT: 3, // candle di kiri pivot yang harus lebih tinggi/rendah (berdasarkan wick, strict)
   PIVOT_RIGHT: 4, // candle konfirmasi di kanan pivot
   PIVOT_CONFIRM: "close", // "close": sisi kanan diperiksa lewat close (wick boleh menembus) | "wick": perilaku v1
   IND_PIVOT: "own", // "own": lembah/puncak indikator sendiri dekat pivot harga | "price": nilai di candle pivot harga (v1/v2)
   IND_RADIUS: 3, // jendela pencarian ekstrem indikator = candle pivot harga +/- N
+  PAIR_MODE: "best", // "best": pivot terbaru vs semua pivot sebelumnya dalam MAX_BARS, ambil selisih indikator terbesar | "last": hanya dua pivot terakhir (v1-v3)
   MIN_BARS: 5, // jarak minimum antar dua pivot
   MAX_BARS: 60, // jarak maksimum antar dua pivot
   LOOKBACK: 3, // pivot terbaru harus terkonfirmasi dalam N candle terakhir
@@ -62,6 +73,8 @@ const DIV = {
   ATR_PERIOD: INDICATOR_CONFIG.ATR_PERIOD,
 };
 const DEFAULT_INDICATORS = ["rsi", "macd"];
+// regular = potensi pembalikan, hidden = potensi lanjutan tren (arah `dir` tetap arah pergerakan yang dimaksud).
+const BIAS = { regular: "reversal", hidden: "continuation" };
 const MIN_CANDLES = 40; // MACD butuh warmup 26 + 9 - 1 = 34 candle; di bawah ini dilewati (bukan error)
 
 /** Buang candle berjalan di ujung deret. Candle tanpa ct/closed dianggap sudah closed. */
@@ -172,11 +185,23 @@ function histRange(hist, n, bars) {
 }
 
 /**
+ * Tandai konflik: kalau dalam satu daftar (satu koin + satu TF) ada divergence bull DAN bear sekaligus,
+ * semua itemnya diberi conflict = true (tampilan wajib menyebut kedua arah dengan label tegas, jangan hanya
+ * salah satu). Mengubah item di tempat dan mengembalikan daftar yang sama.
+ * @param {Array<{dir:'bull'|'bear', conflict?:boolean}>} divs
+ */
+function markConflict(divs) {
+  const both = divs.some((d) => d.dir === "bull") && divs.some((d) => d.dir === "bear");
+  for (const d of divs) d.conflict = both;
+  return divs;
+}
+
+/**
  * @param {Array<{t:number,o:number,h:number,l:number,c:number,ct?:number,closed?:boolean}>} candles urut lama -> baru
  * @param {{indicators?:string[], now?:number}&Partial<typeof DIV>} [opts]
  * @returns {Array<{indicator:'rsi'|'macd', kind:'regular'|'hidden', dir:'bull'|'bear',
  *   pivot1:{idx:number,time:number,price:number,ind:number,indIdx:number}, pivot2:{idx:number,time:number,price:number,ind:number,indIdx:number},
- *   confirmedAtTime:number, barsAgo:number}>} terbaru dulu
+ *   bias:'reversal'|'continuation', conflict:boolean, confirmedAtTime:number, barsAgo:number}>} terbaru dulu
  */
 function detectDivergence(candles, opts = {}) {
   const { indicators = DEFAULT_INDICATORS, now = Date.now(), ...over } = opts;
@@ -208,69 +233,81 @@ function detectDivergence(candles, opts = {}) {
   for (const type of ["low", "high"]) {
     const piv = findPivots(cs, type, P);
     if (piv.length < 2) continue;
-    const i1 = piv[piv.length - 2]; // langkah 4: dua pivot terakhir yang sejenis
-    const i2 = piv[piv.length - 1];
-    const gap = i2 - i1;
-    if (gap < P.MIN_BARS || gap > P.MAX_BARS) continue;
-
+    const i2 = piv[piv.length - 1]; // pivot terbaru
     const confirmIdx = i2 + P.PIVOT_RIGHT;
     const barsAgo = last - confirmIdx; // langkah 8: kebaruan
     if (barsAgo > P.LOOKBACK) continue;
-
-    const key = type === "low" ? "l" : "h";
-    const price1 = cs[i1][key];
-    const price2 = cs[i2][key];
     const a = atrS[i2];
     if (a == null || !(a > 0)) continue;
-    if (Math.abs(price2 - price1) < P.MIN_PRICE_ATR * a) continue; // langkah 6: filter harga
 
+    // langkah 4: kandidat pivot pembanding. "best": semua pivot sebelumnya dalam MAX_BARS (terdekat dulu);
+    // "last": hanya satu pivot sebelumnya (perilaku v1-v3).
+    let prior = piv.slice(0, -1).reverse();
+    if (P.PAIR_MODE === "last") prior = prior.slice(0, 1);
+
+    const key = type === "low" ? "l" : "h";
+    const price2 = cs[i2][key];
     for (const ind of Object.keys(series)) {
-      // langkah 5: nilai pivot indikator
-      let v1;
-      let v2;
-      let j1 = i1;
-      let j2 = i2;
-      if (P.IND_PIVOT === "price") {
-        v1 = series[ind][i1];
-        v2 = series[ind][i2];
-      } else {
-        const e1 = indicatorExtreme(series[ind], i1, type, P.IND_RADIUS);
-        const e2 = indicatorExtreme(series[ind], i2, type, P.IND_RADIUS);
-        if (!e1 || !e2) continue;
-        ({ idx: j1, value: v1 } = e1);
-        ({ idx: j2, value: v2 } = e2);
-        if (j2 <= j1) continue; // jendela saling menimpa -> urutan lembah indikator terbalik/identik
-      }
-      if (v1 == null || v2 == null) continue;
-      if (Math.abs(v2 - v1) < minDiff[ind] || v2 === v1) continue; // langkah 6: filter indikator
+      let best = null;
+      for (const i1 of prior) {
+        const gap = i2 - i1;
+        if (gap < P.MIN_BARS || gap > P.MAX_BARS) continue;
+        const price1 = cs[i1][key];
+        if (Math.abs(price2 - price1) < P.MIN_PRICE_ATR * a) continue; // langkah 6: filter harga
 
-      const priceUp = price2 > price1;
-      const indUp = v2 > v1;
-      let kind = null;
-      let dir = null;
-      if (type === "low") {
-        dir = "bull";
-        if (!priceUp && indUp) kind = "regular"; // lower low + higher low
-        else if (priceUp && !indUp) kind = "hidden"; // higher low + lower low
-      } else {
-        dir = "bear";
-        if (priceUp && !indUp) kind = "regular"; // higher high + lower high
-        else if (!priceUp && indUp) kind = "hidden"; // lower high + higher high
+        // langkah 5: nilai pivot indikator
+        let v1;
+        let v2;
+        let j1 = i1;
+        let j2 = i2;
+        if (P.IND_PIVOT === "price") {
+          v1 = series[ind][i1];
+          v2 = series[ind][i2];
+        } else {
+          const e1 = indicatorExtreme(series[ind], i1, type, P.IND_RADIUS);
+          const e2 = indicatorExtreme(series[ind], i2, type, P.IND_RADIUS);
+          if (!e1 || !e2) continue;
+          ({ idx: j1, value: v1 } = e1);
+          ({ idx: j2, value: v2 } = e2);
+          if (j2 <= j1) continue; // jendela saling menimpa -> urutan lembah indikator terbalik/identik
+        }
+        if (v1 == null || v2 == null) continue;
+        if (Math.abs(v2 - v1) < minDiff[ind] || v2 === v1) continue; // langkah 6: filter indikator
+
+        const priceUp = price2 > price1;
+        const indUp = v2 > v1;
+        let kind = null;
+        if (type === "low") {
+          if (!priceUp && indUp) kind = "regular"; // lower low + higher low
+          else if (priceUp && !indUp) kind = "hidden"; // higher low + lower low
+        } else {
+          if (priceUp && !indUp) kind = "regular"; // higher high + lower high
+          else if (!priceUp && indUp) kind = "hidden"; // lower high + higher high
+        }
+        if (!kind) continue; // langkah 7
+
+        // pasangan paling jelas = selisih indikator terbesar; seri -> pivot lawan terdekat (urutan iterasi, > strict)
+        const diff = Math.abs(v2 - v1);
+        if (best && diff <= best.diff) continue;
+        best = { diff, kind, i1, price1, v1, j1, v2, j2 };
       }
-      if (!kind) continue; // langkah 7
+      if (!best) continue;
 
       out.push({
         indicator: ind,
-        kind,
-        dir,
-        pivot1: { idx: i1, time: cs[i1].t, price: price1, ind: v1, indIdx: j1 },
-        pivot2: { idx: i2, time: cs[i2].t, price: price2, ind: v2, indIdx: j2 },
+        kind: best.kind,
+        dir: type === "low" ? "bull" : "bear",
+        bias: BIAS[best.kind],
+        conflict: false, // diisi markConflict di bawah
+        pivot1: { idx: best.i1, time: cs[best.i1].t, price: best.price1, ind: best.v1, indIdx: best.j1 },
+        pivot2: { idx: i2, time: cs[i2].t, price: price2, ind: best.v2, indIdx: best.j2 },
         confirmedAtTime: cs[confirmIdx].t,
         barsAgo,
       });
     }
   }
+  markConflict(out);
   return out.sort((x, y) => x.barsAgo - y.barsAgo || (x.indicator < y.indicator ? -1 : x.indicator > y.indicator ? 1 : 0));
 }
 
-module.exports = { DIV, DIV_VERSION, DEFAULT_INDICATORS, MIN_CANDLES, detectDivergence, dropUnclosed, findPivots, indicatorExtreme };
+module.exports = { DIV, DIV_VERSION, DEFAULT_INDICATORS, MIN_CANDLES, BIAS, detectDivergence, dropUnclosed, findPivots, indicatorExtreme, markConflict };

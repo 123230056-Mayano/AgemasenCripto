@@ -491,7 +491,8 @@ function scanCoins(coins, cond, lang, opts = {}) {
         if (found.length) {
           const parts = found.map((d) => {
             const ago = d.barsAgo === 0 ? t(lang, "kripto.tren.justNow") : t(lang, "kripto.tren.barsAgo", { n: d.barsAgo });
-            return `${t(lang, `div.kind.${d.kind}`)} ${d.indicator.toUpperCase()} (${ago})`;
+            const mark = d.conflict ? " ⚠️" : ""; // koin ini juga punya sinyal arah berlawanan di TF yang sama
+            return `${t(lang, `div.kind.${d.kind}`)} ${d.indicator.toUpperCase()} · ${t(lang, `div.bias.${d.bias}`)} (${ago})${mark}`;
           });
           push(c, parts.join(" + "), Math.min(...found.map((d) => d.barsAgo))); // terbaru dulu
         }
@@ -558,6 +559,9 @@ async function runScanDivergentCoin(sock, msg, ctx, { coin, tf, condition, indic
     bear: t(lang, "div.dir.bear"),
     regular: t(lang, "div.kind.regular"),
     hidden: t(lang, "div.kind.hidden"),
+    reversal: t(lang, "div.bias.reversal"),
+    continuation: t(lang, "div.bias.continuation"),
+    conflict: t(lang, "div.conflict.chart"),
   };
   const png = renderDivChart({ candles, coin, tf: TF_LABEL[tf], divs, labels });
 
@@ -567,13 +571,14 @@ async function runScanDivergentCoin(sock, msg, ctx, { coin, tf, condition, indic
   if (!divs.length) {
     body = t(lang, "divchart.caption.none", { look: DIV.LOOKBACK });
   } else {
-    const rows = divs.map((d) => {
+    // Reguler (pembalikan) dulu, baru tersembunyi (lanjutan); sort stabil menjaga urutan terbaru-dulu dalam tiap jenis.
+    const byKind = [...divs].sort((x, y) => (x.kind === y.kind ? 0 : x.kind === "regular" ? -1 : 1));
+    const rows = byKind.map((d) => {
       const ago = d.barsAgo === 0 ? t(lang, "kripto.tren.justNow") : t(lang, "kripto.tren.barsAgo", { n: d.barsAgo });
       const pct = ((d.pivot2.price - d.pivot1.price) / d.pivot1.price) * 100;
       return t(lang, "divchart.caption.row", {
         icon: d.dir === "bull" ? "🟢" : "🔴",
-        dir: t(lang, `div.dir.${d.dir}`),
-        kind: t(lang, `div.kind.${d.kind}`),
+        tag: t(lang, `div.tag.${d.kind}.${d.dir}`),
         ind: d.indicator.toUpperCase(),
         p1: fmtLevel(d.pivot1.price),
         p2: fmtLevel(d.pivot2.price),
@@ -585,6 +590,7 @@ async function runScanDivergentCoin(sock, msg, ctx, { coin, tf, condition, indic
       });
     });
     body = rows.join("\n");
+    if (divs.some((d) => d.conflict)) body += "\n" + t(lang, "div.conflict.line", { coin, tf: TF_LABEL[tf] });
   }
   await sock.sendMessage(jid, { image: png, caption: `${head}\n${body}\n${t(lang, "divchart.caption.foot", { win: DIV.PIVOT_RIGHT })}` }, { quoted: msg });
 }
