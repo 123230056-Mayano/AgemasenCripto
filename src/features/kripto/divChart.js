@@ -281,7 +281,7 @@ function renderDivChart({ candles, coin, tf, divs = [], labels = {} }) {
   g.fillText(`${fmtPrice(last.c)}  (${chgLast >= 0 ? "+" : ""}${chgLast.toFixed(2)}%)`, Lm + titleW + 20, 27);
   g.font = `19px ${family}`;
   g.fillStyle = C.axis;
-  g.fillText(`Close candle only · pivot ${DIV.PIVOT_WIN} candle`, Lm, 56);
+  g.fillText(`Close candle only · pivot ${DIV.PIVOT_LEFT} left / ${DIV.PIVOT_RIGHT} right`, Lm, 56);
 
   const ml = (txt, x, y, color) => {
     g.font = `20px ${family}`;

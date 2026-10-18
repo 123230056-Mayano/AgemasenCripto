@@ -533,7 +533,7 @@ async function runScanDiv(sock, msg, ctx, { condition, tf, indicators, kinds }, 
         n: hits.length,
         total: snap.coins.length,
         rows: rows.join("\n") + more,
-        win: DIV.PIVOT_WIN,
+        win: DIV.PIVOT_RIGHT,
       }),
     },
     { quoted: msg },
@@ -586,7 +586,7 @@ async function runScanDivergentCoin(sock, msg, ctx, { coin, tf, condition, indic
     });
     body = rows.join("\n");
   }
-  await sock.sendMessage(jid, { image: png, caption: `${head}\n${body}\n${t(lang, "divchart.caption.foot", { win: DIV.PIVOT_WIN })}` }, { quoted: msg });
+  await sock.sendMessage(jid, { image: png, caption: `${head}\n${body}\n${t(lang, "divchart.caption.foot", { win: DIV.PIVOT_RIGHT })}` }, { quoted: msg });
 }
 
 // Nilai indikator di caption: 2 desimal; MACD koin murah bisa sangat kecil.

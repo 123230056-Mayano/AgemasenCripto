@@ -92,7 +92,7 @@ async function runCreate(sock, msg, { jid, lang, senderId }, args) {
       filters: describeFilters(lang, entry),
       dest: t(lang, isGroup(jid) ? "divalert.dest.group" : "divalert.dest.private"),
       delay: Math.round(ALERT_DIV.DELAY_MS / 1000),
-      win: DIV.PIVOT_WIN,
+      win: DIV.PIVOT_RIGHT,
       tz: DAILY_TZ_LABEL,
     }),
   );

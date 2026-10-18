@@ -18,21 +18,30 @@
  * Aturan penting:
  *   - Hanya candle CLOSED. Candle di ujung deret yang belum tutup dibuang dulu (closed === false,
  *     atau ct >= now, ct = waktu tutup dalam ms).
- *   - Pivot butuh PIVOT_WIN candle konfirmasi di kanan, jadi sinyal selalu terlambat PIVOT_WIN
+ *   - Pivot butuh PIVOT_RIGHT candle konfirmasi di kanan, jadi sinyal selalu terlambat PIVOT_RIGHT
  *     candle dari puncak/lembah sebenarnya. Disengaja agar hasil tidak berubah-ubah.
+ *   - Definisi pivot (PIVOT_CONFIRM, lihat findPivots): default "close" = nilai pivot tetap wick (l/h),
+ *     tetapi sisi kanan hanya diperiksa lewat CLOSE: wick boleh menembus pivot, close tidak boleh.
+ *     "wick" = perilaku lama (v1), sisi kanan juga diperiksa lewat wick.
  *   - Satu cara pivot saja: pivot indikator = nilai indikator di candle pivot HARGA yang sama.
  *   - Kebaruan: pivot kedua harus terkonfirmasi <= LOOKBACK candle terakhir (inklusif, jadi
  *     barsAgo 0..LOOKBACK; sesuai contoh PDF yang menampilkan "3 candle").
  *
- * Changelog parameter: v1 (2026-10-16) nilai awal usulan PDF. Setel setelah dibandingkan dengan chart.
+ * Changelog parameter:
+ *   v1 (2026-10-16) nilai awal usulan PDF. Setel setelah dibandingkan dengan chart.
+ *   v2 (2026-10-18) Revisi bagian 1: PIVOT_WIN dipecah jadi PIVOT_LEFT 3 / PIVOT_RIGHT 4; tambah PIVOT_CONFIRM
+ *       "close" (default) | "wick" (v1). confirmIdx = pivot kedua + PIVOT_RIGHT, jadi sinyal terkonfirmasi 1 candle
+ *       lebih lambat dari v1. Untuk meniru v1 persis: { PIVOT_CONFIRM: "wick", PIVOT_RIGHT: 3 }.
  */
 
 const { rsi, macd, atr } = require("./indicators");
 const { INDICATOR_CONFIG } = require("../../config/indicatorConfig");
 
-const DIV_VERSION = 1;
+const DIV_VERSION = 2;
 const DIV = {
-  PIVOT_WIN: 3, // seperti levels() di analyst
+  PIVOT_LEFT: 3, // candle di kiri pivot yang harus lebih tinggi/rendah (berdasarkan wick, strict)
+  PIVOT_RIGHT: 4, // candle konfirmasi di kanan pivot
+  PIVOT_CONFIRM: "close", // "close": sisi kanan diperiksa lewat close (wick boleh menembus) | "wick": perilaku v1
   MIN_BARS: 5, // jarak minimum antar dua pivot
   MAX_BARS: 60, // jarak maksimum antar dua pivot
   LOOKBACK: 3, // pivot terbaru harus terkonfirmasi dalam N candle terakhir
@@ -58,26 +67,52 @@ function dropUnclosed(candles, now = Date.now()) {
 }
 
 /**
- * Index pivot: lebih rendah/tinggi dari `win` candle di KIRI (strict) dan tidak lebih tinggi/rendah dari
- * `win` candle di KANAN (boleh sama). Kalau ada dataran dengan harga yang persis sama (umum di koin
- * berharga kecil dengan tick size kasar), yang dihitung pivot hanya yang paling awal, jadi tidak ada
- * pivot ganda dan tidak ada pivot yang hilang. Hanya yang sudah terkonfirmasi (i + win <= candle terakhir).
+ * Index pivot. Nilai pivot selalu wick (low untuk "low", high untuk "high").
+ *
+ * Sisi KIRI (PIVOT_LEFT candle): wick pivot harus strict lebih rendah/tinggi dari wick tiap candle di kiri.
+ *
+ * Sisi KANAN (PIVOT_RIGHT candle), tergantung PIVOT_CONFIRM:
+ *   - "close": tidak ada CLOSE di kanan yang lebih rendah dari pivot low (lebih tinggi dari pivot high).
+ *     Wick di kanan boleh menembus pivot. Close tepat di level pivot masih dianggap sah (>= / <=).
+ *   - "wick" (v1): tidak ada WICK di kanan yang lebih rendah/tinggi dari pivot (boleh sama).
+ *
+ * Dataran dengan harga persis sama (koin berharga kecil, tick size kasar): yang dihitung pivot hanya yang
+ * paling awal, karena sisi kiri strict.
+ *
+ * Mode close: kandidat yang jatuh di dalam jendela kanan (PIVOT_RIGHT candle) pivot yang sudah diterima
+ * diabaikan. Itu hanya wick yang menembus pivot tanpa close yang menembus, yang justru dibolehkan, jadi
+ * pivot lama (mis. low 1130) tetap pivotnya dan tidak digantikan wick yang lebih dalam. Tanpa aturan ini
+ * satu lembah bisa menghasilkan dua pivot berdekatan dan pasangan terakhir gugur di filter MIN_BARS.
+ *
+ * Hanya yang sudah terkonfirmasi (i + PIVOT_RIGHT <= candle terakhir).
+ *
+ * @param {Array} candles
+ * @param {"low"|"high"} type
+ * @param {{PIVOT_LEFT?:number, PIVOT_RIGHT?:number, PIVOT_CONFIRM?:"close"|"wick"}} [cfg] default DIV
  */
-function findPivots(candles, win, type) {
-  const key = type === "low" ? "l" : "h";
+function findPivots(candles, type, cfg = DIV) {
+  const left = cfg.PIVOT_LEFT ?? DIV.PIVOT_LEFT;
+  const right = cfg.PIVOT_RIGHT ?? DIV.PIVOT_RIGHT;
+  const mode = cfg.PIVOT_CONFIRM ?? DIV.PIVOT_CONFIRM;
+  if (mode !== "close" && mode !== "wick") throw new Error(`PIVOT_CONFIRM tidak dikenal: ${mode}`);
+  const isLow = type === "low";
+  const wickKey = isLow ? "l" : "h";
+  const rightKey = mode === "close" ? "c" : wickKey;
   const out = [];
-  for (let i = win; i <= candles.length - 1 - win; i++) {
-    const v = candles[i][key];
+  for (let i = left; i <= candles.length - 1 - right; i++) {
+    const v = candles[i][wickKey];
     let ok = true;
-    for (let j = 1; j <= win; j++) {
-      const l = candles[i - j][key];
-      const r = candles[i + j][key];
-      if (type === "low" ? !(v < l && v <= r) : !(v > l && v >= r)) {
-        ok = false;
-        break;
-      }
+    for (let j = 1; j <= left && ok; j++) {
+      const l = candles[i - j][wickKey];
+      if (isLow ? !(v < l) : !(v > l)) ok = false;
     }
-    if (ok) out.push(i);
+    for (let j = 1; j <= right && ok; j++) {
+      const r = candles[i + j][rightKey];
+      if (isLow ? !(r >= v) : !(r <= v)) ok = false;
+    }
+    if (!ok) continue;
+    if (mode === "close" && out.length && i - out[out.length - 1] <= right) continue;
+    out.push(i);
   }
   return out;
 }
@@ -126,16 +161,16 @@ function detectDivergence(candles, opts = {}) {
   const last = n - 1;
   const out = [];
 
-  // langkah 3: pivot terkonfirmasi (i + win <= last dijamin findPivots)
+  // langkah 3: pivot terkonfirmasi (i + PIVOT_RIGHT <= last dijamin findPivots)
   for (const type of ["low", "high"]) {
-    const piv = findPivots(cs, P.PIVOT_WIN, type);
+    const piv = findPivots(cs, type, P);
     if (piv.length < 2) continue;
     const i1 = piv[piv.length - 2]; // langkah 4: dua pivot terakhir yang sejenis
     const i2 = piv[piv.length - 1];
     const gap = i2 - i1;
     if (gap < P.MIN_BARS || gap > P.MAX_BARS) continue;
 
-    const confirmIdx = i2 + P.PIVOT_WIN;
+    const confirmIdx = i2 + P.PIVOT_RIGHT;
     const barsAgo = last - confirmIdx; // langkah 8: kebaruan
     if (barsAgo > P.LOOKBACK) continue;
 
