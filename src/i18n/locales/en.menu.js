@@ -65,6 +65,7 @@ Fufu... welcome, Trainer-san. Here's the list of available commands. For crypto 
 ▸ !price
 ▸ !level
 ▸ !snr
+▸ !fib
 ▸ !ema
 ▸ !trend
 ▸ !mtf
@@ -466,6 +467,7 @@ The setting is saved permanently, so it won't reset when the bot restarts.`,
   "cmd.harga": "💰 *!price <coin>*\n\nLive price in USDT and Rupiah with the 24h percent change.\n\n*Example:*\n```\n!price eth\n```",
   "cmd.level": "📊 *!level <coin> [15m|1H|4H|1D]*\n\nResistance (R1, R2) and support (S1, S2) levels with the percent distance from the current price.\n\n*Example:*\n```\n!level sol 4h\n```\n\nDefault timeframe is *4H*. Not financial advice.",
   "cmd.snr": "📐 *!snr <coin> [15m|1H|4H|1D]*\n\nFull Support & Resistance: the 3 nearest resistances (R1-R3) and supports (S1-S3), percent distance from the current price, each level's *strength* (how many times price reversed at that zone), plus the chart image.\n\n*How to read it:*\n🔴 R = resistance (ceiling, price tends to stall)\n🟢 S = support (floor, price tends to bounce)\n●●●○○ = level strength. Filled dots (●) = strength, empty dots (○) = unfilled slots, not a bad signal\n(6x) = price reversed at that level 6 times\nScale: 1x weak, 2-4x medium, 5-8x strong, 9x+ very strong\n\n*Examples:*\n```\n!snr btc\n!snr sol 1h\n```\n\nDefault timeframe is *4H* (or whatever you set with !tf). Alias: !sr. Not financial advice.",
+  "cmd.fib": "📐 *!fib <coin> [15m|1H|4H|1D]*\n\nAutomatic Fibonacci retracement + extension. The bot finds the swing high & swing low of the last 120 candles, then draws the fib *following the trend*: uptrend is drawn from swing low to swing high, downtrend from swing high to swing low. You get the list of levels, each one's percent distance from the current price, plus the chart image.\n\n*Levels:*\n▫️ Retracement: 0, 0.236, 0.382, 0.5, 0.618, 0.786, 1 (areas where price may stall during a pullback)\n⭐ 0.5 & 0.618 = golden zone\n🎯 Extension: 1.272, 1.618, 2.0, 2.618 (targets if the trend continues)\n\n*Examples:*\n```\n!fib btc\n!fib sol 1h\n```\n\nDefault timeframe is *4H* (or whatever you set with !tf). Aliases: !fibo, !fibonacci. Not financial advice.",
   "cmd.listkripto": "📋 *!listcrypto [keyword]*\n\nCoins available for !price, !chart, !level, and !analysis, grouped by category.\n\n*Examples:*\n```\n!listcrypto\n!listcrypto meme\n!listcrypto sol\n```\n\nOptional keyword: category, ticker, or coin name.",
   "cmd.ema": "📐 *!ema <coin> [15m|1H|4H|1D]*\n\nEMA 20, 50, 200 values and where the price sits against each one (above / below).\n\n*Example:*\n```\n!ema bnb 4h\n```\n\nDefault timeframe is *4H*. Not financial advice.",
   "cmd.tren": "🧭 *!trend <coin> [15m|1H|4H|1D]*\n\nTrend status: bullish, bearish, or sideways. Mentions a golden cross / death cross if one just happened.\n\n*Example:*\n```\n!trend xrp 4h\n```\n\nDefault timeframe is *4H*. Not financial advice.",

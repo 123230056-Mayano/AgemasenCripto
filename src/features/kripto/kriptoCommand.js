@@ -9,6 +9,7 @@
  *   !harga <koin>        -> harga live USDT + Rupiah + % perubahan 24 jam
  *   !level <koin> [tf]   -> R1/R2/S1/S2 + jarak % dari harga sekarang
  *   !snr <koin> [tf]     -> Support & Resistance lengkap: R1-R3/S1-S3 + kekuatan level + chart (snr.js)
+ *   !fib <koin> [tf]     -> Fibonacci retracement + extension otomatis, arah ikut tren + chart (fib.js)
  *   !ema <koin> [tf]     -> EMA 20/50/200 + posisi harga (di atas / di bawah)
  *   !tren <koin> [tf]    -> bullish / bearish / sideways (+ golden/death cross baru)
  *   !mtf <koin>          -> tabel tren di 15m, 1H, 4H, 1D sekaligus
@@ -39,6 +40,7 @@ const { getDominance } = require("./dominance");
 const { getDefaultTf } = require("./defaultTf");
 const { getAvailableCoins, filterCoins, buildMessages } = require("./kriptoList");
 const { runSnr } = require("./snr");
+const { runFib } = require("./fib");
 const { PASAR_COMMANDS, PASAR_RUNNERS, parsePasarArgs } = require("./pasar");
 const { STAT_COMMANDS, STAT_RUNNERS, parseStatArgs } = require("./statistik");
 const { BIAS_COMMANDS, BIAS_RUNNERS, parseBiasArgs } = require("./bias");
@@ -72,6 +74,7 @@ const COMMANDS = {
   harga: { re: /^!(?:harga|price)(?:\s+([\s\S]*))?$/i, useTf: false },
   level: { re: /^!(?:level|levels)(?:\s+([\s\S]*))?$/i, useTf: true },
   snr: { re: /^!(?:snr|sr)(?:\s+([\s\S]*))?$/i, useTf: true },
+  fib: { re: /^!(?:fib|fibo|fibonacci)(?:\s+([\s\S]*))?$/i, useTf: true },
   ema: { re: /^!ema(?:\s+([\s\S]*))?$/i, useTf: true },
   tren: { re: /^!(?:tren|trend)(?:\s+([\s\S]*))?$/i, useTf: true },
   mtf: { re: /^!mtf(?:\s+([\s\S]*))?$/i, useTf: false },
@@ -327,7 +330,7 @@ async function runBandingkan(sock, msg, { jid, lang, senderId }, { coin, coin2 }
   );
 }
 
-const RUNNERS = { chart: runChart, harga: runHarga, level: runLevel, snr: runSnr, ema: runEma, tren: runTren, mtf: runMtf, bandingkan: runBandingkan };
+const RUNNERS = { chart: runChart, harga: runHarga, level: runLevel, snr: runSnr, fib: runFib, ema: runEma, tren: runTren, mtf: runMtf, bandingkan: runBandingkan };
 
 async function runList(sock, msg, { jid, lang }, keyword) {
   const all = await getAvailableCoins(lang);
