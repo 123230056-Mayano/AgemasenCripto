@@ -10,7 +10,8 @@
  *   - di panel harga  : dari low/high pivot 1 ke pivot 2, label perubahan harga (%)
  *   - di panel RSI/MACD: dari nilai indikator pivot 1 ke pivot 2, label "a -> b (selisih)"
  * Indikator dihitung ulang dari deret closed yang sama dengan detektornya, jadi panah selalu jatuh
- * persis di titik yang dipakai deteksi.
+ * persis di titik yang dipakai deteksi. Panah RSI/MACD berpangkal di lembah/puncak indikator sendiri
+ * (pivot.indIdx), bisa bergeser 1-3 candle dari pivot harga; angka label = nilai di titik itu.
  *
  * Fungsi murni (tanpa fetch / kirim pesan). Melempar error kalau candle kurang; pemanggil menanganinya.
  */
@@ -251,9 +252,10 @@ function renderDivChart({ candles, coin, tf, divs = [], labels = {} }) {
     const isRsi = d.indicator === "rsi";
     const Yi = isRsi ? Yr : Ym;
     const box = isRsi ? pRsi : pMacd;
-    const ax = X(p1.idx);
+    // titik di lembah/puncak indikator sendiri (indIdx), bukan di candle pivot harga; fallback idx untuk hasil lama
+    const ax = X(p1.indIdx ?? p1.idx);
     const ay = Yi(p1.ind);
-    const bx = X(p2.idx);
+    const bx = X(p2.indIdx ?? p2.idx);
     const by = Yi(p2.ind);
     arrow(g, ax, ay, bx, by);
     dot(g, ax, ay);
