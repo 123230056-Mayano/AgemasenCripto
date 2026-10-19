@@ -10,6 +10,7 @@
  *     ulang tiap 10 menit; notifikasi saat harga mendekati (<= 0.5%) atau
  *     menyentuh level, aktif lagi setelah harga menjauh > 1.5% / level berganti.
  *   - ringkasan harian (!harian): dikirim sekali per hari pada jam pilihan user.
+ *   - alarm titik balik S/R (!alertsnr): reject / tembus, tahap dini + konfirmasi. Mesinnya di snrAlertEngine.js.
  *   - alarm indikator lanjutan (!alertind, item 10): bias berubah + crossover baru, mode closed (tiap candle tutup)
  *     atau live (refresh berkala, candle belum closed ditandai jelas). Mesinnya di advAlertEngine.js; di sini hanya
  *     dibuat satu engine dan timer-nya. Tidak ada WebSocket (opsi 3 menunggu keputusan client).
@@ -55,7 +56,8 @@ const {
 } = require("./divAlertCore");
 
 const { createAdvEngine } = require("./advAlertEngine");
-const { ADV_ALERT_CONFIG: ADV } = require("../../config/indicatorConfig");
+const { createSnrEngine } = require("./snrAlertEngine");
+const { ADV_ALERT_CONFIG: ADV, SNR_ALERT_CONFIG: SNR } = require("../../config/indicatorConfig");
 
 const BINANCE = (process.env.BINANCE_BASE || "https://data-api.binance.vision").replace(/\/+$/, "");
 const POLL_MS = Math.max(10_000, Number(process.env.ALERT_POLL_MS) || 30_000);
@@ -72,6 +74,7 @@ let pricesBusy = false;
 let dailyBusy = false;
 let divBusy = false;
 let advBusy = false;
+let snrBusy = false;
 
 // ---------- helper ----------
 const langFor = (chat, userJid) => (chat.endsWith("@g.us") ? getLang("group", chat) : getLang("user", userJid));
@@ -554,6 +557,18 @@ const advEngine = createAdvEngine({
 /** Pemeriksaan alarm indikator lanjutan (closed + live). Dipanggil timer; aman dipanggil manual untuk uji. */
 const checkAdvAlerts = (now) => (sockRef ? advEngine.tick(now) : undefined);
 
+// ---------- alarm titik balik S/R (!alertsnr) ----------
+const snrEngine = createSnrEngine({
+  store,
+  fetchCandles,
+  notify,
+  langFor,
+  isUnsupported: (err) => err instanceof UnsupportedCoinError,
+});
+
+/** Pemeriksaan alarm S/R (dini + konfirmasi). Dipanggil timer; aman dipanggil manual untuk uji. */
+const checkSnrAlerts = (now) => (sockRef ? snrEngine.tick(now) : undefined);
+
 // ---------- start ----------
 /** Dipanggil connection.js tiap socket baru dibuat; timer hanya dibuat sekali. */
 function setAlertSocket(sock) {
@@ -608,6 +623,18 @@ function setAlertSocket(sock) {
       advBusy = false;
     }
   }, ADV.CHECK_MS).unref?.();
+
+  setInterval(async () => {
+    if (snrBusy) return;
+    snrBusy = true;
+    try {
+      await checkSnrAlerts();
+    } catch (err) {
+      console.log("[snralert] pengecekan gagal:", err.message);
+    } finally {
+      snrBusy = false;
+    }
+  }, SNR.CHECK_MS).unref?.();
 }
 
-module.exports = { setAlertSocket, checkPriceAlerts, checkDaily, checkDivergence, checkAdvAlerts, localNow, fetchPrices };
+module.exports = { setAlertSocket, checkPriceAlerts, checkDaily, checkDivergence, checkAdvAlerts, checkSnrAlerts, localNow, fetchPrices };

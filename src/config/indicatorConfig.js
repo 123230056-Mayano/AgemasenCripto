@@ -167,4 +167,32 @@ const ADV_ALERT_CONFIG = Object.freeze({
   MAX_ATTEMPTS: 3,
 });
 
-module.exports = { INDICATOR_CONFIG, BIAS_CONFIG, SIGNAL_CONFIG, PROB_CONFIG, ADV_ALERT_CONFIG };
+/**
+ * Alarm titik balik Support/Resistance (!alertsnr): reject (ditolak/memantul) dan tembus (breakout/breakdown),
+ * dua tahap: DINI (candle berjalan, belum closed, bisa batal) dan KONFIRMASI (candle closed).
+ *
+ * Level = zona S/R dari !snr (snr.js: computeSnr), dihitung dari candle CLOSED sebelum candle yang dinilai,
+ * dengan harga acuan = close candle sebelumnya. Jadi level tidak berpindah sisi di tengah candle.
+ * Zona diberi pita +-BUFFER_PCT (persen) di sekitar harga level:
+ *   tembus  : harga (dini) / close (konfirmasi) di luar pita, di seberang level
+ *   reject  : high/low masuk pita, tetapi harga/close kembali keluar pita di sisi asalnya
+ * Semua angka bisa diubah lewat env; naikkan VERSION kalau aturan diubah.
+ */
+const SNR_ALERT_CONFIG = Object.freeze({
+  VERSION: 1,
+  CHECK_MS: Math.max(5_000, _posInt(process.env.SNR_CHECK_MS, 15_000)),
+  INTERVAL_MS: Math.max(30_000, _posInt(process.env.SNR_INTERVAL_MS, 60_000)), // jeda hitung ulang per koin+TF (tahap dini)
+  MAX_PAIRS: _posInt(process.env.SNR_MAX_PAIRS, 60), // batas koin+TF per putaran (sisanya bergilir)
+  FINAL_DELAY_MS: _posInt(process.env.SNR_FINAL_DELAY_MS, 10_000), // tunggu setelah candle tutup agar data Binance final
+  BUFFER_PCT: _num(process.env.SNR_BUFFER_PCT, 0.1), // lebar pita (persen) di atas/bawah level
+  STRONG_MIN_TOUCHES: _posInt(process.env.SNR_STRONG_MIN_TOUCHES, 5), // opsi `kuat`: level dengan sentuhan >= ini (R1..R3/S1..S3)
+  MIN_CANDLES: 30, // data closed minimal supaya level layak dihitung
+  MAX_MSG_PER_CHAT_HOUR: _posInt(process.env.SNR_MAX_MSG_PER_CHAT_HOUR, 20),
+  LINES_PER_MSG: _posInt(process.env.SNR_LINES_PER_MSG, 20),
+  SEND_GAP_MS: _posInt(process.env.SNR_SEND_GAP_MS, 1_000),
+  MAX_PER_USER: _posInt(process.env.SNR_ALERT_MAX_PER_USER, 10),
+  MAX_PER_CHAT: _posInt(process.env.SNR_ALERT_MAX_PER_CHAT, 20),
+  CONCURRENCY: _posInt(process.env.SNR_CONCURRENCY, 8),
+});
+
+module.exports = { INDICATOR_CONFIG, BIAS_CONFIG, SIGNAL_CONFIG, PROB_CONFIG, ADV_ALERT_CONFIG, SNR_ALERT_CONFIG };

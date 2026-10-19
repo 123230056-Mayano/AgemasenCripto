@@ -23,6 +23,7 @@
  *   !bias <koin> [tf|semua] -> bias arah gabungan indikator per timeframe (bias.js)
  *   !sinyal <koin> [tf|semua] -> skenario entry / SL / TP1 / TP2 / RR semua timeframe, tanpa AI (signal.js)
  *   !alertind <koin|watchlist> [tf] [bias|cross] [live] | list | off | hapus <id|semua>  (alarm bias berubah / crossover baru, advAlertCommand.js)
+ *   !alertsnr <koin|watchlist> [tf] [reject|tembus] [dini|konfirmasi] [kuat] | list | off | hapus <id|semua>  (alarm titik balik S/R, snrAlertCommand.js)
  *   !alertdivergent (!alertdiv) <koin|semua|watchlist> [tf] [rsi|macd] | list | hapus <id|semua>
  *                        -> alarm divergence otomatis tiap candle closed (divAlertCommand.js, alertMonitor.js)
  *   !watch / !unwatch / !watchlist / !alert / !alertlevel / !alerts / !hapusalert /
@@ -47,6 +48,7 @@ const { BIAS_COMMANDS, BIAS_RUNNERS, parseBiasArgs } = require("./bias");
 const { SIGNAL_COMMANDS, SIGNAL_RUNNERS, parseSignalArgs } = require("./signal");
 const { DIVALERT_COMMANDS, DIVALERT_RUNNERS, parseDivAlertArgs } = require("./divAlertCommand");
 const { ADVALERT_COMMANDS, ADVALERT_RUNNERS, parseAdvAlertArgs } = require("./advAlertCommand");
+const { SNRALERT_COMMANDS, SNRALERT_RUNNERS, parseSnrAlertArgs } = require("./snrAlertCommand");
 const { WATCH_COMMANDS, WATCH_RUNNERS, parseWatchArgs } = require("./watchlist");
 const { UTIL_COMMANDS, UTIL_RUNNERS, parseUtilArgs } = require("./utilitas");
 const { EMA_PERIODS, CROSS_LOOKBACK, computeEmas, classifyTrendAuto, detectCross, detectCrossStatuses } = require("./indicators");
@@ -445,6 +447,19 @@ async function handleKriptoCommand(sock, msg, { jid, text, lang }) {
       }
     }
   }
+  // Alarm titik balik S/R (!alertsnr: reject / tembus, dini + konfirmasi) -> lihat snrAlertCommand.js
+  let isSnrAlert = false;
+  if (!name) {
+    for (const [key, def] of Object.entries(SNRALERT_COMMANDS)) {
+      const m = text.match(def.re);
+      if (m) {
+        name = key;
+        match = m;
+        isSnrAlert = true;
+        break;
+      }
+    }
+  }
   // Watchlist & alert pribadi (!watch, !alert, !harian, ...) -> lihat watchlist.js
   let isWatch = false;
   if (!name) {
@@ -481,6 +496,7 @@ async function handleKriptoCommand(sock, msg, { jid, text, lang }) {
   else if (isSignal) args = parseSignalArgs(name, match[1] || "");
   else if (isDivAlert) args = parseDivAlertArgs(name, match[1] || "", getDefaultTf(senderId));
   else if (isAdvAlert) args = parseAdvAlertArgs(name, match[1] || "", getDefaultTf(senderId));
+  else if (isSnrAlert) args = parseSnrAlertArgs(name, match[1] || "", getDefaultTf(senderId));
   else if (isWatch) args = parseWatchArgs(name, match[1] || "");
   else if (isUtil) args = parseUtilArgs(name, match[1] || "");
   else if (name === "list") args = { coin: null, coin2: null, tf: null, keyword: match[1] || "" };
@@ -531,6 +547,10 @@ async function handleKriptoCommand(sock, msg, { jid, text, lang }) {
     }
     if (isAdvAlert) {
       await ADVALERT_RUNNERS[name](sock, msg, { jid, lang, senderId }, args);
+      return true;
+    }
+    if (isSnrAlert) {
+      await SNRALERT_RUNNERS[name](sock, msg, { jid, lang, senderId }, args);
       return true;
     }
     if (isWatch) {
