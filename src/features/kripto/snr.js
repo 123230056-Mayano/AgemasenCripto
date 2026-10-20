@@ -16,6 +16,7 @@
 
 const { t } = require("../../i18n");
 const { renderChart } = require("../analisis/analisisChart");
+const { macd: calcMacd, rsi: calcRsi } = require("./indicators");
 const { TF_LABEL, fetchCandles, fetchTicker, fmtUsd, fmtLevel, fmtPct, pctFrom } = require("./market");
 
 const LOOKBACK = 200; // jumlah candle terakhir yang dipindai
@@ -103,6 +104,47 @@ function levelLine(lang, label, icon, zone, price) {
   return `${icon} ${label}  ${fmtLevel(zone.price)} (${fmtPct(pctFrom(price, zone.price))})  ${dots} ${name} (${zone.touches}x)`;
 }
 
+/**
+ * Blok angka indikator untuk pesan teks, mis.
+ *   📊 Indikator
+ *   RSI 14: 21.00 (oversold)
+ *   MACD: -0.0033 | Signal: -0.0026 | Hist: -0.0007 (bearish)
+ * Dihitung dari candle closed, sama dengan angka di label panel chart.
+ */
+function indicatorBlock(lang, candles) {
+  const closes = candles.map((c) => c.c);
+  const n = closes.length;
+  const r = calcRsi(closes)[n - 1];
+  const m = calcMacd(closes);
+  const mv = m.macd[n - 1];
+  const sv = m.signal[n - 1];
+  const hv = m.hist[n - 1];
+
+  const num = (v) => {
+    if (v == null || !isFinite(v)) return "-";
+    const a = Math.abs(v);
+    if (a === 0 || a >= 1) return v.toFixed(a >= 100 ? 1 : 2);
+    return v.toFixed(Math.min(10, Math.max(4, 2 - Math.floor(Math.log10(a)))));
+  };
+
+  let rsiState = "";
+  if (r != null) rsiState = r >= 70 ? "overbought" : r <= 30 ? "oversold" : "neutral";
+  let macdState = "";
+  if (mv != null && sv != null) macdState = mv >= sv ? "bullish" : "bearish";
+
+  const rsiLine = t(lang, "kripto.snr.ind.rsi", {
+    v: r == null ? "-" : r.toFixed(2),
+    state: rsiState ? t(lang, `kripto.snr.ind.rsi.${rsiState}`) : "-",
+  });
+  const macdLine = t(lang, "kripto.snr.ind.macd", {
+    macd: num(mv),
+    signal: num(sv),
+    hist: num(hv),
+    state: macdState ? t(lang, `kripto.snr.ind.macd.${macdState}`) : "-",
+  });
+  return `${t(lang, "kripto.snr.ind.title")}\n${rsiLine}\n${macdLine}`;
+}
+
 async function runSnr(sock, msg, { jid, lang }, { coin, tf }) {
   const [candles, tick] = await Promise.all([fetchCandles(coin, tf), fetchTicker(coin)]);
   const { resistance, support } = computeSnr(candles, tick.price);
@@ -134,6 +176,7 @@ async function runSnr(sock, msg, { jid, lang }, { coin, tf }) {
     change: fmtPct(tick.changePct),
     rows,
     note,
+    ind: indicatorBlock(lang, candles),
   });
 
   // Chart (candle + EMA + garis S/R). Kalau render gagal (mis. font/canvas bermasalah)
@@ -156,4 +199,4 @@ async function runSnr(sock, msg, { jid, lang }, { coin, tf }) {
   else await sock.sendMessage(jid, { text: caption }, { quoted: msg });
 }
 
-module.exports = { runSnr, computeSnr, findZones, strengthKey, strengthLevel };
+module.exports = { runSnr, indicatorBlock, computeSnr, findZones, strengthKey, strengthLevel };

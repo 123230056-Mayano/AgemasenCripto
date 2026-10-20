@@ -410,6 +410,14 @@ function renderChart({ candles, coin, tf, resistance = [], support = [], dominan
     }
   };
   const f2 = (v) => (v == null ? "-" : Math.abs(v) >= 100 ? v.toFixed(1) : Math.abs(v) >= 1 ? v.toFixed(2) : v.toFixed(4));
+  // Angka MACD bisa sangat kecil (koin harga murah) -> pakai 2 angka signifikan supaya tidak tampil 0.0000.
+  const fInd = (v) => {
+    if (v == null || !isFinite(v)) return "-";
+    const a = Math.abs(v);
+    if (a === 0 || a >= 1) return f2(v);
+    const d = Math.min(10, Math.max(4, 2 - Math.floor(Math.log10(a))));
+    return v.toFixed(d);
+  };
 
   // MACD (12, 26, 9)
   {
@@ -437,11 +445,45 @@ function renderChart({ candles, coin, tf, resistance = [], support = [], dominan
     g.globalAlpha = 1;
     line(m.macd, Ym, C.macdLine);
     line(m.signal, Ym, C.macdSig);
+
+    // Posisi tag nilai terakhir MACD & Signal (digeser bila saling menimpa); dihitung dulu supaya
+    // label skala yang tertimpa tag bisa dilewati.
+    const macdTags = [
+      { txt: fInd(m.macd[n - 1]), v: m.macd[n - 1], color: C.macdLine },
+      { txt: fInd(m.signal[n - 1]), v: m.signal[n - 1], color: C.macdSig },
+    ].filter((x) => x.v != null).map((x) => ({ ...x, y: Ym(x.v) })).sort((a, b) => a.y - b.y);
+    for (let i = 1; i < macdTags.length; i++) macdTags[i].y = Math.max(macdTags[i].y, macdTags[i - 1].y + 26);
+    for (const x of macdTags) x.y = Math.min(Math.max(x.y, pMacd.y + 14), pMacd.y + pMacd.h - 14);
+
+    // Skala angka di sumbu kanan (sebelumnya panel MACD tidak punya angka sama sekali).
+    {
+      const stepM = niceStep(mHi - mLo, 4);
+      g.save();
+      g.font = `18px ${family}`;
+      g.textAlign = "left";
+      g.textBaseline = "middle";
+      for (let v = Math.ceil(mLo / stepM) * stepM; v <= mHi; v += stepM) {
+        const vv = Math.abs(v) < stepM * 1e-6 ? 0 : v;
+        const yy = Math.round(Ym(vv)) + 0.5;
+        if (yy < pMacd.y + 10 || yy > pMacd.y + pMacd.h - 10) continue;
+        g.strokeStyle = C.grid;
+        g.beginPath();
+        g.moveTo(pMacd.x, yy);
+        g.lineTo(pMacd.x + pMacd.w, yy);
+        g.stroke();
+        if (macdTags.some((x) => Math.abs(x.y - yy) < 16)) continue; // angkanya sudah diwakili tag
+        g.fillStyle = C.axis;
+        g.fillText(vv === 0 ? "0" : fInd(vv), pMacd.x + pMacd.w + 10, yy);
+      }
+      g.restore();
+    }
+    // Tag nilai terakhir MACD & Signal di sumbu kanan.
+    for (const x of macdTags) axisTag(x.txt, x.y, x.color);
     panelLabel(pMacd, [
       ["MACD close 12 26 9", C.axis],
-      [f2(m.macd[n - 1]), C.macdLine],
-      [f2(m.signal[n - 1]), C.macdSig],
-      [f2(m.hist[n - 1]), (m.hist[n - 1] ?? 0) >= 0 ? C.up : C.down],
+      [`MACD ${fInd(m.macd[n - 1])}`, C.macdLine],
+      [`Signal ${fInd(m.signal[n - 1])}`, C.macdSig],
+      [`Hist ${fInd(m.hist[n - 1])}`, (m.hist[n - 1] ?? 0) >= 0 ? C.up : C.down],
     ]);
     frame(pMacd);
   }
@@ -468,7 +510,13 @@ function renderChart({ candles, coin, tf, resistance = [], support = [], dominan
     g.textAlign = "left";
     g.textBaseline = "middle";
     for (const lv of [70, 50, 30]) g.fillText(String(lv), pRsi.x + pRsi.w + 10, Yr(lv));
-    panelLabel(pRsi, [["RSI 14 close", C.axis], [f2(r[n - 1]), C.rsiLine]]);
+    if (r[n - 1] != null) {
+      // tag nilai terakhir; kalau terlalu dekat dengan label 70/50/30 digeser ke bawah/atas sedikit
+      let ty = Yr(r[n - 1]);
+      for (const lv of [70, 50, 30]) if (Math.abs(ty - Yr(lv)) < 22) ty = Yr(lv) + (ty >= Yr(lv) ? 22 : -22);
+      axisTag(f2(r[n - 1]), Math.min(Math.max(ty, pRsi.y + 14), pRsi.y + pRsi.h - 14), C.rsiLine);
+    }
+    panelLabel(pRsi, [["RSI 14 close", C.axis], [`RSI ${f2(r[n - 1])}`, C.rsiLine]]);
     frame(pRsi);
   }
 
