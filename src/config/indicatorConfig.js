@@ -195,4 +195,31 @@ const SNR_ALERT_CONFIG = Object.freeze({
   CONCURRENCY: _posInt(process.env.SNR_CONCURRENCY, 8),
 });
 
-module.exports = { INDICATOR_CONFIG, BIAS_CONFIG, SIGNAL_CONFIG, PROB_CONFIG, ADV_ALERT_CONFIG, SNR_ALERT_CONFIG };
+// Higher High / Lower Low (market structure): !hhll dan alarm !alerthhll.
+// Swing = pivot (high/low tertinggi/terendah dalam +-PIVOT_WIN candle closed). Pivot baru dianggap pasti setelah
+// PIVOT_WIN candle di kanannya closed, jadi candle yang belum closed tidak memunculkan atau mengubah swing.
+const HHLL_CONFIG = Object.freeze({
+  PIVOT_WIN: Math.max(1, _posInt(process.env.HHLL_PIVOT_WIN, 3)),
+  MIN_SWING_PCT: _num(process.env.HHLL_MIN_SWING_PCT, 0.5), // gerak minimal antar swing (persen); lebih kecil = noise, dilewati
+  EQUAL_PCT: _num(process.env.HHLL_EQUAL_PCT, 0.05), // selisih <= ini dianggap sama (bukan HH/LH atau HL/LL)
+  MIN_CANDLES: 30, // data closed minimal supaya struktur layak dihitung
+  SHOW_SWINGS: 6, // jumlah swing terakhir yang ditulis di !hhll
+  CHART_BARS: 120, // jumlah candle yang digambar di chart !hhll
+});
+
+const HHLL_ALERT_CONFIG = Object.freeze({
+  VERSION: 1,
+  CHECK_MS: Math.max(5_000, _posInt(process.env.HHLL_CHECK_MS, 15_000)),
+  INTERVAL_MS: Math.max(30_000, _posInt(process.env.HHLL_INTERVAL_MS, 60_000)), // jeda ambil ulang per koin+TF
+  MAX_PAIRS: _posInt(process.env.HHLL_MAX_PAIRS, 60), // batas koin+TF per putaran (sisanya bergilir)
+  FINAL_DELAY_MS: _posInt(process.env.HHLL_FINAL_DELAY_MS, 10_000), // tunggu setelah candle tutup agar data Binance final
+  MAX_MSG_PER_CHAT_HOUR: _posInt(process.env.HHLL_MAX_MSG_PER_CHAT_HOUR, 20),
+  LINES_PER_MSG: _posInt(process.env.HHLL_LINES_PER_MSG, 15),
+  PDF_MIN: _posInt(process.env.HHLL_PDF_MIN, 16), // kejadian >= ini (satu penerima, satu putaran) -> 1 pesan pengantar + 1 PDF
+  SEND_GAP_MS: _posInt(process.env.HHLL_SEND_GAP_MS, 1_000),
+  MAX_PER_USER: _posInt(process.env.HHLL_ALERT_MAX_PER_USER, 10),
+  MAX_PER_CHAT: _posInt(process.env.HHLL_ALERT_MAX_PER_CHAT, 20),
+  CONCURRENCY: _posInt(process.env.HHLL_CONCURRENCY, 8),
+});
+
+module.exports = { INDICATOR_CONFIG, BIAS_CONFIG, SIGNAL_CONFIG, PROB_CONFIG, ADV_ALERT_CONFIG, SNR_ALERT_CONFIG, HHLL_CONFIG, HHLL_ALERT_CONFIG };

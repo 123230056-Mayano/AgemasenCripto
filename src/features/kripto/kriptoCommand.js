@@ -10,6 +10,7 @@
  *   !level <koin> [tf]   -> R1/R2/S1/S2 + jarak % dari harga sekarang
  *   !snr <koin> [tf]     -> Support & Resistance lengkap: R1-R3/S1-S3 + kekuatan level + chart (snr.js)
  *   !fib <koin> [tf]     -> Fibonacci retracement + extension otomatis, arah ikut tren + chart (fib.js)
+ *   !hhll <koin> [tf]    -> market structure Higher High / Higher Low / Lower High / Lower Low + status tren + chart (hhll.js). Alias: !struktur
  *   !ema <koin> [tf]     -> EMA 20/50/200 + posisi harga (di atas / di bawah)
  *   !movave <koin> [tf] [sma|ema] -> Moving Average SMA & EMA 20/50/200 + posisi harga + golden/death cross (movave.js). Alias: !ma, !movingaverage
  *   !tren <koin> [tf]    -> bullish / bearish / sideways (+ golden/death cross baru)
@@ -25,6 +26,7 @@
  *   !sinyal <koin> [tf|semua] -> skenario entry / SL / TP1 / TP2 / RR semua timeframe, tanpa AI (signal.js)
  *   !alertind <koin|watchlist> [tf] [bias|cross] [live] | list | off | hapus <id|semua>  (alarm bias berubah / crossover baru, advAlertCommand.js)
  *   !alertsnr <koin|watchlist> [tf] [reject|tembus] [kuat] | list | off | hapus <id|semua>  (alarm titik balik S/R, snrAlertCommand.js)
+ *   !alerthhll <koin|watchlist> [tf] [naik|turun] [dini|konfirmasi] [balik] | list | off | hapus <id|semua>  (alarm Higher High / Lower Low, hhllAlertCommand.js)
  *   !alertdivergent (!alertdiv) <koin|semua|watchlist> [tf] [rsi|macd] | list | hapus <id|semua>
  *                        -> alarm divergence otomatis tiap candle closed (divAlertCommand.js, alertMonitor.js)
  *   !watch / !unwatch / !watchlist / !alert / !alertlevel / !alerts / !hapusalert /
@@ -43,6 +45,7 @@ const { getDefaultTf } = require("./defaultTf");
 const { getAvailableCoins, filterCoins, buildMessages } = require("./kriptoList");
 const { runSnr } = require("./snr");
 const { runFib } = require("./fib");
+const { runHhll } = require("./hhll");
 const { ALL_RUNNERS } = require("./allPdf");
 const { runMovave, MOVAVE_TYPES } = require("./movave");
 const { PASAR_COMMANDS, PASAR_RUNNERS, parsePasarArgs } = require("./pasar");
@@ -52,6 +55,7 @@ const { SIGNAL_COMMANDS, SIGNAL_RUNNERS, parseSignalArgs } = require("./signal")
 const { DIVALERT_COMMANDS, DIVALERT_RUNNERS, parseDivAlertArgs } = require("./divAlertCommand");
 const { ADVALERT_COMMANDS, ADVALERT_RUNNERS, parseAdvAlertArgs } = require("./advAlertCommand");
 const { SNRALERT_COMMANDS, SNRALERT_RUNNERS, parseSnrAlertArgs } = require("./snrAlertCommand");
+const { HHLLALERT_COMMANDS, HHLLALERT_RUNNERS, parseHhllAlertArgs } = require("./hhllAlertCommand");
 const { WATCH_COMMANDS, WATCH_RUNNERS, parseWatchArgs } = require("./watchlist");
 const { UTIL_COMMANDS, UTIL_RUNNERS, parseUtilArgs } = require("./utilitas");
 const { EMA_PERIODS, CROSS_LOOKBACK, computeEmas, classifyTrendAuto, detectCross, detectCrossStatuses } = require("./indicators");
@@ -80,6 +84,7 @@ const COMMANDS = {
   level: { re: /^!(?:level|levels)(?:\s+([\s\S]*))?$/i, useTf: true },
   snr: { re: /^!(?:snr|sr)(?:\s+([\s\S]*))?$/i, useTf: true, allTf: true },
   fib: { re: /^!(?:fib|fibo|fibonacci)(?:\s+([\s\S]*))?$/i, useTf: true, allTf: true },
+  hhll: { re: /^!(?:hhll|struktur|structure)(?:\s+([\s\S]*))?$/i, useTf: true },
   ema: { re: /^!ema(?:\s+([\s\S]*))?$/i, useTf: true },
   movave: { re: /^!(?:movave|movingaverage|ma)(?:\s+([\s\S]*))?$/i, useTf: true, types: MOVAVE_TYPES },
   tren: { re: /^!(?:tren|trend)(?:\s+([\s\S]*))?$/i, useTf: true },
@@ -342,7 +347,7 @@ async function runBandingkan(sock, msg, { jid, lang, senderId }, { coin, coin2 }
   );
 }
 
-const RUNNERS = { chart: runChart, harga: runHarga, level: runLevel, snr: runSnr, fib: runFib, ema: runEma, movave: runMovave, tren: runTren, mtf: runMtf, bandingkan: runBandingkan };
+const RUNNERS = { chart: runChart, harga: runHarga, level: runLevel, snr: runSnr, fib: runFib, hhll: runHhll, ema: runEma, movave: runMovave, tren: runTren, mtf: runMtf, bandingkan: runBandingkan };
 
 async function runList(sock, msg, { jid, lang }, keyword) {
   const all = await getAvailableCoins(lang);
@@ -470,6 +475,19 @@ async function handleKriptoCommand(sock, msg, { jid, text, lang }) {
       }
     }
   }
+  // Alarm Higher High / Lower Low (!alerthhll: swing baru + tembus swing, konfirmasi) -> lihat hhllAlertCommand.js
+  let isHhllAlert = false;
+  if (!name) {
+    for (const [key, def] of Object.entries(HHLLALERT_COMMANDS)) {
+      const m = text.match(def.re);
+      if (m) {
+        name = key;
+        match = m;
+        isHhllAlert = true;
+        break;
+      }
+    }
+  }
   // Watchlist & alert pribadi (!watch, !alert, !harian, ...) -> lihat watchlist.js
   let isWatch = false;
   if (!name) {
@@ -507,6 +525,7 @@ async function handleKriptoCommand(sock, msg, { jid, text, lang }) {
   else if (isDivAlert) args = parseDivAlertArgs(name, match[1] || "", getDefaultTf(senderId));
   else if (isAdvAlert) args = parseAdvAlertArgs(name, match[1] || "", getDefaultTf(senderId));
   else if (isSnrAlert) args = parseSnrAlertArgs(name, match[1] || "", getDefaultTf(senderId));
+  else if (isHhllAlert) args = parseHhllAlertArgs(name, match[1] || "", getDefaultTf(senderId));
   else if (isWatch) args = parseWatchArgs(name, match[1] || "");
   else if (isUtil) args = parseUtilArgs(name, match[1] || "");
   else if (name === "list") args = { coin: null, coin2: null, tf: null, keyword: match[1] || "" };
@@ -561,6 +580,10 @@ async function handleKriptoCommand(sock, msg, { jid, text, lang }) {
     }
     if (isSnrAlert) {
       await SNRALERT_RUNNERS[name](sock, msg, { jid, lang, senderId }, args);
+      return true;
+    }
+    if (isHhllAlert) {
+      await HHLLALERT_RUNNERS[name](sock, msg, { jid, lang, senderId }, args);
       return true;
     }
     if (isWatch) {

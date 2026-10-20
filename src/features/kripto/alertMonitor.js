@@ -11,6 +11,8 @@
  *     menyentuh level, aktif lagi setelah harga menjauh > 1.5% / level berganti.
  *   - ringkasan harian (!harian): dikirim sekali per hari pada jam pilihan user.
  *   - alarm titik balik S/R (!alertsnr): reject / tembus, hanya konfirmasi (candle closed). Mesinnya di snrAlertEngine.js.
+ *   - alarm Higher High / Lower Low (!alerthhll): swing baru (dini) + close menembus swing (konfirmasi), dari candle closed.
+ *     Mesinnya di hhllAlertEngine.js; banyak kejadian dikirim sebagai 1 PDF per penerima.
  *   - alarm indikator lanjutan (!alertind, item 10): bias berubah + crossover baru, mode closed (tiap candle tutup)
  *     atau live (refresh berkala, candle belum closed ditandai jelas). Mesinnya di advAlertEngine.js; di sini hanya
  *     dibuat satu engine dan timer-nya. Tidak ada WebSocket (opsi 3 menunggu keputusan client).
@@ -57,7 +59,9 @@ const {
 
 const { createAdvEngine } = require("./advAlertEngine");
 const { createSnrEngine } = require("./snrAlertEngine");
-const { ADV_ALERT_CONFIG: ADV, SNR_ALERT_CONFIG: SNR } = require("../../config/indicatorConfig");
+const { createHhllEngine } = require("./hhllAlertEngine");
+const { buildHhllPdf } = require("./hhllPdf");
+const { ADV_ALERT_CONFIG: ADV, SNR_ALERT_CONFIG: SNR, HHLL_ALERT_CONFIG: HHLL } = require("../../config/indicatorConfig");
 
 const BINANCE = (process.env.BINANCE_BASE || "https://data-api.binance.vision").replace(/\/+$/, "");
 const POLL_MS = Math.max(10_000, Number(process.env.ALERT_POLL_MS) || 30_000);
@@ -75,6 +79,7 @@ let dailyBusy = false;
 let divBusy = false;
 let advBusy = false;
 let snrBusy = false;
+let hhllBusy = false;
 
 // ---------- helper ----------
 const langFor = (chat, userJid) => (chat.endsWith("@g.us") ? getLang("group", chat) : getLang("user", userJid));
@@ -569,6 +574,20 @@ const snrEngine = createSnrEngine({
 /** Pemeriksaan alarm S/R (konfirmasi). Dipanggil timer; aman dipanggil manual untuk uji. */
 const checkSnrAlerts = (now) => (sockRef ? snrEngine.tick(now) : undefined);
 
+// ---------- alarm Higher High / Lower Low (!alerthhll) ----------
+const hhllEngine = createHhllEngine({
+  store,
+  fetchCandles,
+  notify,
+  notifyDocument,
+  buildPdf: buildHhllPdf,
+  langFor,
+  isUnsupported: (err) => err instanceof UnsupportedCoinError,
+});
+
+/** Pemeriksaan alarm HH/LL (dini + konfirmasi). Dipanggil timer; aman dipanggil manual untuk uji. */
+const checkHhllAlerts = (now) => (sockRef ? hhllEngine.tick(now) : undefined);
+
 // ---------- start ----------
 /** Dipanggil connection.js tiap socket baru dibuat; timer hanya dibuat sekali. */
 function setAlertSocket(sock) {
@@ -635,6 +654,18 @@ function setAlertSocket(sock) {
       snrBusy = false;
     }
   }, SNR.CHECK_MS).unref?.();
+
+  setInterval(async () => {
+    if (hhllBusy) return;
+    hhllBusy = true;
+    try {
+      await checkHhllAlerts();
+    } catch (err) {
+      console.log("[hhllalert] pengecekan gagal:", err.message);
+    } finally {
+      hhllBusy = false;
+    }
+  }, HHLL.CHECK_MS).unref?.();
 }
 
-module.exports = { setAlertSocket, checkPriceAlerts, checkDaily, checkDivergence, checkAdvAlerts, checkSnrAlerts, localNow, fetchPrices };
+module.exports = { setAlertSocket, checkPriceAlerts, checkDaily, checkDivergence, checkAdvAlerts, checkSnrAlerts, checkHhllAlerts, localNow, fetchPrices };
