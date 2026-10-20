@@ -74,12 +74,15 @@ const posInt = (v, d) => (Number.isInteger(Number(v)) && Number(v) > 0 ? Number(
 const MAX_DIV_ALERTS = posInt(process.env.DIV_ALERT_MAX_PER_USER, 10);
 const MAX_DIV_ALERTS_PER_CHAT = posInt(process.env.DIV_ALERT_MAX_PER_CHAT, 20);
 // Batas alarm indikator lanjutan (!alertind, item 10); angka sama dengan ADV_ALERT_CONFIG.
-const { ADV_ALERT_CONFIG, SNR_ALERT_CONFIG } = require("../config/indicatorConfig");
+const { ADV_ALERT_CONFIG, SNR_ALERT_CONFIG, HHLL_ALERT_CONFIG } = require("../config/indicatorConfig");
 const MAX_ADV_ALERTS = ADV_ALERT_CONFIG.MAX_PER_USER;
 const MAX_ADV_ALERTS_PER_CHAT = ADV_ALERT_CONFIG.MAX_PER_CHAT;
 // Batas alarm titik balik S/R (!alertsnr); angka sama dengan SNR_ALERT_CONFIG.
 const MAX_SNR_ALERTS = SNR_ALERT_CONFIG.MAX_PER_USER;
 const MAX_SNR_ALERTS_PER_CHAT = SNR_ALERT_CONFIG.MAX_PER_CHAT;
+// Batas alarm Higher High / Lower Low (!alerthhll); angka sama dengan HHLL_ALERT_CONFIG.
+const MAX_HHLL_ALERTS = HHLL_ALERT_CONFIG.MAX_PER_USER;
+const MAX_HHLL_ALERTS_PER_CHAT = HHLL_ALERT_CONFIG.MAX_PER_CHAT;
 // Kunci dedupe harus bertahan lebih lama dari jendela deteksi ulang (LOOKBACK + 1 candle 1D = 4 hari).
 const DIV_SENT_TTL_MS = posInt(process.env.DIV_SENT_TTL_DAYS, 7) * 86_400_000;
 
@@ -121,7 +124,7 @@ let failures = 0;
 let started = false;
 
 // ---------- helper ----------
-const isEmpty = (u) => !u || (!u.watch?.length && !u.alerts?.length && !u.divAlerts?.length && !u.advAlerts?.length && !u.snrAlerts?.length && !u.daily && !u.tf);
+const isEmpty = (u) => !u || (!u.watch?.length && !u.alerts?.length && !u.divAlerts?.length && !u.advAlerts?.length && !u.snrAlerts?.length && !u.hhllAlerts?.length && !u.daily && !u.tf);
 const snap = (jid) => (isEmpty(users[jid]) ? null : JSON.stringify(users[jid]));
 const hasPending = () => dirtyUsers.size > 0 || dirtyClosed.size > 0 || dirtySent.size > 0 || pruneBefore != null;
 
@@ -430,6 +433,8 @@ function user(jid) {
   if (!u.nextAdvId) u.nextAdvId = 1;
   if (!Array.isArray(u.snrAlerts)) u.snrAlerts = [];
   if (!u.nextSnrId) u.nextSnrId = 1;
+  if (!Array.isArray(u.hhllAlerts)) u.hhllAlerts = [];
+  if (!u.nextHhllId) u.nextHhllId = 1;
   return u;
 }
 
@@ -736,6 +741,66 @@ function allSnrAlerts() {
   return out;
 }
 
+// ---------- alarm Higher High / Lower Low (!alerthhll) ----------
+/**
+ * hhllAlerts: [{ id: "h1", chat, coin: "BTC"|"WATCHLIST", tf, dirs: ["HH","LL"], stages: [...],
+ *                flipOnly: boolean, createdAt, active: true }]
+ * Penanda kejadian terkirim memakai kunci dedupe yang sama dengan alarm lain (wasSent / markSent).
+ */
+const getHhllAlerts = (jid) => [...user(jid).hhllAlerts];
+
+/** @returns {object|"full"|"chatFull"|"exists"} */
+function addHhllAlert(jid, sub) {
+  const u = user(jid);
+  if (u.hhllAlerts.some((a) => a.chat === sub.chat && a.coin === sub.coin && a.tf === sub.tf && !!a.flipOnly === !!sub.flipOnly && sameList(a.dirs || [], sub.dirs || []) && sameList(a.stages || [], sub.stages || []))) {
+    return "exists";
+  }
+  if (u.hhllAlerts.length >= MAX_HHLL_ALERTS) return "full";
+  if (countHhllAlertsInChat(sub.chat) >= MAX_HHLL_ALERTS_PER_CHAT) return "chatFull";
+  const entry = { ...sub, id: `h${u.nextHhllId++}`, createdAt: Date.now(), active: true };
+  u.hhllAlerts.push(entry);
+  save(jid);
+  return entry;
+}
+
+function countHhllAlertsInChat(chat) {
+  let n = 0;
+  for (const u of Object.values(users)) for (const a of u.hhllAlerts || []) if (a.chat === chat) n++;
+  return n;
+}
+
+/** id boleh "h3" / "H3" / "3". @returns {boolean} */
+function removeHhllAlert(jid, id) {
+  const u = user(jid);
+  const want = /^\d+$/.test(String(id)) ? `h${id}` : String(id).toLowerCase();
+  const i = u.hhllAlerts.findIndex((a) => a.id === want);
+  if (i < 0) return false;
+  u.hhllAlerts.splice(i, 1);
+  prune(jid);
+  save(jid);
+  return true;
+}
+
+/** @returns {number} jumlah alarm yang dihapus */
+function clearHhllAlerts(jid) {
+  const u = user(jid);
+  const n = u.hhllAlerts.length;
+  if (!n) return 0;
+  u.hhllAlerts = [];
+  prune(jid);
+  save(jid);
+  return n;
+}
+
+/** Semua alarm HHLL aktif semua user (untuk monitor). */
+function allHhllAlerts() {
+  const out = [];
+  for (const [jid, u] of Object.entries(users)) {
+    for (const a of u.hhllAlerts || []) if (a.active !== false) out.push({ userJid: jid, sub: a });
+  }
+  return out;
+}
+
 const getLastClosed = (tf) => divState.lastClosedByTf[tf] || 0;
 const getLastClosedMap = () => ({ ...divState.lastClosedByTf });
 function setLastClosed(tf, ms) {
@@ -811,6 +876,8 @@ module.exports = {
   MAX_ADV_ALERTS_PER_CHAT,
   MAX_SNR_ALERTS,
   MAX_SNR_ALERTS_PER_CHAT,
+  MAX_HHLL_ALERTS,
+  MAX_HHLL_ALERTS_PER_CHAT,
   DIV_SENT_TTL_MS,
   initCryptoStore,
   isCryptoStoreEnabled,
@@ -844,6 +911,12 @@ module.exports = {
   clearSnrAlerts,
   allSnrAlerts,
   countSnrAlertsInChat,
+  getHhllAlerts,
+  addHhllAlert,
+  removeHhllAlert,
+  clearHhllAlerts,
+  allHhllAlerts,
+  countHhllAlertsInChat,
   getLastClosed,
   getLastClosedMap,
   setLastClosed,
