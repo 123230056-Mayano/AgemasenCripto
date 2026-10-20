@@ -169,6 +169,45 @@ function priceLine(ctx, page, y, coin, tf, tick) {
 const fmtNow = () =>
   new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta", day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: false }) + " WIB";
 
+
+// ---------- halaman penjelasan (di akhir PDF) ----------
+const wrapText = (font, clean, text, size, width) => {
+  const words = clean(text).split(" ").filter(Boolean);
+  const lines = [];
+  let cur = "";
+  for (const w of words) {
+    const test = cur ? cur + " " + w : w;
+    if (font.widthOfTextAtSize(test, size) <= width) cur = test;
+    else { lines.push(cur); cur = w; }
+  }
+  if (cur) lines.push(cur);
+  return lines;
+};
+
+/** sections: [{h: judul, p: paragraf, color?, box?: true}] */
+function explainPage(ctx, title, sections) {
+  const { pdf, reg, bold, clean } = ctx;
+  const page = pdf.addPage([PAGE_W, PAGE_H]);
+  pageHeader(ctx, page, { title, sub: "Penjelasan singkat supaya hasil di halaman sebelumnya tidak salah dibaca" });
+  let y = PAGE_H - 70 - 34;
+  for (const sec of sections) {
+    const size = 10;
+    const lines = wrapText(reg, clean, sec.p, size, CONTENT_W - (sec.box ? 24 : 0));
+    const boxH = lines.length * 14 + 34;
+    if (sec.box) {
+      page.drawRectangle({ x: MARGIN, y: y - boxH + 10, width: CONTENT_W, height: boxH, color: rgb(1, 0.96, 0.9), borderColor: C.gold, borderWidth: 0.8 });
+    }
+    const x = MARGIN + (sec.box ? 12 : 0);
+    page.drawText(clean(sec.h), { x, y: y - 6, size: 11, font: bold, color: sec.color || C.head });
+    y -= 24;
+    for (const ln of lines) {
+      page.drawText(ln, { x, y, size, font: reg, color: C.ink });
+      y -= 14;
+    }
+    y -= sec.box ? 22 : 14;
+  }
+}
+
 // ---------- !snr all ----------
 async function buildSnrAllPdf(coin, lang = "id") {
   const { tick, byTf } = await loadAll(coin);
@@ -232,6 +271,14 @@ async function buildSnrAllPdf(coin, lang = "id") {
       console.log("[kripto] !snr all chart gagal:", tf, err.message);
     }
   }
+
+  explainPage(ctx, "Cara membaca Support & Resistance", [
+    { h: "R = resistance (atap), S = support (lantai)", p: "Resistance adalah area di mana harga cenderung tertahan atau turun. Support adalah area di mana harga cenderung memantul naik. Angka 1-3 menunjukkan urutan terdekat dari harga sekarang (R1 dan S1 paling dekat). Kolom Jarak adalah jarak level itu dari harga sekarang.", color: C.res },
+    { h: "Kekuatan level", p: "Bulatan terisi makin banyak berarti level itu makin sering menjadi titik balik harga dalam sekitar 200 candle terakhir. Bulatan kosong hanya slot yang belum terisi, bukan sinyal jelek. Skala: 1x lemah, 2-4x sedang, 5-8x kuat, 9x ke atas sangat kuat." },
+    { h: "Apakah level yang kuat lebih sulit ditembus?", p: "Umumnya ya. Level yang sudah sering menahan harga biasanya diperhatikan banyak pelaku pasar, sehingga harga cenderung lebih susah menembusnya dan lebih sering berbalik di sana. Tetapi ini bukan jaminan: level yang kuat tetap bisa jebol, terutama kalau sudah berkali-kali diuji." },
+    { h: "Kalau level tertembus (break)", p: "Kalau support tertembus, harga bisa meluncur turun dengan cepat menuju support berikutnya, bahkan lebih jauh. Sebaliknya, kalau resistance tertembus, harga bisa naik cepat menuju resistance berikutnya. Makin kuat level yang jebol, gerakan sesudahnya bisa makin kencang.", color: C.sup },
+    { h: "Tetap hati-hati saat entry", p: "Jangan masuk posisi hanya karena harga menyentuh sebuah level. Tunggu konfirmasi (misalnya candle yang sudah tutup di atas atau di bawah level), tentukan batas rugi (stop loss) sebelum masuk, dan sesuaikan ukuran posisi dengan risiko yang sanggup ditanggung. Hasil ini bersifat edukasi, bukan sinyal beli atau jual.", box: true },
+  ]);
 
   drawFooters(ctx);
   return Buffer.from(await pdf.save());
@@ -309,6 +356,14 @@ async function buildFibAllPdf(coin, lang = "id") {
       console.log("[kripto] !fib all chart gagal:", tf, err.message);
     }
   }
+
+  explainPage(ctx, "Cara membaca Fibonacci", [
+    { h: "Cara menarik level", p: "Bot mencari swing high dan swing low dari 120 candle terakhir, lalu menarik fib sesuai arah tren: tren naik dari swing low ke swing high, tren turun dari swing high ke swing low. Kolom Jarak adalah jarak level dari harga sekarang." },
+    { h: "Retracement dan golden zone", p: "Level 0.236 sampai 0.786 adalah area di mana harga bisa tertahan saat koreksi. Level 0.5 dan 0.618 disebut golden zone dan paling sering diperhatikan. Level 0 adalah ujung swing, level 1 adalah awal swing.", color: C.gold },
+    { h: "Extension", p: "Level 1.272, 1.618, 2.0, dan 2.618 adalah target kalau tren berlanjut melewati ujung swing.", color: C.ext },
+    { h: "Kalau harga menembus awal swing", p: "Kalau harga sudah menembus level 1 (awal swing), swing tersebut kemungkinan sudah tidak berlaku lagi dan perlu dilihat ulang di timeframe lain.", color: C.res },
+    { h: "Tetap hati-hati saat entry", p: "Level fib adalah area perhatian, bukan jaminan harga berbalik. Jangan masuk posisi hanya karena harga menyentuh sebuah level. Tunggu konfirmasi (misalnya candle yang sudah tutup), tentukan batas rugi (stop loss) sebelum masuk, dan sesuaikan ukuran posisi dengan risiko yang sanggup ditanggung. Hasil ini bersifat edukasi, bukan sinyal beli atau jual.", box: true },
+  ]);
 
   drawFooters(ctx);
   return Buffer.from(await pdf.save());
