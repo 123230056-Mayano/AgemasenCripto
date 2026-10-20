@@ -11,6 +11,7 @@
  *   !snr <koin> [tf]     -> Support & Resistance lengkap: R1-R3/S1-S3 + kekuatan level + chart (snr.js)
  *   !fib <koin> [tf]     -> Fibonacci retracement + extension otomatis, arah ikut tren + chart (fib.js)
  *   !ema <koin> [tf]     -> EMA 20/50/200 + posisi harga (di atas / di bawah)
+ *   !movave <koin> [tf] [sma|ema] -> Moving Average SMA & EMA 20/50/200 + posisi harga + golden/death cross (movave.js). Alias: !ma, !movingaverage
  *   !tren <koin> [tf]    -> bullish / bearish / sideways (+ golden/death cross baru)
  *   !mtf <koin>          -> tabel tren di 15m, 1H, 4H, 1D sekaligus
  *   !bandingkan <k1> <k2> -> dua koin berdampingan + kesimpulan siapa lebih kuat
@@ -42,6 +43,7 @@ const { getDefaultTf } = require("./defaultTf");
 const { getAvailableCoins, filterCoins, buildMessages } = require("./kriptoList");
 const { runSnr } = require("./snr");
 const { runFib } = require("./fib");
+const { runMovave, MOVAVE_TYPES } = require("./movave");
 const { PASAR_COMMANDS, PASAR_RUNNERS, parsePasarArgs } = require("./pasar");
 const { STAT_COMMANDS, STAT_RUNNERS, parseStatArgs } = require("./statistik");
 const { BIAS_COMMANDS, BIAS_RUNNERS, parseBiasArgs } = require("./bias");
@@ -78,6 +80,7 @@ const COMMANDS = {
   snr: { re: /^!(?:snr|sr)(?:\s+([\s\S]*))?$/i, useTf: true },
   fib: { re: /^!(?:fib|fibo|fibonacci)(?:\s+([\s\S]*))?$/i, useTf: true },
   ema: { re: /^!ema(?:\s+([\s\S]*))?$/i, useTf: true },
+  movave: { re: /^!(?:movave|movingaverage|ma)(?:\s+([\s\S]*))?$/i, useTf: true, types: MOVAVE_TYPES },
   tren: { re: /^!(?:tren|trend)(?:\s+([\s\S]*))?$/i, useTf: true },
   mtf: { re: /^!mtf(?:\s+([\s\S]*))?$/i, useTf: false },
   bandingkan: { re: /^!(?:bandingkan|compare)(?:\s+([\s\S]*))?$/i, useTf: false, coins: 2 },
@@ -87,19 +90,21 @@ const COMMANDS = {
  * "sol 4h" -> { coin: "SOL", tf: "4H" | null }. null kalau format salah.
  * Command dua koin (coins: 2), mis. "sol eth" -> { coin: "SOL", coin2: "ETH", tf: null }.
  */
-function parseArgs(raw, { useTf, coins = 1 }) {
+function parseArgs(raw, { useTf, coins = 1, types = null }) {
   const tokens = raw.trim().split(/\s+/).filter(Boolean);
   const found = [];
   let tf = null;
+  let type = null;
   for (const tok of tokens) {
     const up = tok.toUpperCase();
     if (useTf && TIMEFRAMES[up]) tf = up;
+    else if (types && types.includes(up)) type = up;
     else if (found.length < coins && /^[A-Z0-9]{1,15}$/.test(up)) found.push(up);
     else return null;
   }
   if (found.length !== coins) return null;
   if (coins === 2 && found[0] === found[1]) return null; // bandingkan koin yang sama tidak ada artinya
-  return { coin: found[0], coin2: found[1] || null, tf };
+  return { coin: found[0], coin2: found[1] || null, tf, type };
 }
 
 async function runHarga(sock, msg, { jid, lang }, { coin }) {
@@ -332,7 +337,7 @@ async function runBandingkan(sock, msg, { jid, lang, senderId }, { coin, coin2 }
   );
 }
 
-const RUNNERS = { chart: runChart, harga: runHarga, level: runLevel, snr: runSnr, fib: runFib, ema: runEma, tren: runTren, mtf: runMtf, bandingkan: runBandingkan };
+const RUNNERS = { chart: runChart, harga: runHarga, level: runLevel, snr: runSnr, fib: runFib, ema: runEma, movave: runMovave, tren: runTren, mtf: runMtf, bandingkan: runBandingkan };
 
 async function runList(sock, msg, { jid, lang }, keyword) {
   const all = await getAvailableCoins(lang);
@@ -566,7 +571,7 @@ async function handleKriptoCommand(sock, msg, { jid, text, lang }) {
       return true;
     }
     const tf = args.tf || getDefaultTf(senderId);
-    await RUNNERS[name](sock, msg, { jid, lang, senderId }, { coin: args.coin, coin2: args.coin2, tf });
+    await RUNNERS[name](sock, msg, { jid, lang, senderId }, { coin: args.coin, coin2: args.coin2, tf, type: args.type });
   } catch (err) {
     console.log(`[kripto] !${name} gagal:`, err.message);
     let key = "kripto.fail";
