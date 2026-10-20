@@ -677,22 +677,22 @@ function allAdvAlerts() {
 
 // ---------- alarm titik balik S/R (!alertsnr) ----------
 /**
- * snrAlerts: [{ id: "s1", chat, coin: "BTC"|"WATCHLIST", tf, kinds: ["reject","break"], stages: ["dini","final"],
- *               strong: boolean, createdAt, active: true, state: { BTC: { base: true } } }]
- * `state` = koin yang sudah dievaluasi pertama kali (baseline tahap dini). Penanda kejadian terkirim memakai
- * kunci dedupe yang sama dengan alarm lain (wasSent / markSent).
+ * snrAlerts: [{ id: "s1", chat, coin: "BTC"|"WATCHLIST", tf, kinds: ["reject","break"],
+ *               strong: boolean, createdAt, active: true }]
+ * Hanya konfirmasi (candle closed). Data lama masih boleh memuat `stages`/`state`; keduanya diabaikan.
+ * Penanda kejadian terkirim memakai kunci dedupe yang sama dengan alarm lain (wasSent / markSent).
  */
 const getSnrAlerts = (jid) => [...user(jid).snrAlerts];
 
 /** @returns {object|"full"|"chatFull"|"exists"} */
 function addSnrAlert(jid, sub) {
   const u = user(jid);
-  if (u.snrAlerts.some((a) => a.chat === sub.chat && a.coin === sub.coin && a.tf === sub.tf && !!a.strong === !!sub.strong && sameList(a.kinds, sub.kinds) && sameList(a.stages, sub.stages))) {
+  if (u.snrAlerts.some((a) => a.chat === sub.chat && a.coin === sub.coin && a.tf === sub.tf && !!a.strong === !!sub.strong && sameList(a.kinds, sub.kinds))) {
     return "exists";
   }
   if (u.snrAlerts.length >= MAX_SNR_ALERTS) return "full";
   if (countSnrAlertsInChat(sub.chat) >= MAX_SNR_ALERTS_PER_CHAT) return "chatFull";
-  const entry = { ...sub, id: `s${u.nextSnrId++}`, createdAt: Date.now(), active: true, state: {} };
+  const entry = { ...sub, id: `s${u.nextSnrId++}`, createdAt: Date.now(), active: true };
   u.snrAlerts.push(entry);
   save(jid);
   return entry;

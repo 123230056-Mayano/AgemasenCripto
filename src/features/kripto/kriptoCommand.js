@@ -23,7 +23,7 @@
  *   !bias <koin> [tf|semua] -> bias arah gabungan indikator per timeframe (bias.js)
  *   !sinyal <koin> [tf|semua] -> skenario entry / SL / TP1 / TP2 / RR semua timeframe, tanpa AI (signal.js)
  *   !alertind <koin|watchlist> [tf] [bias|cross] [live] | list | off | hapus <id|semua>  (alarm bias berubah / crossover baru, advAlertCommand.js)
- *   !alertsnr <koin|watchlist> [tf] [reject|tembus] [dini|konfirmasi] [kuat] | list | off | hapus <id|semua>  (alarm titik balik S/R, snrAlertCommand.js)
+ *   !alertsnr <koin|watchlist> [tf] [reject|tembus] [kuat] | list | off | hapus <id|semua>  (alarm titik balik S/R, snrAlertCommand.js)
  *   !alertdivergent (!alertdiv) <koin|semua|watchlist> [tf] [rsi|macd] | list | hapus <id|semua>
  *                        -> alarm divergence otomatis tiap candle closed (divAlertCommand.js, alertMonitor.js)
  *   !watch / !unwatch / !watchlist / !alert / !alertlevel / !alerts / !hapusalert /
@@ -447,7 +447,7 @@ async function handleKriptoCommand(sock, msg, { jid, text, lang }) {
       }
     }
   }
-  // Alarm titik balik S/R (!alertsnr: reject / tembus, dini + konfirmasi) -> lihat snrAlertCommand.js
+  // Alarm titik balik S/R (!alertsnr: reject / tembus, konfirmasi) -> lihat snrAlertCommand.js
   let isSnrAlert = false;
   if (!name) {
     for (const [key, def] of Object.entries(SNRALERT_COMMANDS)) {

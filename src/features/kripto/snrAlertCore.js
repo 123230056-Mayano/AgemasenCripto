@@ -10,19 +10,15 @@
  *   reject : harga menyentuh level lalu ditolak (resistance: turun lagi, support: naik lagi)
  *   break  : harga menembus level (resistance: ke atas, support: ke bawah)
  *
- * Dua tahap (permintaan client: "dini dan konfirmasi"):
- *   dini   : dinilai dari candle yang sedang berjalan (BELUM closed). Cepat, tetapi bisa gugur.
- *   final  : dinilai dari candle CLOSED = konfirmasi.
- *   cancel : sinyal dini yang sudah dikirim, tetapi candle closed tidak memenuhi syarat -> diberi tahu batal.
+ * Hanya satu tahap: KONFIRMASI. Dinilai dari candle CLOSED (tidak ada sinyal dini / pembatalan).
  *
  * Level: zona dari computeSnr (snr.js) memakai candle closed SEBELUM candle yang dinilai, dengan harga acuan
- * = close candle sebelumnya. Dengan begitu level tidak berpindah sisi (R jadi S) di tengah candle, dan
- * hasil tahap dini sama dengan tahap konfirmasi untuk candle yang sama.
+ * = close candle sebelumnya, jadi level tidak berpindah sisi (R jadi S) untuk candle yang sama.
  *
  * Pita zona = harga level +-BUFFER (persen, SNR_ALERT_CONFIG.BUFFER_PCT):
  *   resistance R: break  = harga > R(1+b)           reject = high >= R(1-b) DAN harga < R(1-b)
  *   support    S: break  = harga < S(1-b)           reject = low  <= S(1+b) DAN harga > S(1+b)
- * (harga = harga sekarang untuk dini, close untuk konfirmasi). Harga yang berhenti di dalam pita = belum ada
+ * (harga = close candle). Harga yang berhenti di dalam pita = belum ada
  * keputusan, tidak ada alarm.
  *
  * Konfigurasi: config/indicatorConfig.js -> SNR_ALERT_CONFIG.
@@ -33,7 +29,6 @@ const { SNR_ALERT_CONFIG: SNR } = require("../../config/indicatorConfig");
 const { TF_MS, TF_ORDER, TF_LABEL, COIN_WATCHLIST, fmtCandleTime } = require("./divAlertCore");
 
 const KINDS = ["reject", "break"];
-const STAGES = ["dini", "final"];
 
 // =====================================================================
 // 1. Level & deteksi
@@ -75,7 +70,7 @@ function classify(candle, level, buf = SNR.BUFFER_PCT / 100) {
 /**
  * Semua kejadian satu candle terhadap daftar level.
  * @returns {{side:string, rank:number, price:number, touches:number, type:"reject"|"break", now:number, extreme:number}[]}
- *   now = harga/close candle, extreme = high (resistance) atau low (support) candle
+ *   now = close candle, extreme = high (resistance) atau low (support) candle
  */
 function candleHits(candle, levels, buf) {
   const out = [];
@@ -91,15 +86,16 @@ const levelId = (x) => `${x.side}${x.rank}`;
 // =====================================================================
 // 2. Kunci dedupe
 // =====================================================================
-/** stage: "dini" | "final" | "cancel". candleT = waktu BUKA candle yang dinilai. */
-const snrKey = (chat, userJid, coin, tf, stage, type, side, rank, candleT) => ["snr", stage, chat, userJid, coin, tf, type, `${side}${rank}`, candleT].join("|");
+/** candleT = waktu BUKA candle yang dinilai. Segmen "final" dipertahankan agar kunci lama (sudah terkirim) tetap dikenali. */
+const snrKey = (chat, userJid, coin, tf, type, side, rank, candleT) => ["snr", "final", chat, userJid, coin, tf, type, `${side}${rank}`, candleT].join("|");
 
 // =====================================================================
 // 3. Parser command
 // =====================================================================
 const COIN_RE = /^[A-Z0-9]{1,15}$/;
 const KIND_TOKENS = { reject: "reject", rejected: "reject", tolak: "reject", ditolak: "reject", tembus: "break", break: "break", breakout: "break", breakdown: "break" };
-const STAGE_TOKENS = { dini: "dini", early: "dini", konfirmasi: "final", confirm: "final", confirmed: "final", final: "final", closed: "final" };
+// Kata tahap lama (dini/konfirmasi) tetap diterima dan diabaikan: alarm S/R sekarang selalu konfirmasi.
+const STAGE_TOKENS = new Set(["dini", "early", "konfirmasi", "confirm", "confirmed", "final", "closed"]);
 const STRONG_TOKENS = new Set(["kuat", "strong"]);
 const WATCH_TOKENS = new Set(["watchlist", "wl"]);
 const LIST_TOKENS = new Set(["list", "daftar", "ls"]);
@@ -108,7 +104,7 @@ const OFF_TOKENS = new Set(["off", "mati", "matikan"]);
 const ALL_TOKENS = new Set(["semua", "all"]);
 
 /**
- * !alertsnr <koin|watchlist> [tf] [reject|tembus] [dini|konfirmasi] [kuat]
+ * !alertsnr <koin|watchlist> [tf] [reject|tembus] [kuat]
  * !alertsnr list | off | hapus <id|semua>
  * @returns {object|null} null = format salah (-> tampilkan penjelasan command)
  */
@@ -130,13 +126,12 @@ function parseSnrArgs(raw, defaultTf) {
   let tf = null;
   let strong = false;
   const kinds = [];
-  const stages = [];
   for (const tok of tokens) {
     const low = tok.toLowerCase();
     const up = tok.toUpperCase();
     if (TF_MS[up]) tf = up;
     else if (KIND_TOKENS[low]) kinds.push(KIND_TOKENS[low]);
-    else if (STAGE_TOKENS[low]) stages.push(STAGE_TOKENS[low]);
+    else if (STAGE_TOKENS.has(low)) continue;
     else if (STRONG_TOKENS.has(low)) strong = true;
     else if (coin == null) {
       if (WATCH_TOKENS.has(low)) coin = COIN_WATCHLIST;
@@ -147,7 +142,7 @@ function parseSnrArgs(raw, defaultTf) {
   }
   if (!coin) return null;
   const uniq = (arr, all) => (arr.length ? all.filter((x) => arr.includes(x)) : [...all]); // urutan tetap, tanpa duplikat
-  return { action: "create", coin, tf: tf || defaultTf, kinds: uniq(kinds, KINDS), stages: uniq(stages, STAGES), strong };
+  return { action: "create", coin, tf: tf || defaultTf, kinds: uniq(kinds, KINDS), strong };
 }
 
 // =====================================================================
@@ -155,7 +150,7 @@ function parseSnrArgs(raw, defaultTf) {
 // =====================================================================
 const fmt = () => require("./market");
 
-/** Satu baris per kejadian. ev.stage: "dini" | "final" | "cancel". */
+/** Satu baris per kejadian (konfirmasi). */
 function buildLine(lang, ev) {
   const { fmtLevel, fmtUsd } = fmt();
   const vars = {
@@ -166,22 +161,16 @@ function buildLine(lang, ev) {
     now: fmtUsd(ev.now),
     extreme: fmtUsd(ev.extreme),
   };
-  if (ev.stage === "cancel") {
-    return t(lang, "snralert.line.cancel", { ...vars, what: t(lang, `snralert.what.${ev.type}.${ev.side}`, vars) });
-  }
-  return t(lang, `snralert.line.${ev.stage}.${ev.type}.${ev.side}`, vars);
+  return t(lang, `snralert.line.${ev.type}.${ev.side}`, vars);
 }
 
-const STAGE_RANK = { final: 0, cancel: 1, dini: 2 };
-
-/** TF besar dulu, lalu koin, lalu konfirmasi > batal > dini, lalu resistance sebelum support. */
+/** TF besar dulu, lalu koin, lalu resistance sebelum support. */
 function sortEvents(events) {
   const rank = (tf) => TF_ORDER.indexOf(tf);
   return [...events].sort(
     (a, b) =>
       rank(a.tf) - rank(b.tf) ||
       a.coin.localeCompare(b.coin) ||
-      STAGE_RANK[a.stage] - STAGE_RANK[b.stage] ||
       a.side.localeCompare(b.side) ||
       a.rank - b.rank,
   );
@@ -205,15 +194,13 @@ function buildSnrText(lang, events, { ms, part = 1, parts = 1 }) {
 /** Ringkasan satu langganan untuk !alertsnr list / pesan konfirmasi. */
 function describeSnr(lang, sub) {
   const kinds = sub.kinds.map((x) => t(lang, `snralert.kind.${x}`)).join(" + ");
-  const stages = sub.stages.map((x) => t(lang, `snralert.stage.${x}`)).join(" + ");
   const levels = t(lang, sub.strong ? "snralert.levels.strong" : "snralert.levels.near");
-  return `${kinds}, ${stages}, ${levels}`;
+  return `${kinds}, ${levels}`;
 }
 
 module.exports = {
   SNR,
   KINDS,
-  STAGES,
   watchedLevels,
   classify,
   candleHits,

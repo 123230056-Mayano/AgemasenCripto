@@ -10,7 +10,7 @@
  *     ulang tiap 10 menit; notifikasi saat harga mendekati (<= 0.5%) atau
  *     menyentuh level, aktif lagi setelah harga menjauh > 1.5% / level berganti.
  *   - ringkasan harian (!harian): dikirim sekali per hari pada jam pilihan user.
- *   - alarm titik balik S/R (!alertsnr): reject / tembus, tahap dini + konfirmasi. Mesinnya di snrAlertEngine.js.
+ *   - alarm titik balik S/R (!alertsnr): reject / tembus, hanya konfirmasi (candle closed). Mesinnya di snrAlertEngine.js.
  *   - alarm indikator lanjutan (!alertind, item 10): bias berubah + crossover baru, mode closed (tiap candle tutup)
  *     atau live (refresh berkala, candle belum closed ditandai jelas). Mesinnya di advAlertEngine.js; di sini hanya
  *     dibuat satu engine dan timer-nya. Tidak ada WebSocket (opsi 3 menunggu keputusan client).
@@ -566,7 +566,7 @@ const snrEngine = createSnrEngine({
   isUnsupported: (err) => err instanceof UnsupportedCoinError,
 });
 
-/** Pemeriksaan alarm S/R (dini + konfirmasi). Dipanggil timer; aman dipanggil manual untuk uji. */
+/** Pemeriksaan alarm S/R (konfirmasi). Dipanggil timer; aman dipanggil manual untuk uji. */
 const checkSnrAlerts = (now) => (sockRef ? snrEngine.tick(now) : undefined);
 
 // ---------- start ----------

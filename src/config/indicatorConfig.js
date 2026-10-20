@@ -181,7 +181,7 @@ const ADV_ALERT_CONFIG = Object.freeze({
 const SNR_ALERT_CONFIG = Object.freeze({
   VERSION: 1,
   CHECK_MS: Math.max(5_000, _posInt(process.env.SNR_CHECK_MS, 15_000)),
-  INTERVAL_MS: Math.max(30_000, _posInt(process.env.SNR_INTERVAL_MS, 60_000)), // jeda hitung ulang per koin+TF (tahap dini)
+  INTERVAL_MS: Math.max(30_000, _posInt(process.env.SNR_INTERVAL_MS, 60_000)), // jeda ambil ulang per koin+TF
   MAX_PAIRS: _posInt(process.env.SNR_MAX_PAIRS, 60), // batas koin+TF per putaran (sisanya bergilir)
   FINAL_DELAY_MS: _posInt(process.env.SNR_FINAL_DELAY_MS, 10_000), // tunggu setelah candle tutup agar data Binance final
   BUFFER_PCT: _num(process.env.SNR_BUFFER_PCT, 0.1), // lebar pita (persen) di atas/bawah level

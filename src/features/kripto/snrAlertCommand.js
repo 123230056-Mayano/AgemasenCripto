@@ -3,12 +3,11 @@
 /**
  * features/kripto/snrAlertCommand.js
  * ------------------------------------------------------------------
- * !alertsnr: alarm titik balik Support/Resistance (reject / tembus), tahap dini + konfirmasi.
+ * !alertsnr: alarm titik balik Support/Resistance (reject / tembus), hanya konfirmasi (candle closed).
  *
- *   !alertsnr btc 4h                      -> reject + tembus di R1/S1, dini + konfirmasi (default)
+ *   !alertsnr btc 4h                      -> reject + tembus di R1/S1 (default)
  *   !alertsnr btc 4h reject               -> hanya reject
- *   !alertsnr eth 1h tembus konfirmasi    -> hanya tembus, hanya setelah candle closed
- *   !alertsnr btc 4h dini                 -> hanya sinyal dini (candle belum closed)
+ *   !alertsnr eth 1h tembus               -> hanya tembus
  *   !alertsnr btc 4h kuat                 -> level kuat (>= 5 sentuhan) di R1..R3 / S1..S3
  *   !alertsnr watchlist 1h
  *   !alertsnr list | off | hapus <id|semua>
@@ -36,10 +35,10 @@ const isGroup = (chat) => String(chat).endsWith("@g.us");
 const targetLabel = (lang, coin) => (coin === COIN_WATCHLIST ? t(lang, "divalert.target.watch") : coin);
 
 async function runCreate(sock, msg, { jid, lang, senderId }, args) {
-  const { coin, tf, kinds, stages, strong } = args;
+  const { coin, tf, kinds, strong } = args;
   if (coin !== COIN_WATCHLIST) await fetchTicker(coin); // koin tidak ada di Binance -> UnsupportedCoinError (ditangani pemanggil)
 
-  const entry = store.addSnrAlert(senderId, { chat: jid, coin, tf, kinds, stages, strong });
+  const entry = store.addSnrAlert(senderId, { chat: jid, coin, tf, kinds, strong });
   if (entry === "exists") return say(sock, jid, msg, t(lang, "snralert.exists"));
   if (entry === "full") return say(sock, jid, msg, t(lang, "snralert.full", { max: store.MAX_SNR_ALERTS }));
   if (entry === "chatFull") return say(sock, jid, msg, t(lang, "snralert.chatFull", { max: store.MAX_SNR_ALERTS_PER_CHAT }));
@@ -60,7 +59,6 @@ async function runCreate(sock, msg, { jid, lang, senderId }, args) {
       what: describeSnr(lang, entry),
       dest: t(lang, isGroup(jid) ? "divalert.dest.group" : "divalert.dest.private"),
       buf: SNR.BUFFER_PCT,
-      min: Math.max(1, Math.round(SNR.INTERVAL_MS / 60_000)),
       strongMin: SNR.STRONG_MIN_TOUCHES,
       tz: DAILY_TZ_LABEL,
     }) + note,
