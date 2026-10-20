@@ -330,6 +330,8 @@ module.exports = {
   "kripto.level.body": "📊 *Level {coin}/USDT {tf}*\nHarga: {price}\n\n{rows}\n\n_Bukan saran finansial._",
   "kripto.snr.body": "📐 *Support & Resistance {coin}/USDT {tf}*\nHarga: {price} ({change})\n\n{rows}\n\n{note}\n\n📖 *Cara baca*\n🔴 R = resistance (\"atap\": harga cenderung tertahan/turun)\n🟢 S = support (\"lantai\": harga cenderung memantul naik)\nAngka 1-3 = urutan terdekat dari harga sekarang (R1/S1 paling dekat)\n(+x%) = jarak level dari harga sekarang\n●○○○○ = kekuatan level; makin banyak bulat isi (●) makin kuat. Bulat kosong (○) cuma bagian yang belum terisi, bukan sinyal jelek\n(12x) = level itu sudah jadi titik balik harga 12 kali dalam ±200 candle\nSkala: 1x lemah · 2-4x sedang · 5-8x kuat · 9x+ sangat kuat\n\n_Level kuat bukan jaminan harga pasti berbalik. Bukan saran finansial._",
   "kripto.snr.now": "Harga sekarang",
+  "kripto.all.snr.caption": "📐 Support & Resistance {coin}/USDT semua timeframe (15m, 1H, 4H, 1D) ada di PDF ini.",
+  "kripto.all.fib.caption": "📐 Fibonacci {coin}/USDT semua timeframe (15m, 1H, 4H, 1D) ada di PDF ini.",
   "kripto.snr.str.vstrong": "sangat kuat",
   "kripto.snr.str.strong": "kuat",
   "kripto.snr.str.medium": "sedang",

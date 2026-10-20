@@ -43,6 +43,7 @@ const { getDefaultTf } = require("./defaultTf");
 const { getAvailableCoins, filterCoins, buildMessages } = require("./kriptoList");
 const { runSnr } = require("./snr");
 const { runFib } = require("./fib");
+const { ALL_RUNNERS } = require("./allPdf");
 const { runMovave, MOVAVE_TYPES } = require("./movave");
 const { PASAR_COMMANDS, PASAR_RUNNERS, parsePasarArgs } = require("./pasar");
 const { STAT_COMMANDS, STAT_RUNNERS, parseStatArgs } = require("./statistik");
@@ -77,8 +78,8 @@ const COMMANDS = {
   chart: { re: /^!chart(?:\s+([\s\S]*))?$/i, useTf: true },
   harga: { re: /^!(?:harga|price)(?:\s+([\s\S]*))?$/i, useTf: false },
   level: { re: /^!(?:level|levels)(?:\s+([\s\S]*))?$/i, useTf: true },
-  snr: { re: /^!(?:snr|sr)(?:\s+([\s\S]*))?$/i, useTf: true },
-  fib: { re: /^!(?:fib|fibo|fibonacci)(?:\s+([\s\S]*))?$/i, useTf: true },
+  snr: { re: /^!(?:snr|sr)(?:\s+([\s\S]*))?$/i, useTf: true, allTf: true },
+  fib: { re: /^!(?:fib|fibo|fibonacci)(?:\s+([\s\S]*))?$/i, useTf: true, allTf: true },
   ema: { re: /^!ema(?:\s+([\s\S]*))?$/i, useTf: true },
   movave: { re: /^!(?:movave|movingaverage|ma)(?:\s+([\s\S]*))?$/i, useTf: true, types: MOVAVE_TYPES },
   tren: { re: /^!(?:tren|trend)(?:\s+([\s\S]*))?$/i, useTf: true },
@@ -90,21 +91,25 @@ const COMMANDS = {
  * "sol 4h" -> { coin: "SOL", tf: "4H" | null }. null kalau format salah.
  * Command dua koin (coins: 2), mis. "sol eth" -> { coin: "SOL", coin2: "ETH", tf: null }.
  */
-function parseArgs(raw, { useTf, coins = 1, types = null }) {
+function parseArgs(raw, { useTf, coins = 1, types = null, allTf = false }) {
   const tokens = raw.trim().split(/\s+/).filter(Boolean);
   const found = [];
   let tf = null;
   let type = null;
+  let all = false;
   for (const tok of tokens) {
     const up = tok.toUpperCase();
-    if (useTf && TIMEFRAMES[up]) tf = up;
+    // "!snr all btc" / "!fib btc all": kata "all" = semua timeframe (satu PDF). Hanya dianggap flag
+    // kalau masih ada token lain (koin), supaya "!snr all" sendirian tetap dianggap koin "ALL".
+    if (allTf && up === "ALL" && tokens.length > 1) all = true;
+    else if (useTf && TIMEFRAMES[up]) tf = up;
     else if (types && types.includes(up)) type = up;
     else if (found.length < coins && /^[A-Z0-9]{1,15}$/.test(up)) found.push(up);
     else return null;
   }
   if (found.length !== coins) return null;
   if (coins === 2 && found[0] === found[1]) return null; // bandingkan koin yang sama tidak ada artinya
-  return { coin: found[0], coin2: found[1] || null, tf, type };
+  return { coin: found[0], coin2: found[1] || null, tf, type, all };
 }
 
 async function runHarga(sock, msg, { jid, lang }, { coin }) {
@@ -568,6 +573,11 @@ async function handleKriptoCommand(sock, msg, { jid, text, lang }) {
     }
     if (name === "list") {
       await runList(sock, msg, { jid, lang }, args.keyword);
+      return true;
+    }
+    if (args.all && ALL_RUNNERS[name]) {
+      // !snr all <koin> / !fib all <koin> -> satu PDF berisi semua timeframe
+      await ALL_RUNNERS[name](sock, msg, { jid, lang, senderId }, { coin: args.coin });
       return true;
     }
     const tf = args.tf || getDefaultTf(senderId);

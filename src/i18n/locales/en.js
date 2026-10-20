@@ -330,6 +330,8 @@ module.exports = {
   "kripto.level.body": "📊 *{coin}/USDT {tf} levels*\nPrice: {price}\n\n{rows}\n\n_Not financial advice._",
   "kripto.snr.body": "📐 *{coin}/USDT {tf} Support & Resistance*\nPrice: {price} ({change})\n\n{rows}\n\n{note}\n\n📖 *How to read*\n🔴 R = resistance (\"ceiling\": price tends to stall/drop)\n🟢 S = support (\"floor\": price tends to bounce up)\nNumbers 1-3 = order of closeness to current price (R1/S1 nearest)\n(+x%) = distance of the level from current price\n●○○○○ = level strength; more filled dots (●) = stronger. Empty dots (○) are just unfilled slots, not a bad signal\n(12x) = price reversed at that zone 12 times in ~200 candles\nScale: 1x weak · 2-4x medium · 5-8x strong · 9x+ very strong\n\n_A strong level does not guarantee a reversal. Not financial advice._",
   "kripto.snr.now": "Current price",
+  "kripto.all.snr.caption": "📐 {coin}/USDT Support & Resistance for all timeframes (15m, 1H, 4H, 1D) is in this PDF.",
+  "kripto.all.fib.caption": "📐 {coin}/USDT Fibonacci for all timeframes (15m, 1H, 4H, 1D) is in this PDF.",
   "kripto.snr.str.vstrong": "very strong",
   "kripto.snr.str.strong": "strong",
   "kripto.snr.str.medium": "medium",
