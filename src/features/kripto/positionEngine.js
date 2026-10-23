@@ -15,6 +15,9 @@
  *   3. tiap posisi dinilai, aturan kirim diterapkan, pesan dikirim.
  *
  * Aturan kirim (anti-spam):
+ *   - TP/SL berbasis harga (positionLevels.js): "mendekati" sekali per level (pos.nearTpAt / pos.nearSlAt, direset saat TP/SL digeser);
+ *     "tercapai" (harga atau high/low candle menyentuh level) dikirim sekali, tidak kena batas pesan per jam, lalu posisi
+ *     dihapus dari pantauan. Bila keduanya tersentuh dalam candle yang sama, SL didahulukan (urutan tidak diketahui).
  *   - INFO tidak dikirim.
  *   - WASPADA paling banyak sekali per candle TF per posisi (pos.lastWarnCandle); tidak dikirim lagi setelah CUT.
  *   - CUT sekali per posisi (pos.cutAt); direset saat SL digeser lewat !posisi sl. CUT tidak ikut terhenti oleh batas
@@ -31,6 +34,7 @@ const { TF_MS, TF_LABEL, ChatRateLimiter } = require("./divAlertCore");
 const { runPool } = require("./advAlertEngine");
 const { assessPosition, rapidMove, LEVEL } = require("./suddenMove");
 const { formatPositionAlert } = require("./suddenMoveText");
+const { assessPriceLevels, formatLevelAlert } = require("./positionLevels");
 
 const defaultSleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -78,7 +82,12 @@ function createPositionEngine(deps) {
     const { price, candles, atrAll, levels, now } = ctx;
     const tfMs = TF_MS[pos.tf];
     const atr = atrAll?.at(-1);
-    if (!tfMs || !Number.isFinite(price) || !(atr > 0)) return null;
+
+    // --- TP/SL berbasis harga (tidak butuh ATR): tercapai > mendekati ---
+    const lvl = evaluateLevels(item, ctx);
+    if (lvl?.hit) return { text: lvl.texts[0], patch: lvl.patch, isCut: false, urgent: true, closeAfter: true, assessment: null };
+
+    if (!tfMs || !Number.isFinite(price) || !(atr > 0)) return lvl?.texts.length ? { text: lvl.texts.join("\n\n"), patch: lvl.patch, isCut: false, urgent: false, assessment: null } : null;
 
     // Candle closed terakhir yang masih sebelum posisi dibuka tidak boleh memicu CUT (mis. close di bawah SL sebelum entri).
     const last = candles?.at(-1);
@@ -130,14 +139,54 @@ function createPositionEngine(deps) {
       out,
       { candlesSince },
     );
-    if (!text) return null; // INFO tanpa hal baru: tidak dikirim, dan status tidak dicatat
-    return { text, patch, isCut, assessment: a };
+    if (!text && !lvl?.texts.length) return null; // INFO tanpa hal baru: tidak dikirim, dan status tidak dicatat
+    if (!text) return { text: lvl.texts.join("\n\n"), patch: lvl.patch, isCut: false, urgent: false, assessment: a };
+    if (lvl?.texts.length) return { text: [...lvl.texts, text].join("\n\n"), patch: { ...patch, ...lvl.patch }, isCut, urgent: isCut, assessment: a };
+    return { text, patch, isCut, urgent: isCut, assessment: a };
+  }
+
+  /**
+   * TP/SL berbasis harga untuk satu posisi.
+   * @returns {{hit:boolean, texts:string[], patch:object}|null}
+   */
+  function evaluateLevels(item, ctx) {
+    const { userJid, pos } = item;
+    const { price, candles, now } = ctx;
+    if (!Number.isFinite(price)) return null;
+    const lang = langFor(pos.chat, userJid);
+    const lv = assessPriceLevels({
+      dir: pos.dir,
+      entry: pos.entry,
+      sl: pos.sl,
+      sl0: pos.sl0,
+      tp: pos.tp1,
+      price,
+      candles: candles || [],
+      openedAt: pos.openedAt,
+      tpSince: pos.tpSetAt,
+      slSince: pos.slSetAt,
+    });
+    const info = { id: pos.id, coin: pos.coin, tfLabel: TF_LABEL[pos.tf] || pos.tf, dir: pos.dir, entry: pos.entry, sl: pos.sl, sl0: pos.sl0, tp: pos.tp1, price };
+    // SL didahulukan bila keduanya tersentuh (urutan tidak diketahui -> asumsi konservatif).
+    if (lv.sl === "hit") return { hit: true, texts: [formatLevelAlert(lang, "hit.sl", { ...info, via: lv.slVia, ambiguous: lv.ambiguous })], patch: { slHitAt: now } };
+    if (lv.tp === "hit") return { hit: true, texts: [formatLevelAlert(lang, "hit.tp", { ...info, via: lv.tpVia })], patch: { tpHitAt: now } };
+    const texts = [];
+    const patch = {};
+    if (lv.sl === "near" && !pos.nearSlAt) {
+      texts.push(formatLevelAlert(lang, "near.sl", info));
+      patch.nearSlAt = now;
+    }
+    if (lv.tp === "near" && !pos.nearTpAt) {
+      texts.push(formatLevelAlert(lang, "near.tp", info));
+      patch.nearTpAt = now;
+    }
+    return { hit: false, texts, patch };
   }
 
   /** @returns {"sent"|"deferred"|"failed"} */
   async function deliver(item, result) {
     const { pos, userJid } = item;
-    if (!result.isCut && limiter.remaining(pos.chat) < 1) return "deferred";
+    if (!result.isCut && !result.urgent && limiter.remaining(pos.chat) < 1) return "deferred";
     let ok = false;
     try {
       ok = await notify(pos.chat, userJid, result.text);
@@ -147,6 +196,8 @@ function createPositionEngine(deps) {
     if (!ok) return "failed";
     limiter.record(pos.chat);
     Object.assign(pos, result.patch); // dicatat hanya setelah terkirim
+    // TP/SL tercapai = skenario selesai: berhenti memantau (bukan menutup posisi di exchange) supaya tidak ada pesan susulan.
+    if (result.closeAfter) store.removePosition?.(userJid, pos.id);
     return "sent";
   }
 
@@ -196,11 +247,12 @@ function createPositionEngine(deps) {
     for (const item of all) {
       const price = prices.get(item.pos.coin);
       const cache = candleCache.get(`${item.pos.coin}|${item.pos.tf}`);
-      if (price == null || !cache?.candles) continue;
+      if (price == null) continue;
       let result;
       try {
-        const levels = levelsOf(cache.candles, price);
-        result = evaluate(item, { price, candles: cache.candles, atrAll: cache.atrAll, levels, now });
+        // Tanpa candle (gagal ambil) peringatan TP/SL berbasis harga tetap jalan; penilaian ATR/wick dilewati di evaluate().
+        const levels = cache?.candles ? levelsOf(cache.candles, price) : null;
+        result = evaluate(item, { price, candles: cache?.candles || null, atrAll: cache?.atrAll || null, levels, now });
       } catch (err) {
         log("[posisi] gagal menilai", item.pos.id, err.message);
         continue;

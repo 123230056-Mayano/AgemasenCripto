@@ -8,8 +8,10 @@
  *   !posisi buka btc 1h long entry 98200 sl 97150 [tp 99800]
  *   !posisi list
  *   !posisi sl <id> <harga>        geser SL (hanya searah profit; melebarkan SL ditolak)
+ *   !posisi tp <id> <harga>        ganti TP (harus di sisi untung dari entry)
  *   !posisi tutup <id|semua>       berhenti memantau (tidak menutup posisi di exchange)
  *
+ * TP dan SL juga dipantau berdasarkan HARGA: peringatan saat mendekati, konfirmasi saat tersentuh (positionLevels.js).
  * Posisi didaftarkan MANUAL: bot tidak tahu apakah kamu benar-benar masuk di harga itu. Bot hanya mengirim pesan.
  * Pemeriksaan berkala ada di positionEngine.js; aturan murninya di suddenMove.js (assessPosition).
  */
@@ -75,6 +77,13 @@ function parsePositionArgs(name, raw, defaultTf) {
     return id && price != null ? { action: "sl", id, price } : null;
   }
 
+  if (TP_TOKENS.has(first)) {
+    if (tokens.length !== 3) return null;
+    const id = parseId(tokens[1]);
+    const price = parsePrice(tokens[2]);
+    return id && price != null ? { action: "tp", id, price } : null;
+  }
+
   if (!OPEN_TOKENS.has(first)) return null;
   let coin = null;
   let tf = null;
@@ -132,6 +141,9 @@ async function runOpen(sock, msg, { jid, lang, senderId }, a) {
   const s = dir === "long" ? 1 : -1;
   const tp1 = a.tp ?? entry + s * SIGNAL_CONFIG.TP_RR[0] * risk;
   if ((tp1 - entry) * s <= 0) return say(sock, jid, msg, t(lang, "position.tpSide"));
+  // TP/SL yang sudah terlewati harga sekarang akan langsung "tercapai": hampir pasti salah ketik.
+  if ((tp1 - tick.price) * s <= 0) return say(sock, jid, msg, t(lang, "position.beyond.tp", { level: fmtLevel(tp1), price: fmtLevel(tick.price) }));
+  if ((tick.price - sl) * s <= 0) return say(sock, jid, msg, t(lang, "position.beyond.sl", { level: fmtLevel(sl), price: fmtLevel(tick.price) }));
 
   const added = store.addPosition(senderId, { chat: jid, coin, tf, dir, entry, sl, sl0: sl, tp1 });
   if (added === "exists") return say(sock, jid, msg, t(lang, "position.exists"));
@@ -179,10 +191,38 @@ async function runSl(sock, msg, { jid, lang, senderId }, { id, price }) {
     const key = price === pos.sl ? "position.sl.same" : "position.sl.widen";
     return say(sock, jid, msg, t(lang, key, { id, sl: fmtLevel(pos.sl), asked: fmtLevel(price) }));
   }
-  // SL baru = status lama (CUT/break-even) tidak berlaku lagi. `from` dicatat dulu: updatePosition mengubah objek yang sama.
+  // SL yang sudah terlewati harga sekarang = langsung "tercapai"; tolak. Gagal ambil harga tidak menggagalkan pergeseran.
+  const live = await livePrice(pos.coin);
+  if (live != null && (live - next) * (pos.dir === "long" ? 1 : -1) <= 0) {
+    return say(sock, jid, msg, t(lang, "position.beyond.sl", { level: fmtLevel(next), price: fmtLevel(live) }));
+  }
+  // SL baru = status lama (CUT/break-even/mendekati/tersentuh) tidak berlaku lagi. `from` dicatat dulu: updatePosition mengubah objek yang sama.
   const from = pos.sl;
-  store.updatePosition(senderId, id, { sl: next, cutAt: null, beAt: null });
+  store.updatePosition(senderId, id, { sl: next, cutAt: null, beAt: null, nearSlAt: null, slHitAt: null, slSetAt: Date.now() });
   await say(sock, jid, msg, t(lang, "position.sl.moved", { id, from: fmtLevel(from), to: fmtLevel(next) }));
+}
+
+/** Harga terakhir, atau null bila gagal (dipakai sebagai pengaman opsional). */
+async function livePrice(coin) {
+  try {
+    const tick = await fetchTicker(coin);
+    return Number.isFinite(tick?.price) ? tick.price : null;
+  } catch {
+    return null;
+  }
+}
+
+async function runTp(sock, msg, { jid, lang, senderId }, { id, price }) {
+  const pos = store.getPositions(senderId).find((p) => p.id === id);
+  if (!pos) return say(sock, jid, msg, t(lang, "position.notFound", { id }));
+  const s = pos.dir === "long" ? 1 : -1;
+  if ((price - pos.entry) * s <= 0) return say(sock, jid, msg, t(lang, "position.tpSide"));
+  if (price === pos.tp1) return say(sock, jid, msg, t(lang, "position.tp.same", { id, tp: fmtLevel(pos.tp1) }));
+  const live = await livePrice(pos.coin);
+  if (live != null && (price - live) * s <= 0) return say(sock, jid, msg, t(lang, "position.beyond.tp", { level: fmtLevel(price), price: fmtLevel(live) }));
+  const from = pos.tp1;
+  store.updatePosition(senderId, id, { tp1: price, nearTpAt: null, tpHitAt: null, tpSetAt: Date.now() });
+  await say(sock, jid, msg, t(lang, "position.tp.moved", { id, from: fmtLevel(from), to: fmtLevel(price) }));
 }
 
 async function runClose(sock, msg, { jid, lang, senderId }, { id }) {
@@ -201,6 +241,8 @@ async function runPosition(sock, msg, ctx, args) {
       return runList(sock, msg, ctx);
     case "sl":
       return runSl(sock, msg, ctx, args);
+    case "tp":
+      return runTp(sock, msg, ctx, args);
     case "close":
       return runClose(sock, msg, ctx, args);
     case "closeAll":

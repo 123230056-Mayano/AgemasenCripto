@@ -215,6 +215,9 @@ const POSITION_CONFIG = Object.freeze({
   MAX_PER_CHAT: _posInt(process.env.POS_MAX_PER_CHAT, 10),
   MAX_MSG_PER_CHAT_HOUR: _posInt(process.env.POS_MAX_MSG_PER_CHAT_HOUR, 20),
   SEND_GAP_MS: _posInt(process.env.POS_SEND_GAP_MS, 1_000),
+  // Peringatan berbasis HARGA ke TP/SL: "mendekati" = sisa jarak ke level <= NEAR_FRAC x jarak entry->level
+  // (0.2 = 20%; entry 81.000, TP 81.798 -> peringatan mulai ~81.640). "Tercapai" = harga / high-low candle menyentuh level.
+  NEAR_FRAC: Math.min(0.9, Math.max(0.02, _num(process.env.POS_NEAR_FRAC, 0.2))),
 });
 
 /**
