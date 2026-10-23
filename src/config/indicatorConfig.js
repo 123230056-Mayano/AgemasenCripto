@@ -272,4 +272,39 @@ const HHLL_ALERT_CONFIG = Object.freeze({
   CONCURRENCY: _posInt(process.env.HHLL_CONCURRENCY, 8),
 });
 
-module.exports = { INDICATOR_CONFIG, BIAS_CONFIG, SIGNAL_CONFIG, PROB_CONFIG, SUDDEN_CONFIG, POSITION_CONFIG, ADV_ALERT_CONFIG, SNR_ALERT_CONFIG, HHLL_CONFIG, HHLL_ALERT_CONFIG };
+// Accumulation / Manipulation / Distribution (AMD, "Power of 3"): !amd dan alarm !alertamd.
+//   Akumulasi   : range sempit (lebar <= RANGE_MAX_ATR x ATR) minimal RANGE_MIN_BARS candle closed, sideways, tepi atas & bawah tersentuh.
+//   Manipulasi  : satu candle closed menembus high/low range (wick) lalu close kembali ke dalam range (sweep / stop hunt).
+//   Distribusi  : setelah sweep, close pertama menembus swing berlawanan (market structure break, hhllCore.js) dalam CONFIRM_BARS candle.
+// Angka-angkanya NILAI AWAL USULAN, bukan hasil backtest. Naikkan VERSION kalau aturan diubah.
+const AMD_CONFIG = Object.freeze({
+  VERSION: 1,
+  MIN_CANDLES: 60, // data closed minimal supaya ATR dan range layak dihitung
+  RANGE_MIN_BARS: _posInt(process.env.AMD_RANGE_MIN_BARS, 8), // candle minimum pembentuk range akumulasi
+  RANGE_MAX_BARS: _posInt(process.env.AMD_RANGE_MAX_BARS, 40), // candle maksimum yang dipindai ke belakang
+  RANGE_MAX_ATR: _num(process.env.AMD_RANGE_MAX_ATR, 5), // lebar range (high-low) maksimum dalam kelipatan ATR(14)
+  EDGE_FRAC: _num(process.env.AMD_EDGE_FRAC, 0.25), // tepi range = 25% teratas / terbawah dari lebar range
+  EDGE_MIN_TOUCHES: _posInt(process.env.AMD_EDGE_MIN_TOUCHES, 2), // tepi atas dan bawah masing-masing minimal disentuh sekian candle
+  DRIFT_MAX: _num(process.env.AMD_DRIFT_MAX, 0.6), // |close akhir - close awal| maksimum = 60% lebar range (kalau lebih = tren, bukan sideways)
+  SWEEP_MIN_ATR: _num(process.env.AMD_SWEEP_MIN_ATR, 0.1), // tembusan minimal di luar tepi range (kelipatan ATR); lebih kecil = noise
+  CONFIRM_BARS: _posInt(process.env.AMD_CONFIRM_BARS, 10), // batas candle setelah sweep untuk menunggu break struktur
+  STATE_LOOKBACK: _posInt(process.env.AMD_STATE_LOOKBACK, 12), // !amd: sweep sampai sekian candle terakhir masih dianggap fase berjalan
+  VOL_LOOKBACK: 20, // pembanding volume range akumulasi (info saja, bukan syarat)
+  CHART_BARS: 110, // jumlah candle yang digambar di chart !amd
+});
+
+const AMD_ALERT_CONFIG = Object.freeze({
+  VERSION: 1,
+  CHECK_MS: Math.max(5_000, _posInt(process.env.AMD_CHECK_MS, 15_000)),
+  INTERVAL_MS: Math.max(30_000, _posInt(process.env.AMD_INTERVAL_MS, 60_000)), // jeda ambil ulang per koin+TF
+  MAX_PAIRS: _posInt(process.env.AMD_MAX_PAIRS, 60), // batas koin+TF per putaran (sisanya bergilir)
+  FINAL_DELAY_MS: _posInt(process.env.AMD_FINAL_DELAY_MS, 10_000), // tunggu setelah candle tutup agar data Binance final
+  MAX_MSG_PER_CHAT_HOUR: _posInt(process.env.AMD_MAX_MSG_PER_CHAT_HOUR, 20),
+  LINES_PER_MSG: _posInt(process.env.AMD_LINES_PER_MSG, 15),
+  SEND_GAP_MS: _posInt(process.env.AMD_SEND_GAP_MS, 1_000),
+  MAX_PER_USER: _posInt(process.env.AMD_ALERT_MAX_PER_USER, 10),
+  MAX_PER_CHAT: _posInt(process.env.AMD_ALERT_MAX_PER_CHAT, 20),
+  CONCURRENCY: _posInt(process.env.AMD_CONCURRENCY, 8),
+});
+
+module.exports = { INDICATOR_CONFIG, BIAS_CONFIG, SIGNAL_CONFIG, PROB_CONFIG, SUDDEN_CONFIG, POSITION_CONFIG, ADV_ALERT_CONFIG, SNR_ALERT_CONFIG, HHLL_CONFIG, HHLL_ALERT_CONFIG, AMD_CONFIG, AMD_ALERT_CONFIG };

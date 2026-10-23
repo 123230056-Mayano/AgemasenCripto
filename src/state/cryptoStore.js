@@ -74,7 +74,7 @@ const posInt = (v, d) => (Number.isInteger(Number(v)) && Number(v) > 0 ? Number(
 const MAX_DIV_ALERTS = posInt(process.env.DIV_ALERT_MAX_PER_USER, 10);
 const MAX_DIV_ALERTS_PER_CHAT = posInt(process.env.DIV_ALERT_MAX_PER_CHAT, 20);
 // Batas alarm indikator lanjutan (!alertind, item 10); angka sama dengan ADV_ALERT_CONFIG.
-const { ADV_ALERT_CONFIG, SNR_ALERT_CONFIG, HHLL_ALERT_CONFIG, POSITION_CONFIG } = require("../config/indicatorConfig");
+const { ADV_ALERT_CONFIG, SNR_ALERT_CONFIG, HHLL_ALERT_CONFIG, AMD_ALERT_CONFIG, POSITION_CONFIG } = require("../config/indicatorConfig");
 const MAX_ADV_ALERTS = ADV_ALERT_CONFIG.MAX_PER_USER;
 const MAX_ADV_ALERTS_PER_CHAT = ADV_ALERT_CONFIG.MAX_PER_CHAT;
 // Batas alarm titik balik S/R (!alertsnr); angka sama dengan SNR_ALERT_CONFIG.
@@ -87,6 +87,9 @@ const MAX_POSITIONS_PER_CHAT = POSITION_CONFIG.MAX_PER_CHAT;
 // Batas alarm Higher High / Lower Low (!alerthhll); angka sama dengan HHLL_ALERT_CONFIG.
 const MAX_HHLL_ALERTS = HHLL_ALERT_CONFIG.MAX_PER_USER;
 const MAX_HHLL_ALERTS_PER_CHAT = HHLL_ALERT_CONFIG.MAX_PER_CHAT;
+// Batas alarm Accumulation / Manipulation / Distribution (!alertamd); angka sama dengan AMD_ALERT_CONFIG.
+const MAX_AMD_ALERTS = AMD_ALERT_CONFIG.MAX_PER_USER;
+const MAX_AMD_ALERTS_PER_CHAT = AMD_ALERT_CONFIG.MAX_PER_CHAT;
 // Kunci dedupe harus bertahan lebih lama dari jendela deteksi ulang (LOOKBACK + 1 candle 1D = 4 hari).
 const DIV_SENT_TTL_MS = posInt(process.env.DIV_SENT_TTL_DAYS, 7) * 86_400_000;
 
@@ -128,7 +131,7 @@ let failures = 0;
 let started = false;
 
 // ---------- helper ----------
-const isEmpty = (u) => !u || (!u.watch?.length && !u.alerts?.length && !u.divAlerts?.length && !u.advAlerts?.length && !u.snrAlerts?.length && !u.hhllAlerts?.length && !u.positions?.length && !u.daily && !u.tf);
+const isEmpty = (u) => !u || (!u.watch?.length && !u.alerts?.length && !u.divAlerts?.length && !u.advAlerts?.length && !u.snrAlerts?.length && !u.hhllAlerts?.length && !u.amdAlerts?.length && !u.positions?.length && !u.daily && !u.tf);
 const snap = (jid) => (isEmpty(users[jid]) ? null : JSON.stringify(users[jid]));
 const hasPending = () => dirtyUsers.size > 0 || dirtyClosed.size > 0 || dirtySent.size > 0 || pruneBefore != null;
 
@@ -439,6 +442,8 @@ function user(jid) {
   if (!u.nextSnrId) u.nextSnrId = 1;
   if (!Array.isArray(u.hhllAlerts)) u.hhllAlerts = [];
   if (!u.nextHhllId) u.nextHhllId = 1;
+  if (!Array.isArray(u.amdAlerts)) u.amdAlerts = [];
+  if (!u.nextAmdId) u.nextAmdId = 1;
   if (!Array.isArray(u.positions)) u.positions = [];
   if (!u.nextPosId) u.nextPosId = 1;
   return u;
@@ -879,6 +884,66 @@ function allHhllAlerts() {
   return out;
 }
 
+// ---------- alarm Accumulation / Manipulation / Distribution (!alertamd) ----------
+/**
+ * amdAlerts: [{ id: "a1", chat, coin: "BTC"|"WATCHLIST", tf, dirs: ["up","down"], stages: ["early","confirm"],
+ *               createdAt, active: true }]
+ * Penanda kejadian terkirim memakai kunci dedupe yang sama dengan alarm lain (wasSent / markSent).
+ */
+const getAmdAlerts = (jid) => [...user(jid).amdAlerts];
+
+/** @returns {object|"full"|"chatFull"|"exists"} */
+function addAmdAlert(jid, sub) {
+  const u = user(jid);
+  if (u.amdAlerts.some((a) => a.chat === sub.chat && a.coin === sub.coin && a.tf === sub.tf && sameList(a.dirs || [], sub.dirs || []) && sameList(a.stages || [], sub.stages || []))) {
+    return "exists";
+  }
+  if (u.amdAlerts.length >= MAX_AMD_ALERTS) return "full";
+  if (countAmdAlertsInChat(sub.chat) >= MAX_AMD_ALERTS_PER_CHAT) return "chatFull";
+  const entry = { ...sub, id: `a${u.nextAmdId++}`, createdAt: Date.now(), active: true };
+  u.amdAlerts.push(entry);
+  save(jid);
+  return entry;
+}
+
+function countAmdAlertsInChat(chat) {
+  let n = 0;
+  for (const u of Object.values(users)) for (const a of u.amdAlerts || []) if (a.chat === chat) n++;
+  return n;
+}
+
+/** id boleh "a3" / "A3" / "3". @returns {boolean} */
+function removeAmdAlert(jid, id) {
+  const u = user(jid);
+  const want = /^\d+$/.test(String(id)) ? `a${id}` : String(id).toLowerCase();
+  const i = u.amdAlerts.findIndex((a) => a.id === want);
+  if (i < 0) return false;
+  u.amdAlerts.splice(i, 1);
+  prune(jid);
+  save(jid);
+  return true;
+}
+
+/** @returns {number} jumlah alarm yang dihapus */
+function clearAmdAlerts(jid) {
+  const u = user(jid);
+  const n = u.amdAlerts.length;
+  if (!n) return 0;
+  u.amdAlerts = [];
+  prune(jid);
+  save(jid);
+  return n;
+}
+
+/** Semua alarm AMD aktif semua user (untuk monitor). */
+function allAmdAlerts() {
+  const out = [];
+  for (const [jid, u] of Object.entries(users)) {
+    for (const a of u.amdAlerts || []) if (a.active !== false) out.push({ userJid: jid, sub: a });
+  }
+  return out;
+}
+
 const getLastClosed = (tf) => divState.lastClosedByTf[tf] || 0;
 const getLastClosedMap = () => ({ ...divState.lastClosedByTf });
 function setLastClosed(tf, ms) {
@@ -958,6 +1023,8 @@ module.exports = {
   MAX_POSITIONS_PER_CHAT,
   MAX_HHLL_ALERTS,
   MAX_HHLL_ALERTS_PER_CHAT,
+  MAX_AMD_ALERTS,
+  MAX_AMD_ALERTS_PER_CHAT,
   DIV_SENT_TTL_MS,
   initCryptoStore,
   isCryptoStoreEnabled,
@@ -1004,6 +1071,12 @@ module.exports = {
   clearHhllAlerts,
   allHhllAlerts,
   countHhllAlertsInChat,
+  getAmdAlerts,
+  addAmdAlert,
+  removeAmdAlert,
+  clearAmdAlerts,
+  allAmdAlerts,
+  countAmdAlertsInChat,
   getLastClosed,
   getLastClosedMap,
   setLastClosed,

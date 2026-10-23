@@ -14,6 +14,8 @@
  *   - peringatan posisi (!posisi): WASPADA / CUT / time stop / saran break-even. Mesinnya di positionEngine.js.
  *   - alarm Higher High / Lower Low (!alerthhll): swing baru (dini) + close menembus swing (konfirmasi), dari candle closed.
  *     Mesinnya di hhllAlertEngine.js; banyak kejadian dikirim sebagai 1 PDF per penerima.
+ *   - alarm Accumulation / Manipulation / Distribution (!alertamd): sweep range (dini) + break struktur (konfirmasi), dari candle closed.
+ *     Mesinnya di amdAlertEngine.js; hasil berupa teks.
  *   - alarm indikator lanjutan (!alertind, item 10): bias berubah + crossover baru, mode closed (tiap candle tutup)
  *     atau live (refresh berkala, candle belum closed ditandai jelas). Mesinnya di advAlertEngine.js; di sini hanya
  *     dibuat satu engine dan timer-nya. Tidak ada WebSocket (opsi 3 menunggu keputusan client).
@@ -63,7 +65,8 @@ const { createSnrEngine } = require("./snrAlertEngine");
 const { createPositionEngine } = require("./positionEngine");
 const { createHhllEngine } = require("./hhllAlertEngine");
 const { buildHhllPdf } = require("./hhllPdf");
-const { ADV_ALERT_CONFIG: ADV, SNR_ALERT_CONFIG: SNR, HHLL_ALERT_CONFIG: HHLL, POSITION_CONFIG: POSCFG } = require("../../config/indicatorConfig");
+const { createAmdEngine } = require("./amdAlertEngine");
+const { ADV_ALERT_CONFIG: ADV, SNR_ALERT_CONFIG: SNR, HHLL_ALERT_CONFIG: HHLL, AMD_ALERT_CONFIG: AMDCFG, POSITION_CONFIG: POSCFG } = require("../../config/indicatorConfig");
 
 const BINANCE = (process.env.BINANCE_BASE || "https://data-api.binance.vision").replace(/\/+$/, "");
 const POLL_MS = Math.max(10_000, Number(process.env.ALERT_POLL_MS) || 30_000);
@@ -83,6 +86,7 @@ let advBusy = false;
 let snrBusy = false;
 let posBusy = false;
 let hhllBusy = false;
+let amdBusy = false;
 
 // ---------- helper ----------
 const langFor = (chat, userJid) => (chat.endsWith("@g.us") ? getLang("group", chat) : getLang("user", userJid));
@@ -604,6 +608,18 @@ const hhllEngine = createHhllEngine({
 /** Pemeriksaan alarm HH/LL (dini + konfirmasi). Dipanggil timer; aman dipanggil manual untuk uji. */
 const checkHhllAlerts = (now) => (sockRef ? hhllEngine.tick(now) : undefined);
 
+// ---------- alarm Accumulation / Manipulation / Distribution (!alertamd) ----------
+const amdEngine = createAmdEngine({
+  store,
+  fetchCandles,
+  notify,
+  langFor,
+  isUnsupported: (err) => err instanceof UnsupportedCoinError,
+});
+
+/** Pemeriksaan alarm AMD (dini + konfirmasi). Dipanggil timer; aman dipanggil manual untuk uji. */
+const checkAmdAlerts = (now) => (sockRef ? amdEngine.tick(now) : undefined);
+
 // ---------- start ----------
 /** Dipanggil connection.js tiap socket baru dibuat; timer hanya dibuat sekali. */
 function setAlertSocket(sock) {
@@ -694,6 +710,18 @@ function setAlertSocket(sock) {
       hhllBusy = false;
     }
   }, HHLL.CHECK_MS).unref?.();
+
+  setInterval(async () => {
+    if (amdBusy) return;
+    amdBusy = true;
+    try {
+      await checkAmdAlerts();
+    } catch (err) {
+      console.log("[amdalert] pengecekan gagal:", err.message);
+    } finally {
+      amdBusy = false;
+    }
+  }, AMDCFG.CHECK_MS).unref?.();
 }
 
-module.exports = { setAlertSocket, checkPriceAlerts, checkDaily, checkDivergence, checkAdvAlerts, checkSnrAlerts, checkPositions, checkHhllAlerts, localNow, fetchPrices };
+module.exports = { setAlertSocket, checkPriceAlerts, checkDaily, checkDivergence, checkAdvAlerts, checkSnrAlerts, checkPositions, checkHhllAlerts, checkAmdAlerts, localNow, fetchPrices };
