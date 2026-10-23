@@ -34,6 +34,7 @@ const COMMAND_ALIASES = {
   "!stopdaily": "!stopharian",
   "!rate": "!kurs",
   "!convert": "!konversi",
+  "!position": "!posisi",
 };
 
 // "!Summarize tolong fokus ke kesimpulan" -> "!ringkas tolong fokus ke kesimpulan"

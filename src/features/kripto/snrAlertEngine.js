@@ -3,7 +3,7 @@
 /**
  * features/kripto/snrAlertEngine.js
  * ------------------------------------------------------------------
- * Mesin alarm titik balik S/R (!alertsnr): reject + tembus, hanya KONFIRMASI (candle closed).
+ * Mesin alarm titik balik S/R (!alertsnr): reject + tembus (default), wick dan sweep (opt-in), hanya KONFIRMASI (candle closed).
  * Semua ketergantungan (store, fetch candle, kirim pesan, bahasa, hitung level) disuntik lewat
  * createSnrEngine(), jadi seluruh alur bisa diuji dengan data palsu tanpa jaringan.
  * alertMonitor.js membuat satu engine dan memanggil tick() tiap SNR.CHECK_MS.
@@ -21,7 +21,7 @@ const { SNR_ALERT_CONFIG: SNR } = require("../../config/indicatorConfig");
 const { TF_MS, COIN_WATCHLIST, ChatRateLimiter } = require("./divAlertCore");
 const { selectLivePairs } = require("./advAlertCore");
 const { runPool } = require("./advAlertEngine");
-const { watchedLevels, candleHits, snrKey, chunk, sortEvents, buildSnrText } = require("./snrAlertCore");
+const { watchedLevels, candleHits, suddenHits, prioritize, snrKey, chunk, sortEvents, buildSnrText } = require("./snrAlertCore");
 
 const defaultSleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -69,9 +69,13 @@ function createSnrEngine(deps) {
     const finalReady = X.t + tfMs + SNR.FINAL_DELAY_MS <= now;
     if (!finalReady || X.t + tfMs <= sub.createdAt) return out;
 
-    const hits = candleHits(X, watchedLevels(closed.slice(0, -1), levelOpts(sub)), buf);
-    for (const h of hits) {
-      if (!sub.kinds.includes(h.type)) continue;
+    const history = closed.slice(0, -1);
+    const levels = watchedLevels(history, levelOpts(sub));
+    const want = { wick: sub.kinds.includes("wick"), sweep: sub.kinds.includes("sweep") };
+    // Kumpulkan semua kejadian candle X sesuai jenis yang dipilih, lalu satu pesan per level (sweep > wick > reject),
+    // baru cek dedupe. Break tidak ikut disaring. Urutan ini penting: reject yang kalah prioritas tidak dikirim sama sekali.
+    const hits = [...candleHits(X, levels, buf).filter((h) => sub.kinds.includes(h.type)), ...suddenHits(history, X, levels, want)];
+    for (const h of prioritize(hits)) {
       const key = snrKey(sub.chat, userJid, coin, tf, h.type, h.side, h.rank, X.t);
       if (store.wasSent(key)) continue;
       out.events.push({ ...base, ...h, candleT: X.t, key, commit: () => store.markSent([key]) });
@@ -124,6 +128,26 @@ function createSnrEngine(deps) {
     return totals;
   }
 
+  /**
+   * Dua langganan satu pemilik bisa menghasilkan kejadian yang tumpang tindih (mis. satu reject+tembus, satu wick).
+   * Gabungkan: kunci yang sama dikirim sekali (kunci lain dari langganan yang sama dicatat ikut), lalu terapkan
+   * prioritas sweep > wick > reject per level per candle lintas langganan. Kejadian yang kalah prioritas dibuang
+   * dan kuncinya TIDAK dicatat.
+   */
+  function mergeEvents(list) {
+    const byKey = new Map();
+    for (const ev of list) if (!byKey.has(ev.key)) byKey.set(ev.key, ev);
+    const groups = new Map();
+    for (const ev of byKey.values()) {
+      const g = `${ev.chat}|${ev.userJid}|${ev.coin}|${ev.tf}|${ev.candleT}`;
+      if (!groups.has(g)) groups.set(g, []);
+      groups.get(g).push(ev);
+    }
+    const out = [];
+    for (const arr of groups.values()) out.push(...prioritize(arr));
+    return out;
+  }
+
   /** Dipanggil berkala oleh alertMonitor. */
   async function tick(now = Date.now()) {
     const all = store.allSnrAlerts();
@@ -143,7 +167,7 @@ function createSnrEngine(deps) {
     if (!chosen.length) return;
 
     const startedAt = Date.now();
-    const events = [];
+    const rawEvents = [];
     let failures = 0;
     await runPool(chosen, SNR.CONCURRENCY, async (pair) => {
       const [coin, tf] = pair.split("|");
@@ -157,15 +181,16 @@ function createSnrEngine(deps) {
       }
       for (const e of byPair.get(pair)) {
         const r = evaluate(e, coin, candles, now);
-        events.push(...r.events);
+        rawEvents.push(...r.events);
       }
     });
+    const events = mergeEvents(rawEvents);
     const totals = await deliverAll(events, { ms: now });
     if (totals.sent) store.persist();
     log(`[snralert] pasangan=${chosen.length}/${byPair.size} kejadian=${events.length} pesan=${totals.sent} gagal=${totals.failed + failures} ditunda_batas_jam=${totals.deferred} total=${Date.now() - startedAt}ms`);
   }
 
-  return { tick, evaluate, deliver, _state: { lastRun, limiter } };
+  return { tick, evaluate, deliver, mergeEvents, _state: { lastRun, limiter } };
 }
 
 module.exports = { createSnrEngine };

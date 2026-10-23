@@ -200,6 +200,24 @@ const SUDDEN_CONFIG = Object.freeze({
 });
 
 /**
+ * Posisi pengguna dan peringatan WASPADA / CUT (!posisi; positionEngine.js memakai suddenMove.assessPosition).
+ * Posisi didaftarkan MANUAL oleh pengguna. Bot hanya mengirim pesan; tidak menutup posisi dan tidak menghapus
+ * posisi otomatis saat CUT. Polling harga tiap CHECK_MS: spike yang selesai dalam hitungan detik bisa terlewat.
+ */
+const POSITION_CONFIG = Object.freeze({
+  VERSION: 1,
+  CHECK_MS: Math.max(10_000, _posInt(process.env.POS_CHECK_MS, 30_000)), // jeda ambil harga (satu permintaan batch untuk semua koin)
+  INTERVAL_MS: Math.max(30_000, _posInt(process.env.POS_INTERVAL_MS, 60_000)), // jeda minimal ambil ulang candle per koin+TF
+  MAX_PAIRS: _posInt(process.env.POS_MAX_PAIRS, 60), // batas koin+TF dihitung per putaran
+  CONCURRENCY: _posInt(process.env.POS_CONCURRENCY, 8),
+  SAMPLE_MAX: _posInt(process.env.POS_SAMPLE_MAX, 60), // maksimum sampel harga per koin di buffer (gerak cepat)
+  MAX_PER_USER: _posInt(process.env.POS_MAX_PER_USER, 5),
+  MAX_PER_CHAT: _posInt(process.env.POS_MAX_PER_CHAT, 10),
+  MAX_MSG_PER_CHAT_HOUR: _posInt(process.env.POS_MAX_MSG_PER_CHAT_HOUR, 20),
+  SEND_GAP_MS: _posInt(process.env.POS_SEND_GAP_MS, 1_000),
+});
+
+/**
  * Alarm titik balik Support/Resistance (!alertsnr): reject (ditolak/memantul) dan tembus (breakout/breakdown),
  * dua tahap: DINI (candle berjalan, belum closed, bisa batal) dan KONFIRMASI (candle closed).
  *
@@ -211,7 +229,7 @@ const SUDDEN_CONFIG = Object.freeze({
  * Semua angka bisa diubah lewat env; naikkan VERSION kalau aturan diubah.
  */
 const SNR_ALERT_CONFIG = Object.freeze({
-  VERSION: 1,
+  VERSION: 2, // v2: jenis wick + sweep (opt-in), satu pesan per level per candle
   CHECK_MS: Math.max(5_000, _posInt(process.env.SNR_CHECK_MS, 15_000)),
   INTERVAL_MS: Math.max(30_000, _posInt(process.env.SNR_INTERVAL_MS, 60_000)), // jeda ambil ulang per koin+TF
   MAX_PAIRS: _posInt(process.env.SNR_MAX_PAIRS, 60), // batas koin+TF per putaran (sisanya bergilir)
@@ -254,4 +272,4 @@ const HHLL_ALERT_CONFIG = Object.freeze({
   CONCURRENCY: _posInt(process.env.HHLL_CONCURRENCY, 8),
 });
 
-module.exports = { INDICATOR_CONFIG, BIAS_CONFIG, SIGNAL_CONFIG, PROB_CONFIG, SUDDEN_CONFIG, ADV_ALERT_CONFIG, SNR_ALERT_CONFIG, HHLL_CONFIG, HHLL_ALERT_CONFIG };
+module.exports = { INDICATOR_CONFIG, BIAS_CONFIG, SIGNAL_CONFIG, PROB_CONFIG, SUDDEN_CONFIG, POSITION_CONFIG, ADV_ALERT_CONFIG, SNR_ALERT_CONFIG, HHLL_CONFIG, HHLL_ALERT_CONFIG };

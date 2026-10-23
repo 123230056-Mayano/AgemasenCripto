@@ -74,12 +74,16 @@ const posInt = (v, d) => (Number.isInteger(Number(v)) && Number(v) > 0 ? Number(
 const MAX_DIV_ALERTS = posInt(process.env.DIV_ALERT_MAX_PER_USER, 10);
 const MAX_DIV_ALERTS_PER_CHAT = posInt(process.env.DIV_ALERT_MAX_PER_CHAT, 20);
 // Batas alarm indikator lanjutan (!alertind, item 10); angka sama dengan ADV_ALERT_CONFIG.
-const { ADV_ALERT_CONFIG, SNR_ALERT_CONFIG, HHLL_ALERT_CONFIG } = require("../config/indicatorConfig");
+const { ADV_ALERT_CONFIG, SNR_ALERT_CONFIG, HHLL_ALERT_CONFIG, POSITION_CONFIG } = require("../config/indicatorConfig");
 const MAX_ADV_ALERTS = ADV_ALERT_CONFIG.MAX_PER_USER;
 const MAX_ADV_ALERTS_PER_CHAT = ADV_ALERT_CONFIG.MAX_PER_CHAT;
 // Batas alarm titik balik S/R (!alertsnr); angka sama dengan SNR_ALERT_CONFIG.
 const MAX_SNR_ALERTS = SNR_ALERT_CONFIG.MAX_PER_USER;
 const MAX_SNR_ALERTS_PER_CHAT = SNR_ALERT_CONFIG.MAX_PER_CHAT;
+
+// Batas posisi (!posisi); angka sama dengan POSITION_CONFIG.
+const MAX_POSITIONS = POSITION_CONFIG.MAX_PER_USER;
+const MAX_POSITIONS_PER_CHAT = POSITION_CONFIG.MAX_PER_CHAT;
 // Batas alarm Higher High / Lower Low (!alerthhll); angka sama dengan HHLL_ALERT_CONFIG.
 const MAX_HHLL_ALERTS = HHLL_ALERT_CONFIG.MAX_PER_USER;
 const MAX_HHLL_ALERTS_PER_CHAT = HHLL_ALERT_CONFIG.MAX_PER_CHAT;
@@ -124,7 +128,7 @@ let failures = 0;
 let started = false;
 
 // ---------- helper ----------
-const isEmpty = (u) => !u || (!u.watch?.length && !u.alerts?.length && !u.divAlerts?.length && !u.advAlerts?.length && !u.snrAlerts?.length && !u.hhllAlerts?.length && !u.daily && !u.tf);
+const isEmpty = (u) => !u || (!u.watch?.length && !u.alerts?.length && !u.divAlerts?.length && !u.advAlerts?.length && !u.snrAlerts?.length && !u.hhllAlerts?.length && !u.positions?.length && !u.daily && !u.tf);
 const snap = (jid) => (isEmpty(users[jid]) ? null : JSON.stringify(users[jid]));
 const hasPending = () => dirtyUsers.size > 0 || dirtyClosed.size > 0 || dirtySent.size > 0 || pruneBefore != null;
 
@@ -435,6 +439,8 @@ function user(jid) {
   if (!u.nextSnrId) u.nextSnrId = 1;
   if (!Array.isArray(u.hhllAlerts)) u.hhllAlerts = [];
   if (!u.nextHhllId) u.nextHhllId = 1;
+  if (!Array.isArray(u.positions)) u.positions = [];
+  if (!u.nextPosId) u.nextPosId = 1;
   return u;
 }
 
@@ -741,6 +747,78 @@ function allSnrAlerts() {
   return out;
 }
 
+// ---------- posisi pengguna (!posisi) ----------
+/**
+ * positions: [{ id: "p1", chat, coin, tf, dir: "long"|"short", entry, sl, sl0, tp1, openedAt, active: true,
+ *               lastLevel, lastAlertAt, lastWarnCandle, cutAt, timeStopAt, beAt }]
+ * sl0 = SL awal (dasar hitungan R), sl = SL berlaku (hanya boleh digeser searah profit, lihat suddenMove.trailStop).
+ * Kolom lastLevel/lastAlertAt/lastWarnCandle/cutAt/timeStopAt/beAt = status anti-spam yang diisi positionEngine
+ * dan disimpan bersama posisi (TTL kunci dedupe 7 hari terlalu pendek untuk posisi yang bisa lebih lama).
+ * Objek pengguna disimpan utuh (Supabase: kolom data jsonb), jadi tidak perlu migrasi skema; pengguna lama
+ * tanpa larik positions diinisialisasi di user().
+ */
+const getPositions = (jid) => [...user(jid).positions];
+
+function countPositionsInChat(chat) {
+  let n = 0;
+  for (const u of Object.values(users)) for (const p of u.positions || []) if (p.chat === chat) n++;
+  return n;
+}
+
+/** @returns {object|"full"|"chatFull"|"exists"} */
+function addPosition(jid, pos) {
+  const u = user(jid);
+  if (u.positions.some((p) => p.chat === pos.chat && p.coin === pos.coin && p.tf === pos.tf && p.dir === pos.dir && p.entry === pos.entry && p.sl0 === (pos.sl0 ?? pos.sl))) return "exists";
+  if (u.positions.length >= MAX_POSITIONS) return "full";
+  if (countPositionsInChat(pos.chat) >= MAX_POSITIONS_PER_CHAT) return "chatFull";
+  const entry = { ...pos, sl0: pos.sl0 ?? pos.sl, id: `p${u.nextPosId++}`, openedAt: pos.openedAt ?? Date.now(), active: true };
+  u.positions.push(entry);
+  save(jid);
+  return entry;
+}
+
+const posId = (id) => (/^\d+$/.test(String(id)) ? `p${id}` : String(id).toLowerCase());
+
+/** Ubah sebagian kolom satu posisi. @returns {object|null} posisi setelah diubah, null bila tidak ada */
+function updatePosition(jid, id, patch) {
+  const p = user(jid).positions.find((x) => x.id === posId(id));
+  if (!p) return null;
+  Object.assign(p, patch);
+  save(jid);
+  return p;
+}
+
+/** @returns {boolean} */
+function removePosition(jid, id) {
+  const u = user(jid);
+  const i = u.positions.findIndex((p) => p.id === posId(id));
+  if (i < 0) return false;
+  u.positions.splice(i, 1);
+  prune(jid);
+  save(jid);
+  return true;
+}
+
+/** @returns {number} jumlah posisi yang dihapus */
+function clearPositions(jid) {
+  const u = user(jid);
+  const n = u.positions.length;
+  if (!n) return 0;
+  u.positions = [];
+  prune(jid);
+  save(jid);
+  return n;
+}
+
+/** Semua posisi aktif semua user (untuk positionEngine). Objek posisi dikembalikan sebagai referensi (engine mengisi status anti-spam lalu memanggil persist()). */
+function allPositions() {
+  const out = [];
+  for (const [jid, u] of Object.entries(users)) {
+    for (const p of u.positions || []) if (p.active !== false) out.push({ userJid: jid, pos: p });
+  }
+  return out;
+}
+
 // ---------- alarm Higher High / Lower Low (!alerthhll) ----------
 /**
  * hhllAlerts: [{ id: "h1", chat, coin: "BTC"|"WATCHLIST", tf, dirs: ["HH","LL"], stages: [...],
@@ -876,6 +954,8 @@ module.exports = {
   MAX_ADV_ALERTS_PER_CHAT,
   MAX_SNR_ALERTS,
   MAX_SNR_ALERTS_PER_CHAT,
+  MAX_POSITIONS,
+  MAX_POSITIONS_PER_CHAT,
   MAX_HHLL_ALERTS,
   MAX_HHLL_ALERTS_PER_CHAT,
   DIV_SENT_TTL_MS,
@@ -911,6 +991,13 @@ module.exports = {
   clearSnrAlerts,
   allSnrAlerts,
   countSnrAlertsInChat,
+  getPositions,
+  addPosition,
+  updatePosition,
+  removePosition,
+  clearPositions,
+  allPositions,
+  countPositionsInChat,
   getHhllAlerts,
   addHhllAlert,
   removeHhllAlert,

@@ -77,6 +77,44 @@ async function fetchCandles(coin, tf, { includeOpen = false } = {}) {
   }
 }
 
+/**
+ * Candle closed historis berhalaman (Binance membatasi 1000 candle per permintaan), urut lama -> baru.
+ * Dipakai backtest (scripts/backtest-sudden.js); fetchCandles biasa hanya 320 candle terakhir.
+ * @param {string} coin
+ * @param {string} tf "15M"|"1H"|"4H"|"1D"
+ * @param {{bars?:number, endTime?:number, pageSize?:number, get?:Function}} [opts]
+ *   get = pengganti axios.get (untuk uji tanpa jaringan)
+ */
+async function fetchCandlesHistory(coin, tf, { bars = 3000, endTime = Date.now(), pageSize = 1000, get } = {}) {
+  const interval = TIMEFRAMES[tf];
+  if (!interval) throw new Error("TF_UNSUPPORTED");
+  const http = get || ((url, cfg) => axios.get(url, cfg));
+  const out = [];
+  let end = endTime;
+  try {
+    while (out.length < bars) {
+      const res = await http(`${BINANCE}/api/v3/klines`, {
+        params: { symbol: binanceSymbol(coin), interval, limit: Math.min(pageSize, 1000), endTime: end },
+        timeout: 15_000,
+      });
+      const rows = res.data || [];
+      if (!rows.length) break;
+      const page = rows.map((k) => ({ t: k[0], o: +k[1], h: +k[2], l: +k[3], c: +k[4], v: +k[5], qv: +k[7], ct: k[6] }));
+      out.unshift(...page);
+      const nextEnd = rows[0][0] - 1; // mundur: halaman berikutnya berakhir tepat sebelum candle tertua
+      if (rows.length < Math.min(pageSize, 1000) || nextEnd >= end) break;
+      end = nextEnd;
+    }
+  } catch (err) {
+    if (isInvalidSymbol(err)) throw new UnsupportedCoinError(coin);
+    throw err;
+  }
+  const now = Date.now();
+  const seen = new Set();
+  const uniq = out.filter((k) => k.ct < now && !seen.has(k.t) && seen.add(k.t)).sort((a, b) => a.t - b.t);
+  return uniq.slice(-bars);
+}
+
 // Kurs USD -> IDR, cache 10 menit. Sumber utama open.er-api.com, cadangan USDTIDR Binance.
 let fxCache = { at: 0, rate: null };
 async function fetchUsdIdr() {
@@ -154,6 +192,7 @@ module.exports = {
   UnsupportedCoinError,
   fetchTicker,
   fetchCandles,
+  fetchCandlesHistory,
   fetchUsdIdr,
   computeLevels,
   fmtUsd,

@@ -25,10 +25,16 @@
  */
 
 const { t } = require("../../i18n");
-const { SNR_ALERT_CONFIG: SNR } = require("../../config/indicatorConfig");
+const { SNR_ALERT_CONFIG: SNR, SUDDEN_CONFIG } = require("../../config/indicatorConfig");
 const { TF_MS, TF_ORDER, TF_LABEL, COIN_WATCHLIST, fmtCandleTime } = require("./divAlertCore");
+const sudden = require("./suddenMove");
+const { atr } = require("./indicators");
 
-const KINDS = ["reject", "break"];
+// Urutan tetap dipakai untuk menampilkan jenis. Default (tanpa kata kunci) hanya reject + break; wick dan sweep opt-in.
+const KINDS = ["reject", "break", "wick", "sweep"];
+const DEFAULT_KINDS = ["reject", "break"];
+// Prioritas satu pesan per level per candle: yang lebih spesifik menang. Break tidak ikut disaring (maknanya berlawanan).
+const KIND_PRIORITY = { sweep: 3, wick: 2, reject: 1 };
 
 // =====================================================================
 // 1. Level & deteksi
@@ -81,6 +87,57 @@ function candleHits(candle, levels, buf) {
   return out;
 }
 
+/**
+ * Kejadian wick-reject dan sweep untuk satu candle closed (suddenMove.js), terhadap level yang sama dengan reject/break.
+ * `history` = candle closed SEBELUM candle yang dinilai, `X` = candle yang dinilai. ATR dari history (candle X tidak
+ * ikut menaikkan pembandingnya). Sweep hanya dilaporkan bila terjadi di X sendiri (barsAgo 0): alarm tidak mengulang
+ * kejadian lama. Satu level dipakai bergantian: R untuk wick/sweep bearish, S untuk bullish.
+ * @param {object[]} history @param {object} X @param {{side,rank,price,touches}[]} levels
+ * @param {{wick?:boolean, sweep?:boolean}} want
+ * @returns {{side,rank,price,touches,type:"wick"|"sweep",now:number,extreme:number,wickPct?:number,volRatio:number|null}[]}
+ */
+function suddenHits(history, X, levels, want = {}) {
+  const out = [];
+  if (!X || !levels?.length || !(want.wick || want.sweep)) return out;
+  const atrNow = atr(history).at(-1);
+  const find = (side, price) => levels.find((l) => l.side === side && l.price === price);
+  const asLevels = { resistance: levels.filter((l) => l.side === "R").map((l) => l.price), support: levels.filter((l) => l.side === "S").map((l) => l.price) };
+  const vol = sudden.volumeSpike([...history.slice(-(SUDDEN_CONFIG.VOLUME_LOOKBACK + 1)), X]);
+  const volRatio = vol?.ratio ?? null;
+
+  if (want.wick && atrNow > 0) {
+    const w = sudden.wickReject(X, asLevels, atrNow);
+    const lv = w && find(w.dir === "bearish" ? "R" : "S", w.level);
+    if (lv) out.push({ ...lv, type: "wick", now: X.c, extreme: w.extreme, wickPct: w.wickPct * 100, volRatio });
+  }
+  if (want.sweep) {
+    const sw = sudden.sweep([X], asLevels); // hanya candle X (barsAgo 0)
+    const lv = sw && find(sw.dir === "bearish" ? "R" : "S", sw.level);
+    if (lv) out.push({ ...lv, type: "sweep", now: X.c, extreme: sw.extreme, volRatio });
+  }
+  return out;
+}
+/**
+ * Satu pesan per level per candle: untuk tiap level ambil kejadian reject/wick/sweep berprioritas tertinggi
+ * (sweep > wick > reject). Kejadian "break" dibiarkan. Level yang sama = side + rank.
+ * @param {object[]} events kejadian satu candle (sudah termasuk type, side, rank)
+ */
+function prioritize(events) {
+  const best = new Map();
+  const keep = [];
+  for (const ev of events) {
+    const pr = KIND_PRIORITY[ev.type];
+    if (!pr) {
+      keep.push(ev);
+      continue;
+    }
+    const k = levelId(ev);
+    const cur = best.get(k);
+    if (!cur || pr > KIND_PRIORITY[cur.type]) best.set(k, ev);
+  }
+  return [...keep, ...best.values()];
+}
+
 const levelId = (x) => `${x.side}${x.rank}`;
 
 // =====================================================================
@@ -93,7 +150,7 @@ const snrKey = (chat, userJid, coin, tf, type, side, rank, candleT) => ["snr", "
 // 3. Parser command
 // =====================================================================
 const COIN_RE = /^[A-Z0-9]{1,15}$/;
-const KIND_TOKENS = { reject: "reject", rejected: "reject", tolak: "reject", ditolak: "reject", tembus: "break", break: "break", breakout: "break", breakdown: "break" };
+const KIND_TOKENS = { reject: "reject", rejected: "reject", tolak: "reject", ditolak: "reject", tembus: "break", break: "break", breakout: "break", breakdown: "break", wick: "wick", sweep: "sweep", fakeout: "sweep" };
 // Kata tahap lama (dini/konfirmasi) tetap diterima dan diabaikan: alarm S/R sekarang selalu konfirmasi.
 const STAGE_TOKENS = new Set(["dini", "early", "konfirmasi", "confirm", "confirmed", "final", "closed"]);
 const STRONG_TOKENS = new Set(["kuat", "strong"]);
@@ -104,7 +161,7 @@ const OFF_TOKENS = new Set(["off", "mati", "matikan"]);
 const ALL_TOKENS = new Set(["semua", "all"]);
 
 /**
- * !alertsnr <koin|watchlist> [tf] [reject|tembus] [kuat]
+ * !alertsnr <koin|watchlist> [tf] [reject|tembus|wick|sweep] [kuat]
  * !alertsnr list | off | hapus <id|semua>
  * @returns {object|null} null = format salah (-> tampilkan penjelasan command)
  */
@@ -141,8 +198,8 @@ function parseSnrArgs(raw, defaultTf) {
     } else return null;
   }
   if (!coin) return null;
-  const uniq = (arr, all) => (arr.length ? all.filter((x) => arr.includes(x)) : [...all]); // urutan tetap, tanpa duplikat
-  return { action: "create", coin, tf: tf || defaultTf, kinds: uniq(kinds, KINDS), strong };
+  const uniq = (arr, all, dflt) => (arr.length ? all.filter((x) => arr.includes(x)) : [...dflt]); // urutan tetap, tanpa duplikat; tanpa kata kunci = default
+  return { action: "create", coin, tf: tf || defaultTf, kinds: uniq(kinds, KINDS, DEFAULT_KINDS), strong };
 }
 
 // =====================================================================
@@ -160,6 +217,8 @@ function buildLine(lang, ev) {
     level: fmtLevel(ev.price),
     now: fmtUsd(ev.now),
     extreme: fmtUsd(ev.extreme),
+    wick: Number.isFinite(ev.wickPct) ? Math.round(ev.wickPct) : "-",
+    vol: Number.isFinite(ev.volRatio) ? t(lang, "snralert.volTxt", { x: ev.volRatio.toFixed(1) }) : "",
   };
   return t(lang, `snralert.line.${ev.type}.${ev.side}`, vars);
 }
@@ -201,6 +260,10 @@ function describeSnr(lang, sub) {
 module.exports = {
   SNR,
   KINDS,
+  DEFAULT_KINDS,
+  KIND_PRIORITY,
+  suddenHits,
+  prioritize,
   watchedLevels,
   classify,
   candleHits,

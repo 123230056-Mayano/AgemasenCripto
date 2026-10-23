@@ -10,7 +10,8 @@
  *     ulang tiap 10 menit; notifikasi saat harga mendekati (<= 0.5%) atau
  *     menyentuh level, aktif lagi setelah harga menjauh > 1.5% / level berganti.
  *   - ringkasan harian (!harian): dikirim sekali per hari pada jam pilihan user.
- *   - alarm titik balik S/R (!alertsnr): reject / tembus, hanya konfirmasi (candle closed). Mesinnya di snrAlertEngine.js.
+ *   - alarm titik balik S/R (!alertsnr): reject / tembus (default), wick / sweep (opt-in), hanya konfirmasi (candle closed). Mesinnya di snrAlertEngine.js.
+ *   - peringatan posisi (!posisi): WASPADA / CUT / time stop / saran break-even. Mesinnya di positionEngine.js.
  *   - alarm Higher High / Lower Low (!alerthhll): swing baru (dini) + close menembus swing (konfirmasi), dari candle closed.
  *     Mesinnya di hhllAlertEngine.js; banyak kejadian dikirim sebagai 1 PDF per penerima.
  *   - alarm indikator lanjutan (!alertind, item 10): bias berubah + crossover baru, mode closed (tiap candle tutup)
@@ -59,9 +60,10 @@ const {
 
 const { createAdvEngine } = require("./advAlertEngine");
 const { createSnrEngine } = require("./snrAlertEngine");
+const { createPositionEngine } = require("./positionEngine");
 const { createHhllEngine } = require("./hhllAlertEngine");
 const { buildHhllPdf } = require("./hhllPdf");
-const { ADV_ALERT_CONFIG: ADV, SNR_ALERT_CONFIG: SNR, HHLL_ALERT_CONFIG: HHLL } = require("../../config/indicatorConfig");
+const { ADV_ALERT_CONFIG: ADV, SNR_ALERT_CONFIG: SNR, HHLL_ALERT_CONFIG: HHLL, POSITION_CONFIG: POSCFG } = require("../../config/indicatorConfig");
 
 const BINANCE = (process.env.BINANCE_BASE || "https://data-api.binance.vision").replace(/\/+$/, "");
 const POLL_MS = Math.max(10_000, Number(process.env.ALERT_POLL_MS) || 30_000);
@@ -79,6 +81,7 @@ let dailyBusy = false;
 let divBusy = false;
 let advBusy = false;
 let snrBusy = false;
+let posBusy = false;
 let hhllBusy = false;
 
 // ---------- helper ----------
@@ -574,6 +577,19 @@ const snrEngine = createSnrEngine({
 /** Pemeriksaan alarm S/R (konfirmasi). Dipanggil timer; aman dipanggil manual untuk uji. */
 const checkSnrAlerts = (now) => (sockRef ? snrEngine.tick(now) : undefined);
 
+// ---------- peringatan posisi (!posisi) ----------
+const positionEngine = createPositionEngine({
+  store,
+  fetchPrices,
+  fetchCandles,
+  notify,
+  langFor,
+  isUnsupported: (err) => err instanceof UnsupportedCoinError,
+});
+
+/** Pemeriksaan posisi (WASPADA / CUT). Dipanggil timer; aman dipanggil manual untuk uji. */
+const checkPositions = (now) => (sockRef ? positionEngine.tick(now) : undefined);
+
 // ---------- alarm Higher High / Lower Low (!alerthhll) ----------
 const hhllEngine = createHhllEngine({
   store,
@@ -656,6 +672,18 @@ function setAlertSocket(sock) {
   }, SNR.CHECK_MS).unref?.();
 
   setInterval(async () => {
+    if (posBusy) return;
+    posBusy = true;
+    try {
+      await checkPositions();
+    } catch (err) {
+      console.log("[posisi] pengecekan gagal:", err.message);
+    } finally {
+      posBusy = false;
+    }
+  }, POSCFG.CHECK_MS).unref?.();
+
+  setInterval(async () => {
     if (hhllBusy) return;
     hhllBusy = true;
     try {
@@ -668,4 +696,4 @@ function setAlertSocket(sock) {
   }, HHLL.CHECK_MS).unref?.();
 }
 
-module.exports = { setAlertSocket, checkPriceAlerts, checkDaily, checkDivergence, checkAdvAlerts, checkSnrAlerts, checkHhllAlerts, localNow, fetchPrices };
+module.exports = { setAlertSocket, checkPriceAlerts, checkDaily, checkDivergence, checkAdvAlerts, checkSnrAlerts, checkPositions, checkHhllAlerts, localNow, fetchPrices };
