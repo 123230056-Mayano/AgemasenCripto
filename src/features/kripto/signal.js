@@ -20,6 +20,8 @@
  * Skenario = ilustrasi level dari indikator, BUKAN ajakan beli/jual.
  *
  * Changelog:
+ *   v2 (2026-10-22) Sudden Move Guard: tiap skenario LONG/SHORT dinilai suddenMove.assessEntry (status VALID / TUNGGU /
+ *                   HINDARI), SL diperlebar saat volatil / di luar ekstrem sweep-wick, TP ikut kelipatan R dari risiko final, RR dihitung ulang.
  *   v1 (2026-10-17) item 08 pertama. Gaya entry (trend/retest/breakout) dan dasar SL (atr/sr)
  *                   masih opsi config karena client belum menjawab; default: ikut tren + SL ATR 1.5x.
  */
@@ -29,6 +31,8 @@ const { SIGNAL_CONFIG: CFG } = require("../../config/indicatorConfig");
 const { computeEmas, atr: atrSeries } = require("./indicators");
 const { computeOverallBias, collectBias, confidenceLevel, parseBiasArgs } = require("./bias");
 const { computeProbability, formatProbLine, formatProbBasis, PROB_VERSION } = require("./probability");
+const sudden = require("./suddenMove");
+const { reasonText } = require("./suddenMoveText");
 
 const SIGNAL_VERSION = CFG.VERSION;
 const TF_LABEL = { "15M": "15m", "1H": "1H", "4H": "4H", "1D": "1D" };
@@ -120,16 +124,29 @@ function pickStopLoss({ dir, entry, atr, levels }, cfg = CFG) {
   return { price: atrSl, mode: "atr", fallback: true };
 }
 
-/** Skenario LONG / SHORT lengkap: entry, SL, TP1/TP2, RR (dihitung ulang dari harga), catatan penghalang. */
-function buildDirectional({ dir, price, atr, levels, emas }, cfg = CFG) {
+/**
+ * Skenario LONG / SHORT lengkap: entry, SL, TP1/TP2, RR (dihitung ulang dari harga), catatan penghalang.
+ * Bila `candles` diberikan, Sudden Move Guard menilai skenario (status + SL yang disesuaikan). TP tetap
+ * kelipatan R yang sama dari risiko FINAL (SL dilebarkan -> TP ikut menjauh); RR selalu dihitung ulang dari entry/SL/TP final.
+ * Tanpa `candles` perilaku sama seperti v1 (guard = null).
+ */
+function buildDirectional({ dir, price, atr, levels, emas, candles, atrSeries }, cfg = CFG) {
   const entry = pickEntry({ dir, price, atr, levels, emas }, cfg);
-  const sl = pickStopLoss({ dir, entry: entry.price, atr, levels }, cfg);
-  const risk = Math.abs(entry.price - sl.price);
+  const baseSl = pickStopLoss({ dir, entry: entry.price, atr, levels }, cfg);
   const sign = dir === "long" ? 1 : -1;
-  const tps = cfg.TP_RR.map((mult) => {
-    const tpPrice = entry.price + sign * mult * risk;
-    return { price: tpPrice, rr: calcRR(entry.price, sl.price, tpPrice) };
-  });
+  const baseRisk = Math.abs(entry.price - baseSl.price);
+  const baseTps = cfg.TP_RR.map((mult) => ({ price: entry.price + sign * mult * baseRisk }));
+
+  let guard = null;
+  let sl = baseSl;
+  if (candles?.length && atrSeries?.length) {
+    guard = sudden.assessEntry({ dir, price, entry, sl: baseSl, tps: baseTps, atr, candles, atrSeries, levels, emas, slMaxAtr: cfg.SL_MAX_ATR });
+    if (guard.slWidened) sl = { ...baseSl, price: guard.sl, widened: true };
+  }
+
+  const risk = Math.abs(entry.price - sl.price);
+  const finalTps = guard?.tps?.length === baseTps.length ? guard.tps : baseTps;
+  const tps = finalTps.map((tp) => ({ price: tp.price, rr: calcRR(entry.price, sl.price, tp.price) }));
   // Level S/R pertama yang menghalangi jalan menuju TP1 (info jujur: TP1 mungkin sulit tercapai).
   const ahead = dir === "long" ? levels?.resistance : levels?.support;
   const tp1 = tps[0].price;
@@ -145,6 +162,7 @@ function buildDirectional({ dir, price, atr, levels, emas }, cfg = CFG) {
     riskPct: (risk / entry.price) * 100,
     entryDistPct: ((entry.price - price) / price) * 100,
     tp1BlockedBy,
+    guard,
   };
 }
 
@@ -179,10 +197,10 @@ function buildRange({ price, atr, candles }, cfg = CFG) {
  * @returns {object} { status: "long"|"short"|"range"|"nodata", ... }
  */
 function computeScenario(input, cfg = CFG) {
-  const { bias, price, atr, levels, emas, candles } = input;
+  const { bias, price, atr, levels, emas, candles, atrSeries } = input;
   if (!bias || bias.insufficient || !isNum(price) || !isNum(atr) || atr <= 0 || !candles?.length) return { status: "nodata" };
-  if (bias.bias === "bullish") return buildDirectional({ dir: "long", price, atr, levels, emas }, cfg);
-  if (bias.bias === "bearish") return buildDirectional({ dir: "short", price, atr, levels, emas }, cfg);
+  if (bias.bias === "bullish") return buildDirectional({ dir: "long", price, atr, levels, emas, candles, atrSeries }, cfg);
+  if (bias.bias === "bearish") return buildDirectional({ dir: "short", price, atr, levels, emas, candles, atrSeries }, cfg);
   return buildRange({ price, atr, candles }, cfg);
 }
 
@@ -201,10 +219,11 @@ async function collectSignal(coin, tfs, ctx) {
   return rows.map((r) => {
     if (!r.result || !r.candles) return { tf: r.tf, bias: null, limited: false, scenario: { status: "nodata" }, err: r.err };
     const candles = r.candles;
-    const atr = atrSeries(candles).at(-1);
+    const atrAll = atrSeries(candles);
+    const atr = atrAll.at(-1);
     const levels = computeLevels(candles, ctx.tick.price);
     const emas = computeEmas(candles).latest;
-    const scenario = computeScenario({ bias: r.result, price: ctx.tick.price, atr, levels, emas, candles });
+    const scenario = computeScenario({ bias: r.result, price: ctx.tick.price, atr, levels, emas, candles, atrSeries: atrAll });
     return { tf: r.tf, bias: r.result, limited: r.limited, scenario, err: undefined };
   });
 }
@@ -219,6 +238,28 @@ const fmtRR = (v) => (v == null ? "-" : v.toFixed(2).replace(/\.?0+$/, ""));
 function entryLabel(lang, entry) {
   if (entry.kind === "market") return t(lang, "sinyal.entry.market");
   return t(lang, `sinyal.entry.${entry.kind}`, { src: entry.source });
+}
+
+const STATUS_ICON = { VALID: "✅", TUNGGU: "⏳", HINDARI: "⛔" };
+
+/** Baris status entri + alasan + saran tindak lanjut. Kosong bila skenario tidak dinilai guard. */
+function formatGuardLines(lang, sc, tf) {
+  const g = sc.guard;
+  if (!g) return [];
+  const { fmtLevel } = require("./market");
+  const label = t(lang, `sudden.status.${g.status}`);
+  const head = g.status === "VALID" && g.conditional ? t(lang, "sudden.statusConditional", { label }) : label;
+  const out = [`${STATUS_ICON[g.status]} ${t(lang, "sudden.line.status", { status: head })}`];
+  for (const r of g.reasons) out.push(`↳ ${reasonText(lang, r)}`);
+  if (g.status === "TUNGGU") {
+    if (g.confirmAt != null) {
+      out.push(`↳ ${t(lang, sc.status === "long" ? "sudden.advice.confirmAbove" : "sudden.advice.confirmBelow", { lvl: fmtLevel(g.confirmAt), tf: TF_LABEL[tf] || tf })}`);
+    }
+    if (g.pullback) out.push(`↳ ${t(lang, "sudden.advice.pullback", { src: g.pullback.source, lvl: fmtLevel(g.pullback.price) })}`);
+  }
+  if (g.status === "VALID" && g.conditional) out.push(`↳ ${t(lang, "sudden.advice.conditional", { sl: fmtLevel(sc.sl.price) })}`);
+  if (g.status !== "HINDARI") out.push(`↳ ${t(lang, "sudden.advice.invalid", { sl: fmtLevel(sc.sl.price), tf: TF_LABEL[tf] || tf })}`);
+  return out;
 }
 
 function formatTfBlock(lang, row, ctx) {
@@ -261,6 +302,7 @@ function formatTfBlock(lang, row, ctx) {
       rr2: fmtRR(sc.tps[1].rr),
     }),
   ];
+  const guardLines = formatGuardLines(lang, sc, row.tf);
   const notes = [];
   if (sc.entry.kind !== "market") notes.push(t(lang, "sinyal.note.entryDist", { pct: fmtSignedPct(sc.entryDistPct) }));
   if (sc.entry.fallback) notes.push(t(lang, "sinyal.note.entryFallback"));
@@ -270,6 +312,7 @@ function formatTfBlock(lang, row, ctx) {
     notes.push(t(lang, "sinyal.note.counter"));
   }
   if (notes.length) lines.push(...notes.map((n) => `↳ ${n}`));
+  lines.push(...guardLines);
   return lines.join("\n");
 }
 
@@ -304,6 +347,7 @@ function formatSignal(lang, { coin, price, rows, overall, failedAny, limitedAny 
   if (failedAny) notes.push(t(lang, "bias.note.failed"));
   if (rows.some((r) => r.bias && !r.bias.insufficient)) notes.push(t(lang, "prob.note"));
   notes.push(t(lang, "sinyal.note.method"));
+  if (rows.some((r) => r.scenario?.guard)) notes.push(t(lang, "sudden.note.method"));
   parts.push("", ...notes, "", t(lang, "sinyal.disclaimer"));
   return parts.join("\n");
 }
@@ -365,4 +409,5 @@ module.exports = {
   collectSignal,
   formatSignal,
   formatTfBlock,
+  formatGuardLines,
 };

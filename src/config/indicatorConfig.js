@@ -83,7 +83,7 @@ const BIAS_CONFIG = Object.freeze({
  *                        ada / jaraknya di luar SL_MIN_ATR..SL_MAX_ATR, otomatis pakai ATR dan ditandai.
  */
 const SIGNAL_CONFIG = Object.freeze({
-  VERSION: 1,
+  VERSION: 2, // v2: Sudden Move Guard (status entri + SL adaptif)
   ENTRY_STYLE: "trend",
   SL_MODE: "atr",
   ATR_SL_MULT: 1.5, // jarak SL mode ATR (kelipatan ATR 14)
@@ -168,6 +168,38 @@ const ADV_ALERT_CONFIG = Object.freeze({
 });
 
 /**
+ * Sudden Move Guard (features/kripto/suddenMove.js): gerbang entri (VALID / TUNGGU / HINDARI), penempatan SL saat
+ * volatilitas tinggi, dan tingkat peringatan posisi (INFO / WASPADA / CUT).
+ * SEMUA angka di bawah adalah NILAI AWAL USULAN (catatan desain 22 Okt 2026), BUKAN hasil backtest. Ubah lewat env,
+ * uji dengan data historis per koin dan timeframe sebelum dipercaya. Naikkan VERSION kalau aturan diubah.
+ */
+const SUDDEN_CONFIG = Object.freeze({
+  VERSION: 1,
+  // --- pendeteksi ---
+  WICK_MIN_PCT: _num(process.env.SUDDEN_WICK_MIN_PCT, 0.6), // wick sisi level >= 60% range candle
+  BODY_MAX_PCT: _num(process.env.SUDDEN_BODY_MAX_PCT, 0.3), // body <= 30% range candle
+  ZONE_ATR: _num(process.env.SUDDEN_ZONE_ATR, 0.25), // ekstrem wick dianggap "di zona" bila dalam jarak ini (x ATR) dari level
+  SWEEP_LOOKBACK: _posInt(process.env.SUDDEN_SWEEP_LOOKBACK, 3), // sweep dicari di N candle closed terakhir
+  EXPANSION_ATR: _num(process.env.SUDDEN_EXPANSION_ATR, 2.0), // range candle >= N x ATR(14) sebelum candle itu
+  VOLUME_LOOKBACK: _posInt(process.env.SUDDEN_VOLUME_LOOKBACK, 20), // rata-rata volume N candle closed sebelumnya
+  VOLUME_MULT: _num(process.env.SUDDEN_VOLUME_MULT, 2.0), // volume >= N x rata-rata = lonjakan
+  RAPID_ATR: _num(process.env.SUDDEN_RAPID_ATR, 1.0), // gerak cepat: perubahan harga >= N x ATR TF itu ...
+  RAPID_MINUTES: _posInt(process.env.SUDDEN_RAPID_MINUTES, 5), // ... dalam N menit
+  // --- gerbang entri ---
+  CHASE_ATR: _num(process.env.SUDDEN_CHASE_ATR, 1.0), // harga sudah lari > N x ATR melewati entry rencana = skenario lewat (HINDARI)
+  MIN_RR: _num(process.env.SUDDEN_MIN_RR, 1.5), // RR ke TP1 minimal setelah SL disesuaikan
+  // --- stop loss ---
+  SL_BUFFER_ATR: _num(process.env.SUDDEN_SL_BUFFER_ATR, 0.25), // buffer di luar ekstrem wick/sweep (sama dengan SIGNAL_CONFIG.SR_SL_BUFFER_ATR)
+  VOL_SL_MULT: _num(process.env.SUDDEN_VOL_SL_MULT, 1.25), // SL dilebarkan N x saat volatilitas tinggi
+  BREAKEVEN_AT_R: _num(process.env.SUDDEN_BREAKEVEN_AT_R, 1), // geser SL ke break-even setelah profit sebesar N R
+  // --- peringatan posisi ---
+  WARN_ADVERSE_ATR: _num(process.env.SUDDEN_WARN_ADVERSE_ATR, 0.75), // WASPADA: harga melawan >= N x ATR dari entry
+  CUT_RAPID_ATR: _num(process.env.SUDDEN_CUT_RAPID_ATR, 1.5), // CUT: gerak cepat melawan >= N x ATR (bersama lonjakan volume)
+  TIME_STOP_CANDLES: _posInt(process.env.SUDDEN_TIME_STOP_CANDLES, 6), // evaluasi ulang bila N candle TF tanpa kemajuan
+  TIME_STOP_PROGRESS_ATR: _num(process.env.SUDDEN_TIME_STOP_PROGRESS_ATR, 0.25), // "kemajuan" = bergerak >= N x ATR searah skenario (angka usulan tambahan)
+});
+
+/**
  * Alarm titik balik Support/Resistance (!alertsnr): reject (ditolak/memantul) dan tembus (breakout/breakdown),
  * dua tahap: DINI (candle berjalan, belum closed, bisa batal) dan KONFIRMASI (candle closed).
  *
@@ -222,4 +254,4 @@ const HHLL_ALERT_CONFIG = Object.freeze({
   CONCURRENCY: _posInt(process.env.HHLL_CONCURRENCY, 8),
 });
 
-module.exports = { INDICATOR_CONFIG, BIAS_CONFIG, SIGNAL_CONFIG, PROB_CONFIG, ADV_ALERT_CONFIG, SNR_ALERT_CONFIG, HHLL_CONFIG, HHLL_ALERT_CONFIG };
+module.exports = { INDICATOR_CONFIG, BIAS_CONFIG, SIGNAL_CONFIG, PROB_CONFIG, SUDDEN_CONFIG, ADV_ALERT_CONFIG, SNR_ALERT_CONFIG, HHLL_CONFIG, HHLL_ALERT_CONFIG };

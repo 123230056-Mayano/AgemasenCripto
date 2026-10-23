@@ -67,7 +67,7 @@ async function fetchCandles(coin, tf, { includeOpen = false } = {}) {
     const now = Date.now();
     const rows = includeOpen ? res.data : res.data.filter((k) => k[6] < now);
     return rows.map((k) => {
-      const c = { t: k[0], o: +k[1], h: +k[2], l: +k[3], c: +k[4], ct: k[6] }; // ct = waktu tutup (ms), dipakai divergence.js untuk memastikan candle closed
+      const c = { t: k[0], o: +k[1], h: +k[2], l: +k[3], c: +k[4], v: +k[5], qv: +k[7], ct: k[6] }; // ct = waktu tutup (ms), dipakai divergence.js untuk memastikan candle closed; v = volume koin, qv = volume dalam USDT (dipakai suddenMove.js)
       if (includeOpen) c.closed = k[6] < now;
       return c;
     });
