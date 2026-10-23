@@ -53,7 +53,7 @@ async function fetchCandles(coin, tf) {
 }
 
 // EMA persis seperti lib/indicators.js di web (seed = SMA periode pertama).
-function ema(values, period) {git
+function ema(values, period) {
   const k = 2 / (period + 1);
   const out = new Array(values.length).fill(null);
   if (values.length < period) return out;
