@@ -13,11 +13,18 @@
  *                   dalam CONFIRM_BARS candle sejak sweep dan sebelum close menembus ekstrem sweep.
  *                   Ini awal fase distribusi.
  * Satu sweep paling banyak menghasilkan satu pesan dini dan satu pesan konfirmasi.
+ *
+ * Tiap kejadian membawa rencana SL/TP otomatis (computePlan) dan state untuk menggambar chart (ev.st); notifikasi
+ * dikirim sebagai gambar chart + caption (buildAmdCaption).
+ *   Entry : konfirmasi = close candle X; dini = level break struktur (entry baru valid kalau close menembusnya).
+ *   SL    : di luar ujung sweep (naik: di bawah low sweep, turun: di atas high sweep) + SL_ATR_BUFFER x ATR.
+ *   TP    : entry +/- kelipatan jarak SL (R). Default TP1 1.5R, TP2 3R; bisa diganti per alarm (rr<a>:<b>).
  */
 
 const { t } = require("../../i18n");
 const { AMD_ALERT_CONFIG: AA } = require("../../config/indicatorConfig");
 const { CFG, findManipulations, mssLevel } = require("./amdCore");
+const { atr: calcAtr } = require("./indicators");
 const { COIN_WATCHLIST, TF_MS, TF_LABEL, TF_ORDER, DAILY_TZ_LABEL, fmtCandleTime } = require("./divAlertCore");
 
 const DIRS = ["up", "down"];
@@ -29,7 +36,7 @@ const dirOf = (d) => (d === "bullish" ? "up" : "down");
 // =====================================================================
 /**
  * @param {object[]} closed candle closed urut lama -> baru (X = elemen terakhir)
- * @returns {{stage:"early"|"confirm", dir:"up"|"down", edge:number, extreme:number, level:number, now:number, rangeHi:number, rangeLo:number, bars:number}[]}
+ * @returns {{stage:"early"|"confirm", dir:"up"|"down", edge:number, extreme:number, level:number, now:number, rangeHi:number, rangeLo:number, bars:number, atr:number|null, st:object}[]}
  *   edge    = tepi range yang disapu (low range untuk naik, high range untuk turun)
  *   extreme = low / high sweep
  *   level   = level break struktur: yang HARUS ditembus (dini) atau yang BARU ditembus (konfirmasi)
@@ -39,6 +46,7 @@ function detectEvents(closed, opts = {}) {
   const min = opts.minCandles ?? CFG.MIN_CANDLES;
   if (n < min) return [];
   const X = closed[n - 1];
+  const atr = calcAtr(closed)[n - 1];
   const out = [];
   for (const mp of findManipulations(closed, { lookback: CFG.CONFIRM_BARS })) {
     const base = {
@@ -49,9 +57,17 @@ function detectEvents(closed, opts = {}) {
       rangeHi: mp.range.hi,
       rangeLo: mp.range.lo,
       bars: mp.range.bars,
+      atr: Number.isFinite(atr) ? atr : null,
     };
-    if (mp.i === n - 1) out.push({ stage: "early", ...base, level: mssLevel(closed, mp).price });
-    if (mp.status === "confirmed" && mp.at === n - 1) out.push({ stage: "confirm", ...base, level: mp.level.price });
+    // st = state untuk renderAmdChart (bentuk sama dengan hasil detectAmd di amdCore.js).
+    const chartState = (phase, level, confirmAt) => ({ phase, dir: mp.dir, range: mp.range, sweep: mp, level, confirmAt, barsSince: n - 1 - mp.i });
+    if (mp.i === n - 1) {
+      const lvl = mssLevel(closed, mp);
+      out.push({ stage: "early", ...base, level: lvl.price, st: chartState("manipulation", lvl, null) });
+    }
+    if (mp.status === "confirmed" && mp.at === n - 1) {
+      out.push({ stage: "confirm", ...base, level: mp.level.price, st: chartState("distribution", mp.level, mp.at) });
+    }
   }
   return out;
 }
@@ -59,6 +75,47 @@ function detectEvents(closed, opts = {}) {
 /** Saring kejadian sesuai langganan { dirs, stages }. */
 function matchSub(ev, sub) {
   return sub.dirs.includes(ev.dir) && sub.stages.includes(ev.stage);
+}
+
+// =====================================================================
+// 1b. Rencana SL/TP
+// =====================================================================
+/** Kelipatan R default (dari config), dipakai kalau alarm tidak punya rr sendiri. */
+const defaultRr = () => [AA.RR_TP1, AA.RR_TP2];
+
+/** rr valid = dua angka terbatas, RR_MIN <= TP1 < TP2 <= RR_MAX. */
+function validRr(rr) {
+  return Array.isArray(rr) && rr.length === 2 && rr.every(Number.isFinite) && rr[0] >= AA.RR_MIN && rr[0] < rr[1] && rr[1] <= AA.RR_MAX;
+}
+
+/**
+ * Rencana SL/TP untuk satu kejadian. Fungsi murni.
+ * @param {object} ev kejadian dari detectEvents (stage, dir, extreme, level, now, atr)
+ * @param {{rr?:number[], slAtr?:number}} [opts] rr = [TP1, TP2] kelipatan R; slAtr = buffer SL (kelipatan ATR)
+ * @returns {null|{entry:number, entryKind:"trigger"|"market", sl:number, tps:number[], rr:number[], risk:number, riskPct:number, slPct:number, tpPct:number[]}}
+ *   null kalau datanya tidak masuk akal (jarak SL <= 0 atau bukan angka).
+ */
+function computePlan(ev, opts = {}) {
+  const rr = validRr(opts.rr) ? opts.rr : defaultRr();
+  const slAtr = opts.slAtr ?? AA.SL_ATR_BUFFER;
+  const up = ev.dir === "up";
+  const entryKind = ev.stage === "early" ? "trigger" : "market";
+  const entry = entryKind === "trigger" ? ev.level : ev.now;
+  const buffer = Number.isFinite(ev.atr) ? slAtr * ev.atr : 0;
+  const sl = up ? ev.extreme - buffer : ev.extreme + buffer;
+  const risk = up ? entry - sl : sl - entry;
+  if (![entry, sl, risk].every(Number.isFinite) || !(entry > 0) || !(risk > 0) || !(sl > 0)) return null;
+  const tps = rr.map((k) => (up ? entry + k * risk : entry - k * risk));
+  const pct = (p) => ((p - entry) / entry) * 100;
+  return { entry, entryKind, sl, tps, rr: [...rr], risk, riskPct: (risk / entry) * 100, slPct: pct(sl), tpPct: tps.map(pct) };
+}
+
+/** "1.5:3" -> [1.5, 3]; satu angka "2" -> [2, 4] (TP2 = 2 x TP1). null kalau di luar batas. */
+function parseRr(a, b) {
+  const x = Number(String(a).replace(",", "."));
+  const y = b == null || b === "" ? x * 2 : Number(String(b).replace(",", "."));
+  const rr = [x, y];
+  return validRr(rr) ? rr : null;
 }
 
 // =====================================================================
@@ -78,11 +135,13 @@ const LIST_TOKENS = new Set(["list", "daftar", "ls"]);
 const DELETE_TOKENS = new Set(["hapus", "delete", "del", "remove", "rm"]);
 const OFF_TOKENS = new Set(["off", "mati", "matikan"]);
 const ALL_TOKENS = new Set(["semua", "all"]);
+const RR_RE = /^rr(\d+(?:[.,]\d+)?)(?::(\d+(?:[.,]\d+)?))?$/i; // rr2 -> TP1 2R, TP2 4R | rr1.5:3 -> TP1 1.5R, TP2 3R
 
 /**
- * !alertamd <koin|watchlist> [tf] [naik|turun] [dini|konfirmasi]
+ * !alertamd <koin|watchlist> [tf] [naik|turun] [dini|konfirmasi] [rr<tp1>[:<tp2>]]
  * !alertamd list | off | hapus <id|semua>
  * Tanpa naik/turun = dua arah (bullish dan bearish). Tanpa dini/konfirmasi = keduanya.
+ * rr = kelipatan R untuk TP1/TP2 (mis. rr2:4); tanpa rr = default config (1.5R dan 3R).
  * @returns {object|null} null = format salah (-> tampilkan penjelasan command)
  */
 function parseAmdArgs(raw, defaultTf) {
@@ -103,10 +162,16 @@ function parseAmdArgs(raw, defaultTf) {
   let tf = null;
   const dirs = [];
   const stages = [];
+  let rr = null;
   for (const tok of tokens) {
     const low = tok.toLowerCase();
     const up = tok.toUpperCase();
-    if (TF_MS[up]) tf = up;
+    const rm = low.match(RR_RE);
+    if (rm) {
+      if (rr) return null; // rr dua kali
+      rr = parseRr(rm[1], rm[2]);
+      if (!rr) return null; // di luar batas / TP1 >= TP2
+    } else if (TF_MS[up]) tf = up;
     else if (DIR_TOKENS[low]) dirs.push(DIR_TOKENS[low]);
     else if (STAGE_TOKENS[low]) stages.push(STAGE_TOKENS[low]);
     else if (coin == null) {
@@ -118,7 +183,7 @@ function parseAmdArgs(raw, defaultTf) {
   }
   if (!coin) return null;
   const pick = (arr, all) => (arr.length ? all.filter((x) => arr.includes(x)) : [...all]);
-  return { action: "create", coin, tf: tf || defaultTf, dirs: pick(dirs, DIRS), stages: pick(stages, STAGES) };
+  return { action: "create", coin, tf: tf || defaultTf, dirs: pick(dirs, DIRS), stages: pick(stages, STAGES), rr }; // rr null = ikut default config
 }
 
 // =====================================================================
@@ -170,11 +235,35 @@ function buildAmdText(lang, events, { ms, part = 1, parts = 1, total = events.le
   return `${head}${partTag}\n${lines.join("\n")}\n\n${t(lang, "amdalert.foot")}`;
 }
 
+/**
+ * Caption satu notifikasi (dikirim bersama gambar chart): baris kejadian + rencana SL/TP + catatan.
+ * Tanpa rencana (data tidak masuk akal) caption tetap berisi baris kejadian.
+ */
+function buildAmdCaption(lang, ev, { ms }) {
+  const { fmtLevel, fmtPct } = fmt();
+  const head = t(lang, "amdalert.cap.head", { time: fmtCandleTime(lang, ms) });
+  const parts = [head, buildLine(lang, ev)];
+  const p = ev.plan;
+  if (p) {
+    const rows = [
+      t(lang, `amdalert.plan.title.${ev.stage}`),
+      t(lang, `amdalert.plan.entry.${ev.stage}`, { entry: fmtLevel(p.entry) }),
+      t(lang, `amdalert.plan.sl.${ev.dir}`, { sl: fmtLevel(p.sl), pct: fmtPct(p.slPct) }),
+      ...p.tps.map((tp, i) => t(lang, "amdalert.plan.tp", { n: i + 1, tp: fmtLevel(tp), pct: fmtPct(p.tpPct[i]), rr: p.rr[i] })),
+      t(lang, "amdalert.plan.risk", { risk: p.riskPct.toFixed(2) }),
+    ];
+    parts.push(rows.join("\n"));
+  }
+  parts.push(t(lang, "amdalert.cap.foot"));
+  return parts.join("\n\n");
+}
+
 /** Ringkasan satu langganan untuk !alertamd list / pesan konfirmasi. */
 function describeAmd(lang, sub) {
   const dirs = sub.dirs.length === DIRS.length ? t(lang, "amdalert.dir.both") : t(lang, `amdalert.dir.${sub.dirs[0]}`);
   const stages = sub.stages.length === STAGES.length ? t(lang, "amdalert.stage.both") : t(lang, `amdalert.stage.${sub.stages[0]}`);
-  return `${dirs}, ${stages}`;
+  const [r1, r2] = validRr(sub.rr) ? sub.rr : defaultRr();
+  return `${dirs}, ${stages}, TP ${r1}R/${r2}R`;
 }
 
 module.exports = {
@@ -187,6 +276,11 @@ module.exports = {
   parseAmdArgs,
   buildLine,
   buildAmdText,
+  buildAmdCaption,
+  computePlan,
+  parseRr,
+  validRr,
+  defaultRr,
   sortEvents,
   chunk,
   describeAmd,

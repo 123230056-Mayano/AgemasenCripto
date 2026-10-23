@@ -16,14 +16,15 @@
  *
  * Aturan pengiriman: kejadian dianggap TERKIRIM (kunci dedupe dicatat) hanya setelah pesan berhasil.
  * Hanya candle yang closed SETELAH alarm dibuat yang diumumkan (kejadian lama tidak).
- * Hasil berupa teks, dipotong per LINES_PER_MSG baris kalau kejadiannya banyak.
+ * Format: SATU pesan per kejadian = gambar chart (dengan zona SL/TP) + caption berisi rencana SL/TP.
+ * Kalau chart gagal dibuat / dikirim, kejadian dikirim sebagai teks saja supaya alarm tidak hilang.
  */
 
 const { AMD_ALERT_CONFIG: HA } = require("../../config/indicatorConfig");
 const { TF_MS, COIN_WATCHLIST, ChatRateLimiter } = require("./divAlertCore");
 const { selectLivePairs } = require("./advAlertCore");
 const { runPool } = require("./advAlertEngine");
-const { detectEvents, matchSub, amdKey, chunk, sortEvents, buildAmdText } = require("./amdAlertCore");
+const { detectEvents, matchSub, amdKey, sortEvents, buildAmdCaption, computePlan } = require("./amdAlertCore");
 
 const defaultSleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -32,6 +33,8 @@ const defaultSleep = (ms) => new Promise((r) => setTimeout(r, ms));
  *   store: object,   // cryptoStore (allAmdAlerts, getWatch, wasSent, markSent, persist)
  *   fetchCandles: (coin:string, tf:string, opts?:object) => Promise<object[]>,
  *   notify: (chat:string, userJid:string, text:string) => Promise<boolean>,
+ *   notifyImage?: (chat:string, userJid:string, png:Buffer, caption:string) => Promise<boolean>,
+ *   renderChart?: (ev:object) => Buffer|Promise<Buffer>,   // ev.closed = candle closed, ev.st = state chart, ev.plan = rencana SL/TP
  *   langFor: (chat:string, userJid:string) => string,
  *   isUnsupported?: (err:Error) => boolean,
  *   limiter?: ChatRateLimiter, sleep?: Function, log?: Function
@@ -39,6 +42,8 @@ const defaultSleep = (ms) => new Promise((r) => setTimeout(r, ms));
  */
 function createAmdEngine(deps) {
   const { store, fetchCandles, notify, langFor } = deps;
+  const notifyImage = deps.notifyImage || null;
+  const renderChart = deps.renderChart || null;
   const isUnsupported = deps.isUnsupported || (() => false);
   const sleep = deps.sleep || defaultSleep;
   const log = deps.log || ((...a) => console.log(...a));
@@ -70,39 +75,59 @@ function createAmdEngine(deps) {
       if (!matchSub(ev, sub)) continue;
       const key = amdKey(sub.chat, userJid, coin, tf, ev.stage, ev.dir, X.t);
       if (store.wasSent(key)) continue;
-      out.events.push({ ...base, ...ev, candleT: X.t, key });
+      const plan = computePlan(ev, { rr: sub.rr });
+      out.events.push({ ...base, ...ev, candleT: X.t, key, plan, closed });
     }
     return out;
   }
 
   const commitAll = (events) => store.markSent(events.map((e) => e.key));
 
-  /** Teks berpotongan (dipotong per LINES_PER_MSG baris). */
-  async function deliverText(chat, userJid, events, lang, ms, res) {
+  /** Chart satu kejadian; null kalau tidak ada renderer atau gagal (kejadian tetap dikirim sebagai teks). */
+  async function chartFor(ev) {
+    if (!renderChart || !notifyImage) return null;
+    try {
+      return await renderChart(ev);
+    } catch (err) {
+      log(`[amdalert] chart ${ev.coin} ${ev.tf} gagal, kirim teks saja:`, err.message);
+      return null;
+    }
+  }
+
+  /** Kirim satu kejadian: gambar chart + caption (atau teks saja kalau chart tidak ada / gagal terkirim). */
+  async function sendEvent(chat, userJid, ev, lang, ms) {
+    const caption = buildAmdCaption(lang, ev, { ms });
+    const png = await chartFor(ev);
+    if (png && (await notifyImage(chat, userJid, png, caption))) return true;
+    if (png) log(`[amdalert] gambar ${ev.coin} ${ev.tf} gagal terkirim, coba kirim teks`);
+    return notify(chat, userJid, caption);
+  }
+
+  /** Satu pesan per kejadian (gambar + caption). Kejadian yang jatah pesannya habis ditunda ke putaran berikutnya. */
+  async function deliverEvents(chat, userJid, events, lang, ms, res) {
     const sorted = sortEvents(events);
-    const parts = chunk(sorted, HA.LINES_PER_MSG);
-    for (let i = 0; i < parts.length; i++) {
+    for (let i = 0; i < sorted.length; i++) {
       if (limiter.remaining(chat) < 1) {
-        res.deferred += parts.slice(i).reduce((n, p) => n + p.length, 0);
+        res.deferred += sorted.length - i;
         break;
       }
-      const ok = await notify(chat, userJid, buildAmdText(lang, parts[i], { ms, part: i + 1, parts: parts.length, total: events.length }));
+      const ok = await sendEvent(chat, userJid, sorted[i], lang, ms);
       if (!ok) {
         res.failed++;
         break;
       }
       limiter.record(chat);
       res.sent++;
-      commitAll(parts[i]);
-      if (HA.SEND_GAP_MS && i < parts.length - 1) await sleep(HA.SEND_GAP_MS);
+      commitAll([sorted[i]]);
+      if (HA.SEND_GAP_MS && i < sorted.length - 1) await sleep(HA.SEND_GAP_MS);
     }
   }
 
-  /** Kirim kejadian satu penerima (teks berpotongan). @returns {{sent:number, failed:number, deferred:number}} */
+  /** Kirim kejadian satu penerima. @returns {{sent:number, failed:number, deferred:number}} */
   async function deliver(chat, userJid, events, { ms }) {
     const lang = langFor(chat, userJid);
     const res = { sent: 0, failed: 0, deferred: 0 };
-    await deliverText(chat, userJid, events, lang, ms, res);
+    await deliverEvents(chat, userJid, events, lang, ms, res);
     return res;
   }
 

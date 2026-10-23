@@ -15,7 +15,7 @@
  *   - alarm Higher High / Lower Low (!alerthhll): swing baru (dini) + close menembus swing (konfirmasi), dari candle closed.
  *     Mesinnya di hhllAlertEngine.js; banyak kejadian dikirim sebagai 1 PDF per penerima.
  *   - alarm Accumulation / Manipulation / Distribution (!alertamd): sweep range (dini) + break struktur (konfirmasi), dari candle closed.
- *     Mesinnya di amdAlertEngine.js; hasil berupa teks.
+ *     Mesinnya di amdAlertEngine.js; tiap kejadian dikirim sebagai gambar chart + caption berisi rencana SL/TP.
  *   - alarm indikator lanjutan (!alertind, item 10): bias berubah + crossover baru, mode closed (tiap candle tutup)
  *     atau live (refresh berkala, candle belum closed ditandai jelas). Mesinnya di advAlertEngine.js; di sini hanya
  *     dibuat satu engine dan timer-nya. Tidak ada WebSocket (opsi 3 menunggu keputusan client).
@@ -66,6 +66,7 @@ const { createPositionEngine } = require("./positionEngine");
 const { createHhllEngine } = require("./hhllAlertEngine");
 const { buildHhllPdf } = require("./hhllPdf");
 const { createAmdEngine } = require("./amdAlertEngine");
+const { renderAmdChart } = require("./amd");
 const { ADV_ALERT_CONFIG: ADV, SNR_ALERT_CONFIG: SNR, HHLL_ALERT_CONFIG: HHLL, AMD_ALERT_CONFIG: AMDCFG, POSITION_CONFIG: POSCFG } = require("../../config/indicatorConfig");
 
 const BINANCE = (process.env.BINANCE_BASE || "https://data-api.binance.vision").replace(/\/+$/, "");
@@ -103,6 +104,29 @@ async function notify(chat, userJid, text) {
     return true;
   } catch (err) {
     console.log("[alert] gagal kirim notifikasi:", err.message);
+    return false;
+  }
+}
+
+/**
+ * Kirim gambar + caption ke chat tujuan (mention user di grup). Caption lebih panjang dari batas WhatsApp
+ * -> gambar dan teks dikirim terpisah. @returns {Promise<boolean>} true kalau terkirim.
+ */
+async function notifyImage(chat, userJid, png, caption) {
+  if (!sockRef) return false;
+  try {
+    const group = chat.endsWith("@g.us");
+    const text = group ? `@${userJid.split("@")[0]}\n${caption}` : caption;
+    const extra = group ? { mentions: [userJid] } : {};
+    if (text.length <= AMDCFG.CAPTION_MAX) {
+      await sockRef.sendMessage(chat, { image: png, caption: text, ...extra });
+    } else {
+      await sockRef.sendMessage(chat, { image: png });
+      await sockRef.sendMessage(chat, { text, ...extra });
+    }
+    return true;
+  } catch (err) {
+    console.log("[alert] gagal kirim gambar:", err.message);
     return false;
   }
 }
@@ -613,6 +637,8 @@ const amdEngine = createAmdEngine({
   store,
   fetchCandles,
   notify,
+  notifyImage,
+  renderChart: (ev) => renderAmdChart({ candles: ev.closed, coin: ev.coin, tf: TF_LABEL[ev.tf] || ev.tf, st: ev.st, plan: ev.plan }),
   langFor,
   isUnsupported: (err) => err instanceof UnsupportedCoinError,
 });
@@ -724,4 +750,4 @@ function setAlertSocket(sock) {
   }, AMDCFG.CHECK_MS).unref?.();
 }
 
-module.exports = { setAlertSocket, checkPriceAlerts, checkDaily, checkDivergence, checkAdvAlerts, checkSnrAlerts, checkPositions, checkHhllAlerts, checkAmdAlerts, localNow, fetchPrices };
+module.exports = { setAlertSocket, notifyImage, checkPriceAlerts, checkDaily, checkDivergence, checkAdvAlerts, checkSnrAlerts, checkPositions, checkHhllAlerts, checkAmdAlerts, localNow, fetchPrices };

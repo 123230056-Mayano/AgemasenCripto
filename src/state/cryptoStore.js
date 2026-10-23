@@ -887,20 +887,30 @@ function allHhllAlerts() {
 // ---------- alarm Accumulation / Manipulation / Distribution (!alertamd) ----------
 /**
  * amdAlerts: [{ id: "a1", chat, coin: "BTC"|"WATCHLIST", tf, dirs: ["up","down"], stages: ["early","confirm"],
- *               createdAt, active: true }]
+ *               rr: [tp1, tp2]|null (kelipatan R untuk TP; null = default config), createdAt, active: true }]
  * Penanda kejadian terkirim memakai kunci dedupe yang sama dengan alarm lain (wasSent / markSent).
  */
 const getAmdAlerts = (jid) => [...user(jid).amdAlerts];
 
-/** @returns {object|"full"|"chatFull"|"exists"} */
+const sameRr = (a, b) => (!a && !b) || (Array.isArray(a) && Array.isArray(b) && a[0] === b[0] && a[1] === b[1]);
+
+/**
+ * @returns {object|"full"|"chatFull"|"exists"} entry baru; "exists" = alarm sama persis (termasuk rr) sudah ada.
+ * Kalau alarm yang sama sudah ada tetapi rr (kelipatan TP) berbeda, rr-nya diperbarui di tempat dan
+ * hasilnya { ...entry, updated: true }.
+ */
 function addAmdAlert(jid, sub) {
   const u = user(jid);
-  if (u.amdAlerts.some((a) => a.chat === sub.chat && a.coin === sub.coin && a.tf === sub.tf && sameList(a.dirs || [], sub.dirs || []) && sameList(a.stages || [], sub.stages || []))) {
-    return "exists";
+  const same = u.amdAlerts.find((a) => a.chat === sub.chat && a.coin === sub.coin && a.tf === sub.tf && sameList(a.dirs || [], sub.dirs || []) && sameList(a.stages || [], sub.stages || []));
+  if (same) {
+    if (sameRr(same.rr, sub.rr)) return "exists";
+    same.rr = sub.rr || null;
+    save(jid);
+    return { ...same, updated: true };
   }
   if (u.amdAlerts.length >= MAX_AMD_ALERTS) return "full";
   if (countAmdAlertsInChat(sub.chat) >= MAX_AMD_ALERTS_PER_CHAT) return "chatFull";
-  const entry = { ...sub, id: `a${u.nextAmdId++}`, createdAt: Date.now(), active: true };
+  const entry = { ...sub, rr: sub.rr || null, id: `a${u.nextAmdId++}`, createdAt: Date.now(), active: true };
   u.amdAlerts.push(entry);
   save(jid);
   return entry;

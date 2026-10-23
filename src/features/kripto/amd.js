@@ -24,8 +24,16 @@ const AMBER = "#f5a524";
 const phaseColor = (st) => (st.phase === "accumulation" ? C.arrow : st.phase === "manipulation" || st.phase === "failed" ? AMBER : st.dir === "bullish" ? C.up : C.down);
 
 // ---------- chart ----------
-/** @returns {Buffer} PNG */
-function renderAmdChart({ candles, coin, tf, st }) {
+const PLAN_PAD_SLOTS = 12; // ruang kosong di kanan candle terakhir untuk zona SL/TP
+const PLAN_TP2_MAX_EXTEND = 0.6; // TP2 hanya ikut skala sumbu kalau memperluasnya <= 60% dari rentang; kalau lebih, ditandai di tepi panel
+
+/**
+ * @param {{candles:object[], coin:string, tf:string, st:object, plan?:object|null}} o
+ *   plan (opsional, dari amdAlertCore.computePlan): kalau ada, digambar zona risiko (merah) + reward (hijau) di kanan candle
+ *   terakhir, garis Entry/SL/TP dan label harga di sumbu kanan.
+ * @returns {Buffer} PNG
+ */
+function renderAmdChart({ candles, coin, tf, st, plan = null }) {
   if (!candles || candles.length < 10) throw new Error("CANDLES_TOO_FEW");
   const family = fontFamily();
   const n = candles.length;
@@ -48,6 +56,22 @@ function renderAmdChart({ candles, coin, tf, st }) {
     lo = Math.min(lo, v);
     hi = Math.max(hi, v);
   }
+  // Level rencana: Entry, SL, TP1 selalu masuk skala; TP2 hanya kalau tidak membuat candle terlalu kecil.
+  let tp2InView = false;
+  if (plan) {
+    for (const v of [plan.entry, plan.sl, plan.tps[0]]) {
+      lo = Math.min(lo, v);
+      hi = Math.max(hi, v);
+    }
+    const span = hi - lo;
+    const tp2 = plan.tps[1];
+    const ext = tp2 > hi ? tp2 - hi : tp2 < lo ? lo - tp2 : 0;
+    tp2InView = ext <= span * PLAN_TP2_MAX_EXTEND;
+    if (tp2InView) {
+      lo = Math.min(lo, tp2);
+      hi = Math.max(hi, tp2);
+    }
+  }
   const pad = (hi - lo) * 0.09 || hi * 0.01;
   lo -= pad;
   hi += pad;
@@ -69,7 +93,7 @@ function renderAmdChart({ candles, coin, tf, st }) {
   g.fillRect(pPrice.x, pPrice.y, pPrice.w, pPrice.h);
 
   const Yp = (p) => pPrice.y + ((hi - p) / (hi - lo)) * pPrice.h;
-  const slot = cw / nb;
+  const slot = cw / (nb + (plan ? PLAN_PAD_SLOTS : 0));
   const X = (i) => Lm + slot * (i - from) + slot / 2;
   const bodyW = Math.max(2, slot * 0.62);
   const right = pPrice.x + pPrice.w;
@@ -80,7 +104,8 @@ function renderAmdChart({ candles, coin, tf, st }) {
   g.textAlign = "left";
   g.lineWidth = 1;
   const step = niceStep(hi - lo, 8);
-  const tagYs = [...extra.map((v) => Yp(v)), Yp(last.c)];
+  const planLv = plan ? [plan.sl, plan.tps[0], ...(tp2InView ? [plan.tps[1]] : [])] : [];
+  const tagYs = [...extra.map((v) => Yp(v)), ...planLv.map((v) => Yp(v)), Yp(last.c)];
   for (let p = Math.ceil(lo / step) * step; p <= hi; p += step) {
     const yy = Math.round(Yp(p)) + 0.5;
     g.strokeStyle = C.grid;
@@ -141,6 +166,46 @@ function renderAmdChart({ candles, coin, tf, st }) {
     g.moveTo(x0, yy);
     g.lineTo(right, yy);
     g.stroke();
+    g.restore();
+  }
+
+  // rencana SL/TP: zona risiko (entry -> SL) dan reward (entry -> TP2) mulai dari candle terakhir ke kanan
+  if (plan) {
+    const x0 = X(n - 1) + slot / 2;
+    const top = pPrice.y;
+    const bot = pPrice.y + pPrice.h;
+    const clampY = (y) => Math.min(Math.max(y, top), bot);
+    const zone = (pa, pb, fill) => {
+      const ya = clampY(Yp(pa));
+      const yb = clampY(Yp(pb));
+      g.fillStyle = fill;
+      g.fillRect(x0, Math.min(ya, yb), right - x0, Math.abs(yb - ya));
+    };
+    zone(plan.entry, plan.sl, "rgba(239,83,80,0.18)");
+    zone(plan.entry, plan.tps[1], "rgba(38,166,154,0.16)");
+    const hline = (price, col, dash, w) => {
+      const yy = Yp(price);
+      if (yy < top || yy > bot) return;
+      g.save();
+      g.strokeStyle = col;
+      g.lineWidth = w;
+      g.setLineDash(dash);
+      g.beginPath();
+      g.moveTo(x0 - slot * 2, Math.round(yy) + 0.5);
+      g.lineTo(right, Math.round(yy) + 0.5);
+      g.stroke();
+      g.restore();
+    };
+    hline(plan.entry, C.title, [2, 5], 1.2);
+    hline(plan.sl, C.down, [10, 6], 2);
+    hline(plan.tps[0], C.up, [10, 6], 2);
+    hline(plan.tps[1], C.up, [10, 6], 2);
+    g.save();
+    g.font = `bold 19px ${family}`;
+    g.textAlign = "left";
+    g.textBaseline = "middle";
+    g.fillStyle = C.axis;
+    g.fillText(plan.entryKind === "trigger" ? "Entry (trigger)" : "Entry", x0 + 6, clampY(Yp(plan.entry)) + (plan.sl < plan.entry ? -14 : 14));
     g.restore();
   }
 
@@ -213,7 +278,7 @@ function renderAmdChart({ candles, coin, tf, st }) {
 
   // tag sumbu kanan: tepi range, level konfirmasi, harga terakhir (yang berdekatan digeser)
   {
-    const tag = (txt, yy, col) => {
+    const tag = (txt, yy, col, off) => {
       g.save();
       g.font = `bold 19px ${family}`;
       g.fillStyle = col;
@@ -222,6 +287,17 @@ function renderAmdChart({ candles, coin, tf, st }) {
       g.textAlign = "left";
       g.textBaseline = "middle";
       g.fillText(txt, right + 10, yy + 1);
+      if (off) {
+        // segitiga kecil: level di luar tampilan chart (up = di atas, down = di bawah)
+        const cx = right + Rm - 20;
+        const d = off === "up" ? -1 : 1;
+        g.beginPath();
+        g.moveTo(cx, yy - 6 * d);
+        g.lineTo(cx - 6, yy + 5 * d);
+        g.lineTo(cx + 6, yy + 5 * d);
+        g.closePath();
+        g.fill();
+      }
       g.restore();
     };
     const lastColor = last.c >= last.o ? C.up : C.down;
@@ -229,6 +305,9 @@ function renderAmdChart({ candles, coin, tf, st }) {
       rg && { txt: `Hi ${fmtPrice(rg.hi)}`, y: Yp(rg.hi), color: C.arrow },
       rg && { txt: `Lo ${fmtPrice(rg.lo)}`, y: Yp(rg.lo), color: C.arrow },
       sw && st.level && { txt: `MSS ${fmtPrice(st.level.price)}`, y: Yp(st.level.price), color: AMBER },
+      plan && { txt: `SL ${fmtPrice(plan.sl)}`, y: Yp(plan.sl), color: C.down },
+      plan && { txt: `TP1 ${fmtPrice(plan.tps[0])}`, y: Yp(plan.tps[0]), color: C.up },
+      plan && { txt: `TP2 ${fmtPrice(plan.tps[1])}`, y: tp2InView ? Yp(plan.tps[1]) : plan.tps[1] > hi ? pPrice.y + 14 : pPrice.y + pPrice.h - 14, color: C.up, off: tp2InView ? null : plan.tps[1] > hi ? "up" : "down" },
       { txt: fmtPrice(last.c), y: Yp(last.c), color: lastColor },
     ]
       .filter(Boolean)
@@ -236,7 +315,7 @@ function renderAmdChart({ candles, coin, tf, st }) {
     const gapY = 28;
     for (let i = 1; i < tags.length; i++) tags[i].ty = Math.max(tags[i].y, (tags[i - 1].ty ?? tags[i - 1].y) + gapY);
     if (tags.length) tags[0].ty = tags[0].y;
-    for (const tg of tags) tag(tg.txt, Math.min(tg.ty ?? tg.y, pPrice.y + pPrice.h - 14), tg.color);
+    for (const tg of tags) tag(tg.txt, Math.min(tg.ty ?? tg.y, pPrice.y + pPrice.h - 14), tg.color, tg.off);
   }
 
   // judul + legenda
@@ -255,7 +334,7 @@ function renderAmdChart({ candles, coin, tf, st }) {
   g.font = `19px ${family}`;
   g.fillStyle = C.axis;
   const phaseTxt = { accumulation: "A: accumulation", manipulation: `M: manipulation (${st.dir})`, distribution: `D: distribution (${st.dir})`, failed: "M failed (real breakout)" }[st.phase] || "";
-  g.fillText(`Close candle only · A = range, M = sweep, D = structure break · ${phaseTxt}`, Lm, 56);
+  g.fillText(`Close candle only · A = range, M = sweep, D = structure break · ${phaseTxt}${plan ? ` · SL/TP ${plan.rr[0]}R / ${plan.rr[1]}R` : ""}`, Lm, 56);
 
   return canvas.toBuffer("image/png");
 }

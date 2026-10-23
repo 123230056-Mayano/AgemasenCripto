@@ -5,11 +5,13 @@
  * ------------------------------------------------------------------
  * !alertamd: alarm Accumulation / Manipulation / Distribution (AMD), dari candle closed. Dua tahap:
  * dini (sweep terdeteksi) dan konfirmasi (break market structure ke arah berlawanan sweep).
+ * Tiap notifikasi berupa gambar chart + rencana SL/TP otomatis.
  *
  *   !alertamd btc 4h                  -> dua arah (bullish + bearish), dini + konfirmasi
  *   !alertamd btc 4h naik             -> hanya sweep bawah yang berbalik naik
  *   !alertamd eth 1h turun konfirmasi -> hanya konfirmasi bearish
  *   !alertamd sol 1h dini             -> hanya tanda awal (sweep)
+ *   !alertamd btc 4h rr2:4            -> TP1 2R dan TP2 4R (default 1.5R dan 3R)
  *   !alertamd watchlist 1h
  *   !alertamd list | off | hapus <id|semua>
  *
@@ -37,10 +39,11 @@ const isGroup = (chat) => String(chat).endsWith("@g.us");
 const targetLabel = (lang, coin) => (coin === COIN_WATCHLIST ? t(lang, "divalert.target.watch") : coin);
 
 async function runCreate(sock, msg, { jid, lang, senderId }, args) {
-  const { coin, tf, dirs, stages } = args;
+  const { coin, tf, dirs, stages, rr } = args;
   if (coin !== COIN_WATCHLIST) await fetchTicker(coin); // koin tidak ada di Binance -> UnsupportedCoinError (ditangani pemanggil)
 
-  const entry = store.addAmdAlert(senderId, { chat: jid, coin, tf, dirs, stages });
+  const entry = store.addAmdAlert(senderId, { chat: jid, coin, tf, dirs, stages, rr });
+  if (entry.updated) return say(sock, jid, msg, t(lang, "amdalert.updated", { id: entry.id, what: describeAmd(lang, entry) }));
   if (entry === "exists") return say(sock, jid, msg, t(lang, "amdalert.exists"));
   if (entry === "full") return say(sock, jid, msg, t(lang, "amdalert.full", { max: store.MAX_AMD_ALERTS }));
   if (entry === "chatFull") return say(sock, jid, msg, t(lang, "amdalert.chatFull", { max: store.MAX_AMD_ALERTS_PER_CHAT }));

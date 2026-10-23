@@ -305,6 +305,14 @@ const AMD_ALERT_CONFIG = Object.freeze({
   MAX_PER_USER: _posInt(process.env.AMD_ALERT_MAX_PER_USER, 10),
   MAX_PER_CHAT: _posInt(process.env.AMD_ALERT_MAX_PER_CHAT, 20),
   CONCURRENCY: _posInt(process.env.AMD_CONCURRENCY, 8),
+  // Rencana SL/TP otomatis (ikut di tiap notifikasi). Entry: harga close (konfirmasi) atau level break struktur (dini).
+  // SL = di luar ujung sweep + SL_ATR_BUFFER x ATR. TP = entry +/- kelipatan jarak SL (R). Usulan awal, bukan hasil backtest.
+  RR_TP1: _num(process.env.AMD_RR_TP1, 1.5), // TP1 default (kelipatan R); bisa diganti per alarm: !alertamd btc 4h rr2:4
+  RR_TP2: _num(process.env.AMD_RR_TP2, 3), // TP2 default (kelipatan R)
+  RR_MIN: 0.5, // batas bawah kelipatan R yang boleh diset user
+  RR_MAX: 20, // batas atas kelipatan R yang boleh diset user
+  SL_ATR_BUFFER: _num(process.env.AMD_SL_ATR_BUFFER, 0.2), // jarak tambahan SL di luar ujung sweep (kelipatan ATR); 0 = tepat di ujung sweep
+  CAPTION_MAX: 1000, // batas aman caption gambar WhatsApp (1024); lebih dari ini gambar dan teks dikirim terpisah
 });
 
 module.exports = { INDICATOR_CONFIG, BIAS_CONFIG, SIGNAL_CONFIG, PROB_CONFIG, SUDDEN_CONFIG, POSITION_CONFIG, ADV_ALERT_CONFIG, SNR_ALERT_CONFIG, HHLL_CONFIG, HHLL_ALERT_CONFIG, AMD_CONFIG, AMD_ALERT_CONFIG };

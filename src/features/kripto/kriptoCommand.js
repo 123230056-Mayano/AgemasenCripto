@@ -28,7 +28,7 @@
  *   !posisi buka <koin> [tf] <long|short> entry <harga> sl <harga> [tp <harga>] | list | sl <id> <harga> | tutup <id|semua>  (posisi + peringatan WASPADA/CUT, positionCommand.js)
  *   !alertsnr <koin|watchlist> [tf] [reject|tembus|wick|sweep] [kuat] | list | off | hapus <id|semua>  (alarm titik balik S/R, snrAlertCommand.js)
  *   !amd <koin> [tf]     -> kondisi Accumulation / Manipulation / Distribution (AMD, Power of 3) saat ini + chart (amd.js). Alias: !powerof3
- *   !alertamd <koin|watchlist> [tf] [naik|turun] [dini|konfirmasi] | list | off | hapus <id|semua>  (alarm AMD, amdAlertCommand.js)
+ *   !alertamd <koin|watchlist> [tf] [naik|turun] [dini|konfirmasi] [rr<tp1>:<tp2>] | list | off | hapus <id|semua>  (alarm AMD, amdAlertCommand.js)
  *   !alerthhll <koin|watchlist> [tf] [naik|turun] [dini|konfirmasi] [balik] | list | off | hapus <id|semua>  (alarm Higher High / Lower Low, hhllAlertCommand.js)
  *   !alertdivergent (!alertdiv) <koin|semua|watchlist> [tf] [rsi|macd] | list | hapus <id|semua>
  *                        -> alarm divergence otomatis tiap candle closed (divAlertCommand.js, alertMonitor.js)
