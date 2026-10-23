@@ -5,7 +5,7 @@
  * ------------------------------------------------------------------
  * Command analisis dasar yang melengkapi !analisis:
  *   !listkripto [kata kunci] -> daftar koin yang tersedia (lihat kriptoList.js)
- *   !chart <koin> [tf]   -> gambar candlestick + EMA 20/50/200 + garis S/R
+ *   !chart <koin> [tf]   -> gambar candlestick + EMA 20/50/200 + garis S/R + level Fibonacci + insight (chartInsight.js)
  *   !harga <koin>        -> harga live USDT + Rupiah + % perubahan 24 jam
  *   !level <koin> [tf]   -> R1/R2/S1/S2 + jarak % dari harga sekarang
  *   !snr <koin> [tf]     -> Support & Resistance lengkap: R1-R3/S1-S3 + kekuatan level + chart (snr.js)
@@ -47,7 +47,8 @@ const { getDominance } = require("./dominance");
 const { getDefaultTf } = require("./defaultTf");
 const { getAvailableCoins, filterCoins, buildMessages } = require("./kriptoList");
 const { runSnr } = require("./snr");
-const { runFib } = require("./fib");
+const { runFib, computeFib } = require("./fib");
+const { buildChartInsight } = require("./chartInsight");
 const { runHhll } = require("./hhll");
 const { runAmd } = require("./amd");
 const { ALL_RUNNERS } = require("./allPdf");
@@ -132,24 +133,38 @@ async function runHarga(sock, msg, { jid, lang }, { coin }) {
   await sock.sendMessage(jid, { text: parts.join(" | ") }, { quoted: msg });
 }
 
+const CHART_CAPTION_MAX = 1000; // batas aman caption gambar WhatsApp (1024)
+
 async function runChart(sock, msg, { jid, lang }, { coin, tf }) {
   const [candles, tick] = await Promise.all([fetchCandles(coin, tf), fetchTicker(coin)]);
   const { resistance, support } = computeLevels(candles, tick.price);
   const dominance = await getDominance(TF_LABEL[tf].toUpperCase(), candles[Math.max(0, candles.length - 110)].t).catch(() => null);
-  const png = renderChart({ candles, coin, tf: TF_LABEL[tf], resistance, support, dominance });
-  await sock.sendMessage(
-    jid,
-    {
-      image: png,
-      caption: t(lang, "kripto.chart.caption", {
-        coin,
-        tf: TF_LABEL[tf],
-        price: fmtUsd(tick.price),
-        change: fmtPct(tick.changePct),
-      }) + t(lang, "kripto.chart.foot", { win: 3, bars: 20 }),
-    },
-    { quoted: msg },
-  );
+  const fib = computeFib(candles); // null kalau belum ada swing yang jelas -> chart tetap jalan tanpa garis fib
+  const png = renderChart({ candles, coin, tf: TF_LABEL[tf], resistance, support, dominance, fib });
+
+  const head = t(lang, "kripto.chart.caption", {
+    coin,
+    tf: TF_LABEL[tf],
+    price: fmtUsd(tick.price),
+    change: fmtPct(tick.changePct),
+  });
+  const foot = t(lang, "kripto.chart.foot", { win: 3, bars: 20 });
+  // Insight gagal dihitung tidak boleh menggagalkan chart.
+  let insight = "";
+  try {
+    insight = buildChartInsight(lang, { candles, price: tick.price, resistance, support, fib });
+  } catch (err) {
+    console.log("[kripto] !chart insight gagal:", err.message);
+  }
+
+  const full = head + (insight ? "\n\n" + insight : "") + "\n" + foot;
+  if (full.length <= CHART_CAPTION_MAX) {
+    await sock.sendMessage(jid, { image: png, caption: full }, { quoted: msg });
+  } else {
+    // Batas caption WhatsApp 1024 karakter -> gambar bawa header, insight + catatan dikirim sebagai teks.
+    await sock.sendMessage(jid, { image: png, caption: head }, { quoted: msg });
+    await sock.sendMessage(jid, { text: (insight ? insight + "\n" : "") + foot.trim() });
+  }
 }
 
 async function runLevel(sock, msg, { jid, lang }, { coin, tf }) {

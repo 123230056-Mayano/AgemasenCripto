@@ -53,7 +53,7 @@ async function fetchCandles(coin, tf) {
 }
 
 // EMA persis seperti lib/indicators.js di web (seed = SMA periode pertama).
-function ema(values, period) {
+function ema(values, period) {git
   const k = 2 / (period + 1);
   const out = new Array(values.length).fill(null);
   if (values.length < period) return out;
@@ -75,6 +75,10 @@ const { alignToCandles, getDominance } = require("../kripto/dominance");
 const SWING_WIN = 3; // sama dengan computeLevels() di kripto/market.js (swing high/low +-3 candle)
 const SWING_LOOKBACK = 150; // sama dengan computeLevels()
 const EMA_SLOPE_BARS = 20; // panah EMA: dari nilai EMA 20 candle lalu ke nilai terakhir
+
+// Warna level Fibonacci (sama dengan chart !fib di kripto/fib.js).
+const FIB_COLOR = { 0: "#8b93a1", 0.236: "#60a5fa", 0.382: "#4ade80", 0.5: "#facc15", 0.618: "#fb923c", 0.786: "#f472b6", 1: "#8b93a1", 1.272: "#a78bfa", 1.618: "#c084fc" };
+const FIB_EXT_MAX = 1.618; // extension di atas ini tidak digambar (candle jadi gepeng)
 
 const pctTxt = (from, to) => {
   const v = ((to - from) / from) * 100;
@@ -121,9 +125,10 @@ function findSwingIdx(candles, level, isHigh) {
  * @param {number[]} [o.resistance]
  * @param {number[]} [o.support]
  * @param {{now:object|null, series:Array|null}|null} [o.dominance]  hasil getDominance(); null = panel dominance dilewati
+ * @param {object|null} [o.fib]  hasil computeFib() (kripto/fib.js); diisi = gambar level Fibonacci + golden zone (dipakai !chart)
  * @returns {Buffer} PNG
  */
-function renderChart({ candles, coin, tf, resistance = [], support = [], dominance = null }) {
+function renderChart({ candles, coin, tf, resistance = [], support = [], dominance = null, fib = null }) {
   if (!candles || candles.length < 10) throw new Error("CANDLES_TOO_FEW");
   const family = fontFamily();
 
@@ -154,6 +159,17 @@ function renderChart({ candles, coin, tf, resistance = [], support = [], dominan
   for (const lv of [...rs, ...ss]) {
     lo = Math.min(lo, lv);
     hi = Math.max(hi, lv);
+  }
+  // Level Fibonacci (retracement + extension sampai 1.618); yang terlalu jauh dilewati seperti S/R.
+  const fibLv = fib
+    ? [
+        ...fib.retracement.map((l) => ({ ...l, color: FIB_COLOR[l.ratio], ext: false })),
+        ...fib.extension.filter((l) => l.ratio <= FIB_EXT_MAX).map((l) => ({ ...l, color: FIB_COLOR[l.ratio], ext: true })),
+      ].filter((l) => near(l.price))
+    : [];
+  for (const l of fibLv) {
+    lo = Math.min(lo, l.price);
+    hi = Math.max(hi, l.price);
   }
   const pad = (hi - lo) * 0.09 || hi * 0.01;
   lo -= pad;
@@ -244,6 +260,36 @@ function renderChart({ candles, coin, tf, resistance = [], support = [], dominan
     g.lineTo(pPrice.x + pPrice.w, yy);
     g.stroke();
     g.restore();
+  }
+
+  // ----- Fibonacci: golden zone 0.5-0.618 + garis level (di bawah candle) -----
+  if (fib && fibLv.length) {
+    const gA = fib.retracement.find((l) => l.ratio === 0.5);
+    const gB = fib.retracement.find((l) => l.ratio === 0.618);
+    if (gA && gB) {
+      const y1 = Yp(Math.max(gA.price, gB.price));
+      const y2 = Yp(Math.min(gA.price, gB.price));
+      g.save();
+      g.globalAlpha = 0.1;
+      g.fillStyle = FIB_COLOR[0.618];
+      g.fillRect(pPrice.x, y1, pPrice.w, y2 - y1);
+      g.restore();
+    }
+    const fx0 = Math.max(pPrice.x, X(Math.max(fib.startIdx, from)));
+    for (const l of fibLv) {
+      const yy = Math.round(Yp(l.price)) + 0.5;
+      const edge = l.ratio === 0 || l.ratio === 1;
+      g.save();
+      g.strokeStyle = l.color;
+      g.lineWidth = edge ? 1.8 : l.ratio === 0.5 || l.ratio === 0.618 ? 2 : 1.3;
+      if (!edge) g.setLineDash([4, 6]);
+      g.globalAlpha = 0.85;
+      g.beginPath();
+      g.moveTo(fx0, yy);
+      g.lineTo(pPrice.x + pPrice.w, yy);
+      g.stroke();
+      g.restore();
+    }
   }
 
   // ----- candle -----
@@ -366,6 +412,26 @@ function renderChart({ candles, coin, tf, resistance = [], support = [], dominan
     chips.push([txt, (ax + bx) / 2, by + (v[n - 1] >= v[i1] ? 34 : -34), C.ema[p]]);
   }
   for (const [txt, cx, cy, color] of chips) chip(g, family, txt, cx, cy, pPrice, color, placed);
+
+  // Label level Fibonacci di tepi kiri panel harga: "Fib 0.618  12,345".
+  if (fib && fibLv.length) {
+    g.save();
+    g.font = `bold 17px ${family}`;
+    g.textAlign = "left";
+    g.textBaseline = "bottom";
+    for (const l of fibLv) {
+      const txt = `Fib ${Number.isInteger(l.ratio) && l.ratio > 1 ? l.ratio.toFixed(1) : l.ratio}  ${fmtPrice(l.price)}`;
+      const yy = Yp(l.price);
+      const w = g.measureText(txt).width + 10;
+      g.globalAlpha = 0.75;
+      g.fillStyle = C.panel;
+      g.fillRect(pPrice.x + 4, yy - 20, w, 19);
+      g.globalAlpha = 1;
+      g.fillStyle = l.color;
+      g.fillText(txt, pPrice.x + 9, yy - 3);
+    }
+    g.restore();
+  }
 
   // ----- panel MACD / RSI / Dominance (susunan sama dengan screenshot referensi klien) -----
   const frame = (p) => {
@@ -584,7 +650,7 @@ function renderChart({ candles, coin, tf, resistance = [], support = [], dominan
   g.fillText(`${fmtPrice(last.c)}  (${chgLast >= 0 ? "+" : ""}${chgLast.toFixed(2)}%)`, Lm + titleW + 20, 27);
   g.font = `19px ${family}`;
   g.fillStyle = C.axis;
-  g.fillText(`Close candle only · S/R swing ${SWING_WIN} candle · EMA slope ${EMA_SLOPE_BARS} candle`, Lm, 56);
+  g.fillText(`Close candle only · S/R swing ${SWING_WIN} candle · EMA slope ${EMA_SLOPE_BARS} candle${fib ? ` · Fibonacci ${fib.trend === "up" ? "uptrend (low → high)" : "downtrend (high → low)"}` : ""}`, Lm, 56);
 
   // nilai EMA terakhir di pojok kiri atas panel (seperti label MACD/RSI di chart divergence)
   let lx = Lm + 10;
