@@ -75,7 +75,7 @@ function createAmdEngine(deps) {
       if (!matchSub(ev, sub)) continue;
       const key = amdKey(sub.chat, userJid, coin, tf, ev.stage, ev.dir, X.t);
       if (store.wasSent(key)) continue;
-      const plan = computePlan(ev, { rr: sub.rr });
+      const plan = computePlan(ev, { rr: sub.rr, sl: sub.sl, tp: sub.tp });
       out.events.push({ ...base, ...ev, candleT: X.t, key, plan, closed });
     }
     return out;
@@ -94,8 +94,21 @@ function createAmdEngine(deps) {
     }
   }
 
+  /**
+   * SL/TP nominal + konfirmasi -> daftarkan posisi supaya dipantau positionEngine (peringatan mendekati / kena TP atau SL, seperti !posisi).
+   * Entry = close konfirmasi. Dedupe di store.addPosition ("exists" saat kirim ulang) mencegah posisi ganda.
+   * @returns {true|"full"|null} null = tidak berlaku (bukan konfirmasi / tanpa level nominal yang valid)
+   */
+  function registerPosition(ev) {
+    if (ev.stage !== "confirm" || !ev.plan || !ev.plan.custom || typeof store.addPosition !== "function") return null;
+    const p = ev.plan;
+    const added = store.addPosition(ev.userJid, { chat: ev.chat, coin: ev.coin, tf: ev.tf, dir: ev.dir === "up" ? "long" : "short", entry: p.entry, sl: p.sl, sl0: p.sl, tp1: p.tps[0], source: "amd" });
+    return added === "full" || added === "chatFull" ? "full" : true;
+  }
+
   /** Kirim satu kejadian: gambar chart + caption (atau teks saja kalau chart tidak ada / gagal terkirim). */
   async function sendEvent(chat, userJid, ev, lang, ms) {
+    ev.monitored = registerPosition(ev);
     const caption = buildAmdCaption(lang, ev, { ms });
     const png = await chartFor(ev);
     if (png && (await notifyImage(chat, userJid, png, caption))) return true;

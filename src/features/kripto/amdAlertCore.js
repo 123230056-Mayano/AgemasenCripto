@@ -102,12 +102,34 @@ function computePlan(ev, opts = {}) {
   const entryKind = ev.stage === "early" ? "trigger" : "market";
   const entry = entryKind === "trigger" ? ev.level : ev.now;
   const buffer = Number.isFinite(ev.atr) ? slAtr * ev.atr : 0;
-  const sl = up ? ev.extreme - buffer : ev.extreme + buffer;
+  const autoSl = up ? ev.extreme - buffer : ev.extreme + buffer;
+  // SL/TP nominal (harga) dari user. Level yang salah sisi terhadap entry diabaikan (pakai otomatis) dan dicatat di `ignored`.
+  const side = (p) => (up ? 1 : -1) * (p - entry); // > 0 = sisi untung
+  const ignored = [];
+  let sl = autoSl;
+  let customSl = false;
+  if (opts.sl != null) {
+    if (Number.isFinite(opts.sl) && opts.sl > 0 && side(opts.sl) < 0) {
+      sl = opts.sl;
+      customSl = true;
+    } else ignored.push("sl");
+  }
   const risk = up ? entry - sl : sl - entry;
   if (![entry, sl, risk].every(Number.isFinite) || !(entry > 0) || !(risk > 0) || !(sl > 0)) return null;
-  const tps = rr.map((k) => (up ? entry + k * risk : entry - k * risk));
+  let tps;
+  let rrOut;
+  let customTp = false;
+  if (opts.tp != null && Number.isFinite(opts.tp) && opts.tp > 0 && side(opts.tp) > 0) {
+    tps = [opts.tp]; // TP nominal = satu target; kelipatan R dihitung dari jarak SL
+    rrOut = [Math.round((Math.abs(opts.tp - entry) / risk) * 100) / 100];
+    customTp = true;
+  } else {
+    if (opts.tp != null) ignored.push("tp");
+    tps = rr.map((k) => (up ? entry + k * risk : entry - k * risk));
+    rrOut = [...rr];
+  }
   const pct = (p) => ((p - entry) / entry) * 100;
-  return { entry, entryKind, sl, tps, rr: [...rr], risk, riskPct: (risk / entry) * 100, slPct: pct(sl), tpPct: tps.map(pct) };
+  return { entry, entryKind, sl, tps, rr: rrOut, risk, riskPct: (risk / entry) * 100, slPct: pct(sl), tpPct: tps.map(pct), custom: customSl || customTp, customSl, customTp, ignored };
 }
 
 /** "1.5:3" -> [1.5, 3]; satu angka "2" -> [2, 4] (TP2 = 2 x TP1). null kalau di luar batas. */
@@ -135,11 +157,21 @@ const LIST_TOKENS = new Set(["list", "daftar", "ls"]);
 const DELETE_TOKENS = new Set(["hapus", "delete", "del", "remove", "rm"]);
 const OFF_TOKENS = new Set(["off", "mati", "matikan"]);
 const ALL_TOKENS = new Set(["semua", "all"]);
+const SL_TOKENS = new Set(["sl", "stop", "stoploss"]);
+const TP_TOKENS = new Set(["tp", "tp1", "target"]);
+/** Harga polos dengan titik desimal (sama dengan !posisi). Koma / pemisah ribuan ditolak, bukan ditebak. */
+function parsePrice(tok) {
+  if (typeof tok !== "string" || !/^\d+(\.\d+)?$/.test(tok) || /^\d{1,3}(\.\d{3}){2,}$/.test(tok)) return null;
+  const n = Number(tok);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
 const RR_RE = /^rr(\d+(?:[.,]\d+)?)(?::(\d+(?:[.,]\d+)?))?$/i; // rr2 -> TP1 2R, TP2 4R | rr1.5:3 -> TP1 1.5R, TP2 3R
 
 /**
- * !alertamd <koin|watchlist> [tf] [naik|turun] [dini|konfirmasi] [rr<tp1>[:<tp2>]]
+ * !alertamd <koin|watchlist> [tf] [naik|turun] [dini|konfirmasi] [rr<tp1>[:<tp2>]] [sl <harga>] [tp <harga>]
  * !alertamd list | off | hapus <id|semua>
+ * sl / tp = harga nominal. Butuh SATU koin dan SATU arah (naik = long, turun = short), karena harga tetap hanya masuk akal
+ * untuk satu koin dan satu sisi. Level ini menggantikan SL/TP otomatis dan, saat konfirmasi, dipantau seperti !posisi.
  * Tanpa naik/turun = dua arah (bullish dan bearish). Tanpa dini/konfirmasi = keduanya.
  * rr = kelipatan R untuk TP1/TP2 (mis. rr2:4); tanpa rr = default config (1.5R dan 3R).
  * @returns {object|null} null = format salah (-> tampilkan penjelasan command)
@@ -163,11 +195,21 @@ function parseAmdArgs(raw, defaultTf) {
   const dirs = [];
   const stages = [];
   let rr = null;
-  for (const tok of tokens) {
+  let sl = null;
+  let tp = null;
+  for (let i = 0; i < tokens.length; i++) {
+    const tok = tokens[i];
     const low = tok.toLowerCase();
     const up = tok.toUpperCase();
     const rm = low.match(RR_RE);
-    if (rm) {
+    if (SL_TOKENS.has(low) || TP_TOKENS.has(low)) {
+      const isSl = SL_TOKENS.has(low);
+      if ((isSl ? sl : tp) != null) return null; // diberi dua kali
+      const v = parsePrice(tokens[++i]);
+      if (v == null) return null;
+      if (isSl) sl = v;
+      else tp = v;
+    } else if (rm) {
       if (rr) return null; // rr dua kali
       rr = parseRr(rm[1], rm[2]);
       if (!rr) return null; // di luar batas / TP1 >= TP2
@@ -182,8 +224,15 @@ function parseAmdArgs(raw, defaultTf) {
     } else return null;
   }
   if (!coin) return null;
+  if (sl != null || tp != null) {
+    if (coin === COIN_WATCHLIST) return { action: "levelsNeedCoin" };
+    if (new Set(dirs).size !== 1) return { action: "levelsNeedDir" };
+    if (rr) return { action: "levelsNoRr" }; // rr = kelipatan R, bentrok dengan TP nominal
+    const up = dirs[0] === "up";
+    if (sl != null && tp != null && (up ? !(sl < tp) : !(sl > tp))) return { action: "levelsSide", dir: dirs[0] };
+  }
   const pick = (arr, all) => (arr.length ? all.filter((x) => arr.includes(x)) : [...all]);
-  return { action: "create", coin, tf: tf || defaultTf, dirs: pick(dirs, DIRS), stages: pick(stages, STAGES), rr }; // rr null = ikut default config
+  return { action: "create", coin, tf: tf || defaultTf, dirs: pick(dirs, DIRS), stages: pick(stages, STAGES), rr, sl, tp }; // rr null = ikut default config; sl/tp null = otomatis
 }
 
 // =====================================================================
@@ -248,10 +297,12 @@ function buildAmdCaption(lang, ev, { ms }) {
     const rows = [
       t(lang, `amdalert.plan.title.${ev.stage}`),
       t(lang, `amdalert.plan.entry.${ev.stage}`, { entry: fmtLevel(p.entry) }),
-      t(lang, `amdalert.plan.sl.${ev.dir}`, { sl: fmtLevel(p.sl), pct: fmtPct(p.slPct) }),
-      ...p.tps.map((tp, i) => t(lang, "amdalert.plan.tp", { n: i + 1, tp: fmtLevel(tp), pct: fmtPct(p.tpPct[i]), rr: p.rr[i] })),
+      t(lang, p.customSl ? "amdalert.plan.sl.manual" : `amdalert.plan.sl.${ev.dir}`, { sl: fmtLevel(p.sl), pct: fmtPct(p.slPct) }),
+      ...p.tps.map((tp, i) => t(lang, p.customTp ? "amdalert.plan.tp.manual" : "amdalert.plan.tp", { n: i + 1, tp: fmtLevel(tp), pct: fmtPct(p.tpPct[i]), rr: p.rr[i] })),
       t(lang, "amdalert.plan.risk", { risk: p.riskPct.toFixed(2) }),
     ];
+    if (p.ignored?.length) rows.push(t(lang, "amdalert.plan.ignored", { what: p.ignored.map((k) => k.toUpperCase()).join("/") }));
+    if (ev.monitored) rows.push(t(lang, ev.monitored === "full" ? "amdalert.plan.monitorFull" : "amdalert.plan.monitored"));
     parts.push(rows.join("\n"));
   }
   parts.push(t(lang, "amdalert.cap.foot"));
@@ -262,6 +313,10 @@ function buildAmdCaption(lang, ev, { ms }) {
 function describeAmd(lang, sub) {
   const dirs = sub.dirs.length === DIRS.length ? t(lang, "amdalert.dir.both") : t(lang, `amdalert.dir.${sub.dirs[0]}`);
   const stages = sub.stages.length === STAGES.length ? t(lang, "amdalert.stage.both") : t(lang, `amdalert.stage.${sub.stages[0]}`);
+  if (sub.sl != null || sub.tp != null) {
+    const lv = [sub.sl != null ? `SL ${fmt().fmtLevel(sub.sl)}` : null, sub.tp != null ? `TP ${fmt().fmtLevel(sub.tp)}` : null].filter(Boolean).join(" ");
+    return `${dirs}, ${stages}, ${lv}`;
+  }
   const [r1, r2] = validRr(sub.rr) ? sub.rr : defaultRr();
   return `${dirs}, ${stages}, TP ${r1}R/${r2}R`;
 }
@@ -279,6 +334,7 @@ module.exports = {
   buildAmdCaption,
   computePlan,
   parseRr,
+  parsePrice,
   validRr,
   defaultRr,
   sortEvents,

@@ -12,6 +12,8 @@
  *   !alertamd eth 1h turun konfirmasi -> hanya konfirmasi bearish
  *   !alertamd sol 1h dini             -> hanya tanda awal (sweep)
  *   !alertamd btc 4h rr2:4            -> TP1 2R dan TP2 4R (default 1.5R dan 3R)
+ *   !alertamd btc 4h naik sl 97150 tp 99800 -> SL/TP nominal (harga); satu koin + satu arah. Saat konfirmasi
+ *                                        posisi otomatis dipantau seperti !posisi (mendekati / kena TP atau SL)
  *   !alertamd watchlist 1h
  *   !alertamd list | off | hapus <id|semua>
  *
@@ -22,7 +24,7 @@
 const { t } = require("../../i18n");
 const store = require("../../state/cryptoStore");
 const { withSyncNotice } = require("./syncNotice");
-const { fetchTicker } = require("./market");
+const { fetchTicker, fmtLevel } = require("./market");
 const { COIN_WATCHLIST, TF_LABEL, DAILY_TZ_LABEL } = require("./divAlertCore");
 const { parseAmdArgs, describeAmd } = require("./amdAlertCore");
 const { AMD_ALERT_CONFIG: HA } = require("../../config/indicatorConfig");
@@ -39,10 +41,17 @@ const isGroup = (chat) => String(chat).endsWith("@g.us");
 const targetLabel = (lang, coin) => (coin === COIN_WATCHLIST ? t(lang, "divalert.target.watch") : coin);
 
 async function runCreate(sock, msg, { jid, lang, senderId }, args) {
-  const { coin, tf, dirs, stages, rr } = args;
-  if (coin !== COIN_WATCHLIST) await fetchTicker(coin); // koin tidak ada di Binance -> UnsupportedCoinError (ditangani pemanggil)
+  const { coin, tf, dirs, stages, rr, sl, tp } = args;
+  const tick = coin !== COIN_WATCHLIST ? await fetchTicker(coin) : null; // koin tidak ada di Binance -> UnsupportedCoinError (ditangani pemanggil)
 
-  const entry = store.addAmdAlert(senderId, { chat: jid, coin, tf, dirs, stages, rr });
+  // SL/TP nominal harus di sisi yang benar terhadap harga sekarang (salah sisi = hampir pasti salah ketik).
+  if ((sl != null || tp != null) && Number.isFinite(tick?.price)) {
+    const s = dirs[0] === "up" ? 1 : -1;
+    if (sl != null && (tick.price - sl) * s <= 0) return say(sock, jid, msg, t(lang, "position.beyond.sl", { level: fmtLevel(sl), price: fmtLevel(tick.price) }));
+    if (tp != null && (tp - tick.price) * s <= 0) return say(sock, jid, msg, t(lang, "position.beyond.tp", { level: fmtLevel(tp), price: fmtLevel(tick.price) }));
+  }
+
+  const entry = store.addAmdAlert(senderId, { chat: jid, coin, tf, dirs, stages, rr, sl: sl ?? null, tp: tp ?? null });
   if (entry.updated) return say(sock, jid, msg, t(lang, "amdalert.updated", { id: entry.id, what: describeAmd(lang, entry) }));
   if (entry === "exists") return say(sock, jid, msg, t(lang, "amdalert.exists"));
   if (entry === "full") return say(sock, jid, msg, t(lang, "amdalert.full", { max: store.MAX_AMD_ALERTS }));
@@ -99,6 +108,14 @@ async function runAmdAlert(sock, msg, ctx, args) {
       return runDeleteAll(sock, msg, ctx, args);
     case "noAll":
       return say(sock, jid, msg, t(lang, "amdalert.noAll"));
+    case "levelsNeedCoin":
+      return say(sock, jid, msg, t(lang, "amdalert.levels.needCoin"));
+    case "levelsNeedDir":
+      return say(sock, jid, msg, t(lang, "amdalert.levels.needDir"));
+    case "levelsNoRr":
+      return say(sock, jid, msg, t(lang, "amdalert.levels.noRr"));
+    case "levelsSide":
+      return say(sock, jid, msg, t(lang, args.dir === "up" ? "amdalert.levels.side.up" : "amdalert.levels.side.down"));
     default:
       return runCreate(sock, msg, ctx, args);
   }

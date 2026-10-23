@@ -65,11 +65,13 @@ function renderAmdChart({ candles, coin, tf, st, plan = null }) {
     }
     const span = hi - lo;
     const tp2 = plan.tps[1];
-    const ext = tp2 > hi ? tp2 - hi : tp2 < lo ? lo - tp2 : 0;
-    tp2InView = ext <= span * PLAN_TP2_MAX_EXTEND;
-    if (tp2InView) {
-      lo = Math.min(lo, tp2);
-      hi = Math.max(hi, tp2);
+    if (Number.isFinite(tp2)) {
+      const ext = tp2 > hi ? tp2 - hi : tp2 < lo ? lo - tp2 : 0;
+      tp2InView = ext <= span * PLAN_TP2_MAX_EXTEND;
+      if (tp2InView) {
+        lo = Math.min(lo, tp2);
+        hi = Math.max(hi, tp2);
+      }
     }
   }
   const pad = (hi - lo) * 0.09 || hi * 0.01;
@@ -182,7 +184,7 @@ function renderAmdChart({ candles, coin, tf, st, plan = null }) {
       g.fillRect(x0, Math.min(ya, yb), right - x0, Math.abs(yb - ya));
     };
     zone(plan.entry, plan.sl, "rgba(239,83,80,0.18)");
-    zone(plan.entry, plan.tps[1], "rgba(38,166,154,0.16)");
+    zone(plan.entry, plan.tps[1] ?? plan.tps[0], "rgba(38,166,154,0.16)");
     const hline = (price, col, dash, w) => {
       const yy = Yp(price);
       if (yy < top || yy > bot) return;
@@ -199,7 +201,7 @@ function renderAmdChart({ candles, coin, tf, st, plan = null }) {
     hline(plan.entry, C.title, [2, 5], 1.2);
     hline(plan.sl, C.down, [10, 6], 2);
     hline(plan.tps[0], C.up, [10, 6], 2);
-    hline(plan.tps[1], C.up, [10, 6], 2);
+    if (plan.tps.length > 1) hline(plan.tps[1], C.up, [10, 6], 2);
     g.save();
     g.font = `bold 19px ${family}`;
     g.textAlign = "left";
@@ -307,7 +309,7 @@ function renderAmdChart({ candles, coin, tf, st, plan = null }) {
       sw && st.level && { txt: `MSS ${fmtPrice(st.level.price)}`, y: Yp(st.level.price), color: AMBER },
       plan && { txt: `SL ${fmtPrice(plan.sl)}`, y: Yp(plan.sl), color: C.down },
       plan && { txt: `TP1 ${fmtPrice(plan.tps[0])}`, y: Yp(plan.tps[0]), color: C.up },
-      plan && { txt: `TP2 ${fmtPrice(plan.tps[1])}`, y: tp2InView ? Yp(plan.tps[1]) : plan.tps[1] > hi ? pPrice.y + 14 : pPrice.y + pPrice.h - 14, color: C.up, off: tp2InView ? null : plan.tps[1] > hi ? "up" : "down" },
+      plan && plan.tps.length > 1 && { txt: `TP2 ${fmtPrice(plan.tps[1])}`, y: tp2InView ? Yp(plan.tps[1]) : plan.tps[1] > hi ? pPrice.y + 14 : pPrice.y + pPrice.h - 14, color: C.up, off: tp2InView ? null : plan.tps[1] > hi ? "up" : "down" },
       { txt: fmtPrice(last.c), y: Yp(last.c), color: lastColor },
     ]
       .filter(Boolean)
@@ -334,7 +336,7 @@ function renderAmdChart({ candles, coin, tf, st, plan = null }) {
   g.font = `19px ${family}`;
   g.fillStyle = C.axis;
   const phaseTxt = { accumulation: "A: accumulation", manipulation: `M: manipulation (${st.dir})`, distribution: `D: distribution (${st.dir})`, failed: "M failed (real breakout)" }[st.phase] || "";
-  g.fillText(`Close candle only · A = range, M = sweep, D = structure break · ${phaseTxt}${plan ? ` · SL/TP ${plan.rr[0]}R / ${plan.rr[1]}R` : ""}`, Lm, 56);
+  g.fillText(`Close candle only · A = range, M = sweep, D = structure break · ${phaseTxt}${plan ? ` · SL/TP ${plan.rr.map((r) => `${r}R`).join(" / ")}${plan.custom ? " (manual)" : ""}` : ""}`, Lm, 56);
 
   return canvas.toBuffer("image/png");
 }
