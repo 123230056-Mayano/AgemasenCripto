@@ -248,6 +248,30 @@ const SNR_ALERT_CONFIG = Object.freeze({
   CONCURRENCY: _posInt(process.env.SNR_CONCURRENCY, 8),
 });
 
+/**
+ * Alarm skenario sinyal (!alertsignal): kirim skenario seperti !signal (entry / SL / TP1 / TP2 / RR + status entri)
+ * saat skenario LONG / SHORT BARU muncul di candle closed. Dinilai dari candle closed terakhir dan candle
+ * sebelumnya (tanpa status tersimpan): "baru" = candle sebelumnya belum punya skenario arah yang sama.
+ * Default hanya status entri VALID; opsi `tunggu` ikut mengabari status TUNGGU. HINDARI tidak pernah dikirim.
+ * Isi skenario memakai aturan yang sama dengan !signal (SIGNAL_CONFIG), tetapi skor bias alarm tanpa mood pasar
+ * dan BTC (sama seperti !alertind), jadi bisa sedikit beda dari !signal.
+ */
+const SIGNAL_ALERT_CONFIG = Object.freeze({
+  VERSION: 1,
+  CHECK_MS: Math.max(5_000, _posInt(process.env.SIGNAL_ALERT_CHECK_MS, 15_000)),
+  INTERVAL_MS: Math.max(30_000, _posInt(process.env.SIGNAL_ALERT_INTERVAL_MS, 60_000)), // jeda ambil ulang per koin+TF
+  MAX_PAIRS: _posInt(process.env.SIGNAL_ALERT_MAX_PAIRS, 60), // batas koin+TF per putaran (sisanya bergilir)
+  FINAL_DELAY_MS: _posInt(process.env.SIGNAL_ALERT_FINAL_DELAY_MS, 10_000), // tunggu setelah candle tutup agar data Binance final
+  COOLDOWN_CANDLES: Math.max(0, Math.floor(_num(process.env.SIGNAL_ALERT_COOLDOWN_CANDLES, 3))), // arah yang sama tidak dikirim lagi dalam N candle terakhir (cegah alarm berulang saat bias menempel di ambang); 0 = mati
+  MIN_CANDLES: 52, // candle closed minimal: bias butuh 51, ditambah 1 untuk membandingkan dengan candle sebelumnya
+  MAX_MSG_PER_CHAT_HOUR: _posInt(process.env.SIGNAL_ALERT_MAX_MSG_PER_CHAT_HOUR, 20),
+  BLOCKS_PER_MSG: _posInt(process.env.SIGNAL_ALERT_BLOCKS_PER_MSG, 3), // jumlah skenario per pesan (sisanya pesan berikutnya)
+  SEND_GAP_MS: _posInt(process.env.SIGNAL_ALERT_SEND_GAP_MS, 1_000),
+  MAX_PER_USER: _posInt(process.env.SIGNAL_ALERT_MAX_PER_USER, 10),
+  MAX_PER_CHAT: _posInt(process.env.SIGNAL_ALERT_MAX_PER_CHAT, 20),
+  CONCURRENCY: _posInt(process.env.SIGNAL_ALERT_CONCURRENCY, 8),
+});
+
 // Higher High / Lower Low (market structure): !hhll dan alarm !alerthhll.
 // Swing = pivot (high/low tertinggi/terendah dalam +-PIVOT_WIN candle closed). Pivot baru dianggap pasti setelah
 // PIVOT_WIN candle di kanannya closed, jadi candle yang belum closed tidak memunculkan atau mengubah swing.
@@ -318,4 +342,4 @@ const AMD_ALERT_CONFIG = Object.freeze({
   CAPTION_MAX: 1000, // batas aman caption gambar WhatsApp (1024); lebih dari ini gambar dan teks dikirim terpisah
 });
 
-module.exports = { INDICATOR_CONFIG, BIAS_CONFIG, SIGNAL_CONFIG, PROB_CONFIG, SUDDEN_CONFIG, POSITION_CONFIG, ADV_ALERT_CONFIG, SNR_ALERT_CONFIG, HHLL_CONFIG, HHLL_ALERT_CONFIG, AMD_CONFIG, AMD_ALERT_CONFIG };
+module.exports = { INDICATOR_CONFIG, BIAS_CONFIG, SIGNAL_CONFIG, PROB_CONFIG, SUDDEN_CONFIG, POSITION_CONFIG, ADV_ALERT_CONFIG, SNR_ALERT_CONFIG, SIGNAL_ALERT_CONFIG, HHLL_CONFIG, HHLL_ALERT_CONFIG, AMD_CONFIG, AMD_ALERT_CONFIG };

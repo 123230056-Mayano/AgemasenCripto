@@ -27,6 +27,7 @@
  *   !alertind <koin|watchlist> [tf] [bias|cross] [live] | list | off | hapus <id|semua>  (alarm bias berubah / crossover baru, advAlertCommand.js)
  *   !posisi buka <koin> [tf] <long|short> entry <harga> sl <harga> [tp <harga>] | list | sl <id> <harga> | tutup <id|semua>  (posisi + peringatan WASPADA/CUT, positionCommand.js)
  *   !alertsnr <koin|watchlist> [tf] [reject|tembus|wick|sweep] [kuat] | list | off | hapus <id|semua>  (alarm titik balik S/R, snrAlertCommand.js)
+ *   !alertsignal <koin|watchlist> [tf] [long|short] [tunggu] | list | off | hapus <id|semua>  (alarm skenario sinyal seperti !signal, signalAlertCommand.js). Alias: !alertsinyal
  *   !amd <koin> [tf]     -> kondisi Accumulation / Manipulation / Distribution (AMD, Power of 3) saat ini + chart (amd.js). Alias: !powerof3
  *   !alertamd <koin|watchlist> [tf] [naik|turun] [dini|konfirmasi] [rr<tp1>:<tp2>] [sl <harga>] [tp <harga>] | list | off | hapus <id|semua>  (alarm AMD, amdAlertCommand.js)
  *   !alerthhll <koin|watchlist> [tf] [naik|turun] [dini|konfirmasi] [balik] | list | off | hapus <id|semua>  (alarm Higher High / Lower Low, hhllAlertCommand.js)
@@ -60,6 +61,7 @@ const { SIGNAL_COMMANDS, SIGNAL_RUNNERS, parseSignalArgs } = require("./signal")
 const { DIVALERT_COMMANDS, DIVALERT_RUNNERS, parseDivAlertArgs } = require("./divAlertCommand");
 const { ADVALERT_COMMANDS, ADVALERT_RUNNERS, parseAdvAlertArgs } = require("./advAlertCommand");
 const { SNRALERT_COMMANDS, SNRALERT_RUNNERS, parseSnrAlertArgs } = require("./snrAlertCommand");
+const { SIGNALALERT_COMMANDS, SIGNALALERT_RUNNERS, parseSignalAlertArgs } = require("./signalAlertCommand");
 const { POSITION_COMMANDS, POSITION_RUNNERS, parsePositionCommandArgs } = require("./positionCommand");
 const { HHLLALERT_COMMANDS, HHLLALERT_RUNNERS, parseHhllAlertArgs } = require("./hhllAlertCommand");
 const { AMDALERT_COMMANDS, AMDALERT_RUNNERS, parseAmdAlertArgs } = require("./amdAlertCommand");
@@ -497,6 +499,19 @@ async function handleKriptoCommand(sock, msg, { jid, text, lang }) {
       }
     }
   }
+  // Alarm skenario sinyal (!alertsignal: LONG / SHORT baru seperti !signal, konfirmasi) -> lihat signalAlertCommand.js
+  let isSignalAlert = false;
+  if (!name) {
+    for (const [key, def] of Object.entries(SIGNALALERT_COMMANDS)) {
+      const m = text.match(def.re);
+      if (m) {
+        name = key;
+        match = m;
+        isSignalAlert = true;
+        break;
+      }
+    }
+  }
   // Posisi pengguna + peringatan WASPADA / CUT (!posisi) -> lihat positionCommand.js
   let isPosition = false;
   if (!name) {
@@ -573,6 +588,7 @@ async function handleKriptoCommand(sock, msg, { jid, text, lang }) {
   else if (isDivAlert) args = parseDivAlertArgs(name, match[1] || "", getDefaultTf(senderId));
   else if (isAdvAlert) args = parseAdvAlertArgs(name, match[1] || "", getDefaultTf(senderId));
   else if (isSnrAlert) args = parseSnrAlertArgs(name, match[1] || "", getDefaultTf(senderId));
+  else if (isSignalAlert) args = parseSignalAlertArgs(name, match[1] || "", getDefaultTf(senderId));
   else if (isPosition) args = parsePositionCommandArgs(name, match[1] || "", getDefaultTf(senderId));
   else if (isHhllAlert) args = parseHhllAlertArgs(name, match[1] || "", getDefaultTf(senderId));
   else if (isAmdAlert) args = parseAmdAlertArgs(name, match[1] || "", getDefaultTf(senderId));
@@ -630,6 +646,10 @@ async function handleKriptoCommand(sock, msg, { jid, text, lang }) {
     }
     if (isSnrAlert) {
       await SNRALERT_RUNNERS[name](sock, msg, { jid, lang, senderId }, args);
+      return true;
+    }
+    if (isSignalAlert) {
+      await SIGNALALERT_RUNNERS[name](sock, msg, { jid, lang, senderId }, args);
       return true;
     }
     if (isPosition) {

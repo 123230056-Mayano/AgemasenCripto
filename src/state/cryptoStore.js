@@ -74,12 +74,15 @@ const posInt = (v, d) => (Number.isInteger(Number(v)) && Number(v) > 0 ? Number(
 const MAX_DIV_ALERTS = posInt(process.env.DIV_ALERT_MAX_PER_USER, 10);
 const MAX_DIV_ALERTS_PER_CHAT = posInt(process.env.DIV_ALERT_MAX_PER_CHAT, 20);
 // Batas alarm indikator lanjutan (!alertind, item 10); angka sama dengan ADV_ALERT_CONFIG.
-const { ADV_ALERT_CONFIG, SNR_ALERT_CONFIG, HHLL_ALERT_CONFIG, AMD_ALERT_CONFIG, POSITION_CONFIG } = require("../config/indicatorConfig");
+const { ADV_ALERT_CONFIG, SNR_ALERT_CONFIG, SIGNAL_ALERT_CONFIG, HHLL_ALERT_CONFIG, AMD_ALERT_CONFIG, POSITION_CONFIG } = require("../config/indicatorConfig");
 const MAX_ADV_ALERTS = ADV_ALERT_CONFIG.MAX_PER_USER;
 const MAX_ADV_ALERTS_PER_CHAT = ADV_ALERT_CONFIG.MAX_PER_CHAT;
 // Batas alarm titik balik S/R (!alertsnr); angka sama dengan SNR_ALERT_CONFIG.
 const MAX_SNR_ALERTS = SNR_ALERT_CONFIG.MAX_PER_USER;
 const MAX_SNR_ALERTS_PER_CHAT = SNR_ALERT_CONFIG.MAX_PER_CHAT;
+// Batas alarm skenario sinyal (!alertsignal); angka sama dengan SIGNAL_ALERT_CONFIG.
+const MAX_SIGNAL_ALERTS = SIGNAL_ALERT_CONFIG.MAX_PER_USER;
+const MAX_SIGNAL_ALERTS_PER_CHAT = SIGNAL_ALERT_CONFIG.MAX_PER_CHAT;
 
 // Batas posisi (!posisi); angka sama dengan POSITION_CONFIG.
 const MAX_POSITIONS = POSITION_CONFIG.MAX_PER_USER;
@@ -131,7 +134,7 @@ let failures = 0;
 let started = false;
 
 // ---------- helper ----------
-const isEmpty = (u) => !u || (!u.watch?.length && !u.alerts?.length && !u.divAlerts?.length && !u.advAlerts?.length && !u.snrAlerts?.length && !u.hhllAlerts?.length && !u.amdAlerts?.length && !u.positions?.length && !u.daily && !u.tf);
+const isEmpty = (u) => !u || (!u.watch?.length && !u.alerts?.length && !u.divAlerts?.length && !u.advAlerts?.length && !u.snrAlerts?.length && !u.signalAlerts?.length && !u.hhllAlerts?.length && !u.amdAlerts?.length && !u.positions?.length && !u.daily && !u.tf);
 const snap = (jid) => (isEmpty(users[jid]) ? null : JSON.stringify(users[jid]));
 const hasPending = () => dirtyUsers.size > 0 || dirtyClosed.size > 0 || dirtySent.size > 0 || pruneBefore != null;
 
@@ -440,6 +443,8 @@ function user(jid) {
   if (!u.nextAdvId) u.nextAdvId = 1;
   if (!Array.isArray(u.snrAlerts)) u.snrAlerts = [];
   if (!u.nextSnrId) u.nextSnrId = 1;
+  if (!Array.isArray(u.signalAlerts)) u.signalAlerts = [];
+  if (!u.nextSignalId) u.nextSignalId = 1;
   if (!Array.isArray(u.hhllAlerts)) u.hhllAlerts = [];
   if (!u.nextHhllId) u.nextHhllId = 1;
   if (!Array.isArray(u.amdAlerts)) u.amdAlerts = [];
@@ -752,6 +757,67 @@ function allSnrAlerts() {
   return out;
 }
 
+// ---------- alarm skenario sinyal (!alertsignal) ----------
+/**
+ * signalAlerts: [{ id: "g1", chat, coin: "BTC"|"WATCHLIST", tf, dirs: ["long","short"], wait: boolean,
+ *                  createdAt, active: true }]
+ * wait = ikut mengabari status entri TUNGGU (default hanya VALID). Hanya candle closed.
+ * Penanda kejadian terkirim memakai kunci dedupe yang sama dengan alarm lain (wasSent / markSent).
+ */
+const getSignalAlerts = (jid) => [...user(jid).signalAlerts];
+
+/** @returns {object|"full"|"chatFull"|"exists"} */
+function addSignalAlert(jid, sub) {
+  const u = user(jid);
+  if (u.signalAlerts.some((a) => a.chat === sub.chat && a.coin === sub.coin && a.tf === sub.tf && !!a.wait === !!sub.wait && sameList(a.dirs, sub.dirs))) {
+    return "exists";
+  }
+  if (u.signalAlerts.length >= MAX_SIGNAL_ALERTS) return "full";
+  if (countSignalAlertsInChat(sub.chat) >= MAX_SIGNAL_ALERTS_PER_CHAT) return "chatFull";
+  const entry = { ...sub, id: `g${u.nextSignalId++}`, createdAt: Date.now(), active: true };
+  u.signalAlerts.push(entry);
+  save(jid);
+  return entry;
+}
+
+function countSignalAlertsInChat(chat) {
+  let n = 0;
+  for (const u of Object.values(users)) for (const a of u.signalAlerts || []) if (a.chat === chat) n++;
+  return n;
+}
+
+/** id boleh "g3" / "G3" / "3". @returns {boolean} */
+function removeSignalAlert(jid, id) {
+  const u = user(jid);
+  const want = /^\d+$/.test(String(id)) ? `g${id}` : String(id).toLowerCase();
+  const i = u.signalAlerts.findIndex((a) => a.id === want);
+  if (i < 0) return false;
+  u.signalAlerts.splice(i, 1);
+  prune(jid);
+  save(jid);
+  return true;
+}
+
+/** @returns {number} jumlah alarm yang dihapus */
+function clearSignalAlerts(jid) {
+  const u = user(jid);
+  const n = u.signalAlerts.length;
+  if (!n) return 0;
+  u.signalAlerts = [];
+  prune(jid);
+  save(jid);
+  return n;
+}
+
+/** Semua alarm skenario sinyal aktif semua user (untuk monitor). */
+function allSignalAlerts() {
+  const out = [];
+  for (const [jid, u] of Object.entries(users)) {
+    for (const a of u.signalAlerts || []) if (a.active !== false) out.push({ userJid: jid, sub: a });
+  }
+  return out;
+}
+
 // ---------- posisi pengguna (!posisi) ----------
 /**
  * positions: [{ id: "p1", chat, coin, tf, dir: "long"|"short", entry, sl, sl0, tp1, openedAt, active: true,
@@ -1034,6 +1100,8 @@ module.exports = {
   MAX_ADV_ALERTS_PER_CHAT,
   MAX_SNR_ALERTS,
   MAX_SNR_ALERTS_PER_CHAT,
+  MAX_SIGNAL_ALERTS,
+  MAX_SIGNAL_ALERTS_PER_CHAT,
   MAX_POSITIONS,
   MAX_POSITIONS_PER_CHAT,
   MAX_HHLL_ALERTS,
@@ -1073,6 +1141,12 @@ module.exports = {
   clearSnrAlerts,
   allSnrAlerts,
   countSnrAlertsInChat,
+  getSignalAlerts,
+  addSignalAlert,
+  removeSignalAlert,
+  clearSignalAlerts,
+  allSignalAlerts,
+  countSignalAlertsInChat,
   getPositions,
   addPosition,
   updatePosition,

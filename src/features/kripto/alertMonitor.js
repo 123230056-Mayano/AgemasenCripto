@@ -10,6 +10,7 @@
  *     ulang tiap 10 menit; notifikasi saat harga mendekati (<= 0.5%) atau
  *     menyentuh level, aktif lagi setelah harga menjauh > 1.5% / level berganti.
  *   - ringkasan harian (!harian): dikirim sekali per hari pada jam pilihan user.
+ *   - alarm skenario sinyal (!alertsignal): skenario LONG / SHORT baru seperti !signal, hanya konfirmasi (candle closed). Mesinnya di signalAlertEngine.js.
  *   - alarm titik balik S/R (!alertsnr): reject / tembus (default), wick / sweep (opt-in), hanya konfirmasi (candle closed). Mesinnya di snrAlertEngine.js.
  *   - peringatan posisi (!posisi): WASPADA / CUT / time stop / saran break-even. Mesinnya di positionEngine.js.
  *   - alarm Higher High / Lower Low (!alerthhll): swing baru (dini) + close menembus swing (konfirmasi), dari candle closed.
@@ -62,12 +63,13 @@ const {
 
 const { createAdvEngine } = require("./advAlertEngine");
 const { createSnrEngine } = require("./snrAlertEngine");
+const { createSignalEngine } = require("./signalAlertEngine");
 const { createPositionEngine } = require("./positionEngine");
 const { createHhllEngine } = require("./hhllAlertEngine");
 const { buildHhllPdf } = require("./hhllPdf");
 const { createAmdEngine } = require("./amdAlertEngine");
 const { renderAmdChart } = require("./amd");
-const { ADV_ALERT_CONFIG: ADV, SNR_ALERT_CONFIG: SNR, HHLL_ALERT_CONFIG: HHLL, AMD_ALERT_CONFIG: AMDCFG, POSITION_CONFIG: POSCFG } = require("../../config/indicatorConfig");
+const { ADV_ALERT_CONFIG: ADV, SNR_ALERT_CONFIG: SNR, SIGNAL_ALERT_CONFIG: SIGCFG, HHLL_ALERT_CONFIG: HHLL, AMD_ALERT_CONFIG: AMDCFG, POSITION_CONFIG: POSCFG } = require("../../config/indicatorConfig");
 
 const BINANCE = (process.env.BINANCE_BASE || "https://data-api.binance.vision").replace(/\/+$/, "");
 const POLL_MS = Math.max(10_000, Number(process.env.ALERT_POLL_MS) || 30_000);
@@ -85,6 +87,7 @@ let dailyBusy = false;
 let divBusy = false;
 let advBusy = false;
 let snrBusy = false;
+let signalBusy = false;
 let posBusy = false;
 let hhllBusy = false;
 let amdBusy = false;
@@ -605,6 +608,18 @@ const snrEngine = createSnrEngine({
 /** Pemeriksaan alarm S/R (konfirmasi). Dipanggil timer; aman dipanggil manual untuk uji. */
 const checkSnrAlerts = (now) => (sockRef ? snrEngine.tick(now) : undefined);
 
+// ---------- alarm skenario sinyal (!alertsignal) ----------
+const signalEngine = createSignalEngine({
+  store,
+  fetchCandles,
+  notify,
+  langFor,
+  isUnsupported: (err) => err instanceof UnsupportedCoinError,
+});
+
+/** Pemeriksaan alarm skenario sinyal (konfirmasi). Dipanggil timer; aman dipanggil manual untuk uji. */
+const checkSignalAlerts = (now) => (sockRef ? signalEngine.tick(now) : undefined);
+
 // ---------- peringatan posisi (!posisi) ----------
 const positionEngine = createPositionEngine({
   store,
@@ -714,6 +729,18 @@ function setAlertSocket(sock) {
   }, SNR.CHECK_MS).unref?.();
 
   setInterval(async () => {
+    if (signalBusy) return;
+    signalBusy = true;
+    try {
+      await checkSignalAlerts();
+    } catch (err) {
+      console.log("[signalalert] pengecekan gagal:", err.message);
+    } finally {
+      signalBusy = false;
+    }
+  }, SIGCFG.CHECK_MS).unref?.();
+
+  setInterval(async () => {
     if (posBusy) return;
     posBusy = true;
     try {
@@ -750,4 +777,4 @@ function setAlertSocket(sock) {
   }, AMDCFG.CHECK_MS).unref?.();
 }
 
-module.exports = { setAlertSocket, notifyImage, checkPriceAlerts, checkDaily, checkDivergence, checkAdvAlerts, checkSnrAlerts, checkPositions, checkHhllAlerts, checkAmdAlerts, localNow, fetchPrices };
+module.exports = { setAlertSocket, notifyImage, checkPriceAlerts, checkDaily, checkDivergence, checkAdvAlerts, checkSnrAlerts, checkSignalAlerts, checkPositions, checkHhllAlerts, checkAmdAlerts, localNow, fetchPrices };
