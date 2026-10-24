@@ -23,12 +23,11 @@
  *   (lima terakhir ada di pasar.js)
  *   !ringkasan / !stat / !scan <kondisi> [tf] -> statistik & screener pasar (statistik.js)
  *   !bias <koin> [tf|semua] -> bias arah gabungan indikator per timeframe (bias.js)
- *   !sinyal <koin> [tf|semua] -> skenario entry / SL / TP1 / TP2 / RR semua timeframe, tanpa AI (signal.js)
+ *   !signal <koin> [tf|semua] -> skenario entry / SL / TP1 / TP2 / RR semua timeframe + kondisi AMD (Accumulation / Manipulation / Distribution) tiap timeframe, tanpa AI (signal.js). Satu timeframe -> chart AMD ikut dikirim. Alias: !sinyal, !amd, !powerof3, !po3 (!amd lama sudah digabung ke sini)
  *   !alertind <koin|watchlist> [tf] [bias|cross] [live] | list | off | hapus <id|semua>  (alarm bias berubah / crossover baru, advAlertCommand.js)
  *   !posisi buka <koin> [tf] <long|short> entry <harga> sl <harga> [tp <harga>] | list | sl <id> <harga> | tutup <id|semua>  (posisi + peringatan WASPADA/CUT, positionCommand.js)
  *   !alertsnr <koin|watchlist> [tf] [reject|tembus|wick|sweep] [kuat] | list | off | hapus <id|semua>  (alarm titik balik S/R, snrAlertCommand.js)
  *   !alertsignal <koin|watchlist> [tf] [long|short] [tunggu] | list | off | hapus <id|semua>  (alarm skenario sinyal seperti !signal, signalAlertCommand.js). Alias: !alertsinyal
- *   !amd <koin> [tf]     -> kondisi Accumulation / Manipulation / Distribution (AMD, Power of 3) saat ini + chart (amd.js). Alias: !powerof3
  *   !alertamd <koin|watchlist> [tf] [naik|turun] [dini|konfirmasi] [rr<tp1>:<tp2>] [sl <harga>] [tp <harga>] | list | off | hapus <id|semua>  (alarm AMD, amdAlertCommand.js)
  *   !alerthhll <koin|watchlist> [tf] [naik|turun] [dini|konfirmasi] [balik] | list | off | hapus <id|semua>  (alarm Higher High / Lower Low, hhllAlertCommand.js)
  *   !alertdivergent (!alertdiv) <koin|semua|watchlist> [tf] [rsi|macd] | list | hapus <id|semua>
@@ -51,7 +50,6 @@ const { runSnr } = require("./snr");
 const { runFib, computeFib } = require("./fib");
 const { buildChartInsight } = require("./chartInsight");
 const { runHhll } = require("./hhll");
-const { runAmd } = require("./amd");
 const { ALL_RUNNERS } = require("./allPdf");
 const { runMovave, MOVAVE_TYPES } = require("./movave");
 const { PASAR_COMMANDS, PASAR_RUNNERS, parsePasarArgs } = require("./pasar");
@@ -94,7 +92,6 @@ const COMMANDS = {
   snr: { re: /^!(?:snr|sr)(?:\s+([\s\S]*))?$/i, useTf: true, allTf: true },
   fib: { re: /^!(?:fib|fibo|fibonacci)(?:\s+([\s\S]*))?$/i, useTf: true, allTf: true },
   hhll: { re: /^!(?:hhll|struktur|structure)(?:\s+([\s\S]*))?$/i, useTf: true },
-  amd: { re: /^!(?:amd|powerof3|po3)(?:\s+([\s\S]*))?$/i, useTf: true },
   ema: { re: /^!ema(?:\s+([\s\S]*))?$/i, useTf: true },
   movave: { re: /^!(?:movave|movingaverage|ma)(?:\s+([\s\S]*))?$/i, useTf: true, types: MOVAVE_TYPES },
   tren: { re: /^!(?:tren|trend)(?:\s+([\s\S]*))?$/i, useTf: true },
@@ -371,7 +368,7 @@ async function runBandingkan(sock, msg, { jid, lang, senderId }, { coin, coin2 }
   );
 }
 
-const RUNNERS = { chart: runChart, harga: runHarga, level: runLevel, snr: runSnr, fib: runFib, hhll: runHhll, amd: runAmd, ema: runEma, movave: runMovave, tren: runTren, mtf: runMtf, bandingkan: runBandingkan };
+const RUNNERS = { chart: runChart, harga: runHarga, level: runLevel, snr: runSnr, fib: runFib, hhll: runHhll, ema: runEma, movave: runMovave, tren: runTren, mtf: runMtf, bandingkan: runBandingkan };
 
 async function runList(sock, msg, { jid, lang }, keyword) {
   const all = await getAvailableCoins(lang);

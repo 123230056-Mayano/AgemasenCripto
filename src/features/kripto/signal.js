@@ -3,8 +3,10 @@
 /**
  * features/kripto/signal.js
  * ------------------------------------------------------------------
- * !sinyal <koin> [tf|semua]  (alias !signal)
- * Skenario entry / SL / TP1 / TP2 / RR untuk 15m, 1H, 4H, 1D dalam SATU pesan ringkas.
+ * !signal <koin> [tf|semua]  (alias !sinyal, !amd, !powerof3, !po3)
+ * Skenario entry / SL / TP1 / TP2 / RR untuk 15m, 1H, 4H, 1D dalam SATU pesan ringkas, DITAMBAH kondisi
+ * Accumulation / Manipulation / Distribution (AMD) tiap timeframe (amdCore.js). Satu timeframe saja -> chart AMD
+ * + penjelasan fase lengkap (amd.js) dikirim lebih dulu. Command !amd lama sudah digabung ke sini.
  * Pengganti jalur lama "!analisis via Gemini" (1 TF per panggilan, tanpa sideways).
  *
  * Semua angka dihitung di backend dari candle closed + ATR + level S/R; TIDAK ada angka dari AI.
@@ -20,6 +22,8 @@
  * Skenario = ilustrasi level dari indikator, BUKAN ajakan beli/jual.
  *
  * Changelog:
+ *   v3 (2026-10-24) !amd digabung ke !signal: tiap baris TF dapat satu baris status AMD (dihitung dari candle yang sama dengan
+ *                   skenario, tanpa fetch tambahan) + catatan bila arah AMD berlawanan dengan skenario; satu TF -> chart AMD.
  *   v2 (2026-10-22) Sudden Move Guard: tiap skenario LONG/SHORT dinilai suddenMove.assessEntry (status VALID / TUNGGU /
  *                   HINDARI), SL diperlebar saat volatil / di luar ekstrem sweep-wick, TP ikut kelipatan R dari risiko final, RR dihitung ulang.
  *   v1 (2026-10-17) item 08 pertama. Gaya entry (trend/retest/breakout) dan dasar SL (atr/sr)
@@ -33,6 +37,8 @@ const { computeOverallBias, collectBias, confidenceLevel, parseBiasArgs } = requ
 const { computeProbability, formatProbLine, formatProbBasis, PROB_VERSION } = require("./probability");
 const sudden = require("./suddenMove");
 const { reasonText } = require("./suddenMoveText");
+const { detectAmd, CFG: AMD_CFG } = require("./amdCore");
+const { computeSnr } = require("./snr");
 
 const SIGNAL_VERSION = CFG.VERSION;
 const TF_LABEL = { "15M": "15m", "1H": "1H", "4H": "4H", "1D": "1D" };
@@ -217,14 +223,21 @@ async function collectSignal(coin, tfs, ctx) {
   const { computeLevels } = require("./market");
   const rows = await collectBias(coin, tfs, ctx);
   return rows.map((r) => {
-    if (!r.result || !r.candles) return { tf: r.tf, bias: null, limited: false, scenario: { status: "nodata" }, err: r.err };
+    if (!r.result || !r.candles) return { tf: r.tf, bias: null, limited: false, scenario: { status: "nodata" }, amd: null, err: r.err };
     const candles = r.candles;
     const atrAll = atrSeries(candles);
     const atr = atrAll.at(-1);
     const levels = computeLevels(candles, ctx.tick.price);
     const emas = computeEmas(candles).latest;
     const scenario = computeScenario({ bias: r.result, price: ctx.tick.price, atr, levels, emas, candles, atrSeries: atrAll });
-    return { tf: r.tf, bias: r.result, limited: r.limited, scenario, err: undefined };
+    // AMD dari candle yang sama; gagal dihitung tidak boleh menggagalkan skenario sinyal.
+    let amd = null;
+    try {
+      amd = candles.length >= AMD_CFG.MIN_CANDLES ? detectAmd(candles, { computeSnr }) : null;
+    } catch (err) {
+      console.log(`[kripto] AMD ${coin} ${r.tf} gagal dihitung:`, err.message);
+    }
+    return { tf: r.tf, bias: r.result, limited: r.limited, scenario, amd, err: undefined };
   });
 }
 
@@ -262,6 +275,32 @@ function formatGuardLines(lang, sc, tf) {
   return out;
 }
 
+/**
+ * Satu baris ringkas status AMD satu TF (detail lengkap + chart: !signal <koin> <tf>).
+ * @returns {string|null} null bila AMD tidak dihitung (data kurang / baris dari alarm).
+ */
+function formatAmdLine(lang, amd) {
+  if (!amd) return null;
+  const { fmtLevel } = require("./market");
+  if (amd.phase === "none") return t(lang, "sinyal.amd.none");
+  const dirKey = amd.dir === "bullish" ? "bull" : "bear";
+  if (amd.phase === "accumulation") {
+    return t(lang, "sinyal.amd.accumulation", { lo: fmtLevel(amd.range.lo), hi: fmtLevel(amd.range.hi), bars: amd.range.bars });
+  }
+  const vars = {
+    extreme: fmtLevel(amd.sweep.extreme),
+    level: amd.level ? fmtLevel(amd.level.price) : "-",
+    ago: amd.barsSince,
+  };
+  return t(lang, `sinyal.amd.${amd.phase}.${dirKey}`, vars);
+}
+
+/** Skenario LONG/SHORT yang berlawanan dengan arah AMD yang sedang berjalan (manipulasi / distribusi). */
+function amdConflicts(sc, amd) {
+  if (!amd || (amd.phase !== "manipulation" && amd.phase !== "distribution")) return false;
+  return (sc.status === "long" && amd.dir === "bearish") || (sc.status === "short" && amd.dir === "bullish");
+}
+
 function formatTfBlock(lang, row, ctx) {
   const { fmtLevel } = require("./market");
   const tf = TF_LABEL[row.tf];
@@ -282,6 +321,8 @@ function formatTfBlock(lang, row, ctx) {
     ];
     if (sc.outside) lines.push(t(lang, `sinyal.range.outside.${sc.outside}`, { tf }));
     if (sc.narrow) lines.push(t(lang, "sinyal.range.narrow"));
+    const amdRange = ctx.amdLine === false ? null : formatAmdLine(lang, row.amd);
+    if (amdRange) lines.push(amdRange);
     return lines.join("\n");
   }
 
@@ -313,10 +354,15 @@ function formatTfBlock(lang, row, ctx) {
   }
   if (notes.length) lines.push(...notes.map((n) => `↳ ${n}`));
   lines.push(...guardLines);
+  const amdDir = ctx.amdLine === false ? null : formatAmdLine(lang, row.amd);
+  if (amdDir) {
+    lines.push(amdDir);
+    if (amdConflicts(sc, row.amd)) lines.push(`↳ ${t(lang, "sinyal.amd.conflict")}`);
+  }
   return lines.join("\n");
 }
 
-function formatSignal(lang, { coin, price, rows, overall, failedAny, limitedAny }) {
+function formatSignal(lang, { coin, price, rows, overall, failedAny, limitedAny, amdLine = true }) {
   const parts = [t(lang, "sinyal.head", { coin, ver: SIGNAL_VERSION, price })];
   if (overall && !overall.insufficient) {
     parts.push(
@@ -339,7 +385,7 @@ function formatSignal(lang, { coin, price, rows, overall, failedAny, limitedAny 
     }),
     "",
   );
-  const ctx = { overall };
+  const ctx = { overall, amdLine };
   parts.push(rows.map((r) => formatTfBlock(lang, r, ctx)).join("\n\n"));
 
   const notes = [];
@@ -347,12 +393,58 @@ function formatSignal(lang, { coin, price, rows, overall, failedAny, limitedAny 
   if (failedAny) notes.push(t(lang, "bias.note.failed"));
   if (rows.some((r) => r.bias && !r.bias.insufficient)) notes.push(t(lang, "prob.note"));
   notes.push(t(lang, "sinyal.note.method"));
+  if (amdLine && rows.some((r) => r.amd)) notes.push(t(lang, rows.length > 1 ? "sinyal.note.amdMulti" : "sinyal.note.amd"));
   if (rows.some((r) => r.scenario?.guard)) notes.push(t(lang, "sudden.note.method"));
   parts.push("", ...notes, "", t(lang, "sinyal.disclaimer"));
   return parts.join("\n");
 }
 
-/** !sinyal <koin> [tf|semua]. Tanpa Gemini. TF gagal ditandai, tidak menggagalkan seluruh perintah. */
+const CAPTION_MAX = 1000; // batas aman caption gambar WhatsApp (1024)
+
+/**
+ * Chart AMD + penjelasan fase lengkap (isi lama !amd) untuk SATU timeframe.
+ * @returns {Promise<boolean>} true kalau terkirim. Pola belum ada / render gagal -> false (baris ringkas di pesan sinyal tetap ada).
+ */
+async function sendAmdDetail(sock, msg, { jid, lang }, { coin, row, tick }) {
+  const { buildPhaseText, renderAmdChart } = require("./amd");
+  const { TF_LABEL: MKT_TF, fetchCandles, fmtUsd, fmtPct } = require("./market");
+  const st = row.amd;
+  if (!st || st.phase === "none") return false;
+
+  const candles = row.candles || (await fetchCandles(coin, row.tf));
+  const caption = t(lang, "amd.body", {
+    coin,
+    tf: MKT_TF[row.tf],
+    price: fmtUsd(tick.price),
+    change: fmtPct(tick.changePct),
+    phase: buildPhaseText(lang, st, candles, row.tf, tick.price),
+    minBars: AMD_CFG.RANGE_MIN_BARS,
+    maxAtr: AMD_CFG.RANGE_MAX_ATR,
+    confirmBars: AMD_CFG.CONFIRM_BARS,
+  });
+
+  // Render gagal (font/canvas bermasalah) -> tetap kirim versi teks supaya detail AMD tidak hilang.
+  let png = null;
+  try {
+    png = renderAmdChart({ candles, coin, tf: MKT_TF[row.tf], st });
+  } catch (err) {
+    console.log("[kripto] !signal chart AMD gagal, kirim teks saja:", err.message);
+  }
+  if (!png) await sock.sendMessage(jid, { text: caption }, { quoted: msg });
+  else if (caption.length <= CAPTION_MAX) await sock.sendMessage(jid, { image: png, caption }, { quoted: msg });
+  else {
+    await sock.sendMessage(jid, { image: png }, { quoted: msg });
+    await sock.sendMessage(jid, { text: caption });
+  }
+  return true;
+}
+
+/**
+ * !signal <koin> [tf|semua] (juga !sinyal, !amd, !powerof3, !po3). Tanpa Gemini.
+ * TF gagal ditandai, tidak menggagalkan seluruh perintah.
+ * Satu TF: chart AMD + penjelasan fase dikirim dulu, lalu skenario sinyal (tanpa baris AMD ringkas, sudah ada di chart).
+ * Banyak TF: satu pesan, tiap TF berisi skenario + satu baris AMD.
+ */
 async function runSinyal(sock, msg, ctx, { coin, tfs }) {
   const { jid, lang } = ctx;
   const { fetchTicker, fmtUsd, UnsupportedCoinError } = require("./market");
@@ -372,6 +464,16 @@ async function runSinyal(sock, msg, ctx, { coin, tfs }) {
     throw e || new Error("SINYAL_FAILED");
   }
 
+  // Satu TF: detail AMD (chart) dulu. Kalau gagal dikirim, baris ringkas tetap ditampilkan di pesan sinyal.
+  let amdSent = false;
+  if (rows.length === 1 && rows[0].bias) {
+    try {
+      amdSent = await sendAmdDetail(sock, msg, ctx, { coin, row: rows[0], tick });
+    } catch (err) {
+      console.log("[kripto] !signal detail AMD gagal:", err.message);
+    }
+  }
+
   const overall = ok.length > 1 ? computeOverallBias(rows.map((r) => ({ tf: r.tf, result: r.bias }))) : null;
   const text = formatSignal(lang, {
     coin,
@@ -380,11 +482,13 @@ async function runSinyal(sock, msg, ctx, { coin, tfs }) {
     overall,
     failedAny: rows.some((r) => !r.bias),
     limitedAny: ok.some((r) => r.limited),
+    amdLine: !amdSent,
   });
-  await sock.sendMessage(jid, { text }, { quoted: msg });
+  await sock.sendMessage(jid, { text }, amdSent ? undefined : { quoted: msg });
 }
 
-const SIGNAL_COMMANDS = { sinyal: { re: /^!(?:sinyal|signal)(?:\s+([\s\S]*))?$/i } };
+// !amd / !powerof3 / !po3 (command lama) sekarang masuk ke sini: satu command untuk skenario sinyal + kondisi AMD.
+const SIGNAL_COMMANDS = { sinyal: { re: /^!(?:sinyal|signal|amd|powerof3|po3)(?:\s+([\s\S]*))?$/i } };
 
 /** Format argumen sama persis dengan !bias: "btc" | "btc 4h" | "btc semua" | "4h btc". */
 function parseSignalArgs(name, raw) {
@@ -410,4 +514,7 @@ module.exports = {
   formatSignal,
   formatTfBlock,
   formatGuardLines,
+  formatAmdLine,
+  amdConflicts,
+  sendAmdDetail,
 };

@@ -299,7 +299,7 @@ const HHLL_ALERT_CONFIG = Object.freeze({
   CONCURRENCY: _posInt(process.env.HHLL_CONCURRENCY, 8),
 });
 
-// Accumulation / Manipulation / Distribution (AMD, "Power of 3"): !amd dan alarm !alertamd.
+// Accumulation / Manipulation / Distribution (AMD, "Power of 3"): !signal (dulu !amd) dan alarm !alertamd.
 //   Akumulasi   : range sempit (lebar <= RANGE_MAX_ATR x ATR) minimal RANGE_MIN_BARS candle closed, sideways, tepi atas & bawah tersentuh.
 //   Manipulasi  : satu candle closed menembus high/low range (wick) lalu close kembali ke dalam range (sweep / stop hunt).
 //   Distribusi  : setelah sweep, close pertama menembus swing berlawanan (market structure break, hhllCore.js) dalam CONFIRM_BARS candle.
@@ -315,9 +315,9 @@ const AMD_CONFIG = Object.freeze({
   DRIFT_MAX: _num(process.env.AMD_DRIFT_MAX, 0.6), // |close akhir - close awal| maksimum = 60% lebar range (kalau lebih = tren, bukan sideways)
   SWEEP_MIN_ATR: _num(process.env.AMD_SWEEP_MIN_ATR, 0.1), // tembusan minimal di luar tepi range (kelipatan ATR); lebih kecil = noise
   CONFIRM_BARS: _posInt(process.env.AMD_CONFIRM_BARS, 10), // batas candle setelah sweep untuk menunggu break struktur
-  STATE_LOOKBACK: _posInt(process.env.AMD_STATE_LOOKBACK, 12), // !amd: sweep sampai sekian candle terakhir masih dianggap fase berjalan
+  STATE_LOOKBACK: _posInt(process.env.AMD_STATE_LOOKBACK, 12), // !signal: sweep sampai sekian candle terakhir masih dianggap fase berjalan
   VOL_LOOKBACK: 20, // pembanding volume range akumulasi (info saja, bukan syarat)
-  CHART_BARS: 110, // jumlah candle yang digambar di chart !amd
+  CHART_BARS: 110, // jumlah candle yang digambar di chart AMD di !signal
 });
 
 const AMD_ALERT_CONFIG = Object.freeze({

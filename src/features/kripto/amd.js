@@ -3,7 +3,8 @@
 /**
  * features/kripto/amd.js
  * ------------------------------------------------------------------
- * !amd <koin> [tf]: kondisi Accumulation - Manipulation - Distribution (AMD / "Power of 3") saat ini.
+ * Chart + teks fase Accumulation - Manipulation - Distribution (AMD / "Power of 3"). Dipanggil dari signal.js (!signal <koin> <tf>)
+ * dan alertMonitor.js (!alertamd); command !amd lama sudah digabung ke !signal.
  * Fase yang sedang berjalan (akumulasi / manipulasi / distribusi / sweep gagal), range akumulasinya, level
  * konfirmasi, plus chart berlabel. Bullish dan bearish. Data langsung dari Binance (market.js).
  * Aturan deteksi ada di amdCore.js (sama persis dengan yang dipakai alarm !alertamd); R1/S1 di dalam range
@@ -13,12 +14,10 @@
 const { createCanvas } = require("@napi-rs/canvas");
 const { t } = require("../../i18n");
 const { C, fontFamily, fmtPrice, niceStep, tickLabel } = require("./chartKit");
-const { TF_LABEL, fetchCandles, fetchTicker, fmtUsd, fmtLevel, fmtPct, pctFrom } = require("./market");
-const { computeSnr } = require("./snr");
+const { fmtUsd, fmtLevel, fmtPct, pctFrom } = require("./market");
 const { fmtWhen } = require("./hhll");
-const { detectAmd, CFG } = require("./amdCore");
+const { CFG } = require("./amdCore");
 
-const CAPTION_MAX = 1000; // batas aman caption gambar WhatsApp (1024)
 const AMBER = "#f5a524";
 
 const phaseColor = (st) => (st.phase === "accumulation" ? C.arrow : st.phase === "manipulation" || st.phase === "failed" ? AMBER : st.dir === "bullish" ? C.up : C.down);
@@ -413,42 +412,4 @@ function buildPhaseText(lang, st, candles, tf, price) {
   return t(lang, `amd.phase.failed.${dirKey}`, vars);
 }
 
-async function runAmd(sock, msg, { jid, lang }, { coin, tf }) {
-  const [candles, tick] = await Promise.all([fetchCandles(coin, tf), fetchTicker(coin)]);
-  const st = candles.length >= CFG.MIN_CANDLES ? detectAmd(candles, { computeSnr }) : null;
-  if (!st || st.phase === "none") {
-    await sock.sendMessage(jid, { text: t(lang, "amd.none", { coin, tf: TF_LABEL[tf] }) }, { quoted: msg });
-    return;
-  }
-
-  const caption = t(lang, "amd.body", {
-    coin,
-    tf: TF_LABEL[tf],
-    price: fmtUsd(tick.price),
-    change: fmtPct(tick.changePct),
-    phase: buildPhaseText(lang, st, candles, tf, tick.price),
-    minBars: CFG.RANGE_MIN_BARS,
-    maxAtr: CFG.RANGE_MAX_ATR,
-    confirmBars: CFG.CONFIRM_BARS,
-  });
-
-  // Kalau render gagal (mis. font/canvas bermasalah) tetap kirim versi teks supaya fitur tidak mati total.
-  let png = null;
-  try {
-    png = renderAmdChart({ candles, coin, tf: TF_LABEL[tf], st });
-  } catch (err) {
-    console.log("[kripto] !amd chart gagal, kirim teks saja:", err.message);
-  }
-
-  if (!png) {
-    await sock.sendMessage(jid, { text: caption }, { quoted: msg });
-  } else if (caption.length <= CAPTION_MAX) {
-    await sock.sendMessage(jid, { image: png, caption }, { quoted: msg });
-  } else {
-    // Batas caption WhatsApp 1024 karakter -> kalau lebih, gambar dan teks dikirim terpisah.
-    await sock.sendMessage(jid, { image: png }, { quoted: msg });
-    await sock.sendMessage(jid, { text: caption });
-  }
-}
-
-module.exports = { runAmd, renderAmdChart, buildPhaseText };
+module.exports = { renderAmdChart, buildPhaseText };
