@@ -8,10 +8,9 @@
  *   !signal all 1h 4h      -> semua koin, beberapa timeframe pilihan
  *   (urutan bebas: "!signal 4h all" sama saja)
  *
- * Hasil: satu blok per timeframe. Tiap blok berisi
- *   - ringkasan jumlah VALID / TUNGGU / HINDARI / SIDEWAYS,
- *   - TABEL skenario yang VALID (arah, entry, SL, TP1, RR),
- *   - daftar singkat koin TUNGGU, HINDARI, SIDEWAYS, dan data kurang.
+ * Hasil dikirim sebagai SATU PDF (signalAllPdf.js), satu bagian per timeframe. Tiap bagian berisi ringkasan
+ * jumlah VALID / TUNGGU / HINDARI / SIDEWAYS, tabel VALID (arah, entry, SL, TP1, RR), tabel TUNGGU dan HINDARI
+ * (lengkap dengan alasan), serta daftar koin SIDEWAYS dan data kurang. Chat hanya menerima caption ringkas.
  *
  * Status "valid" = status Sudden Move Guard (signal.js -> suddenMove.assessEntry) yang sama dengan
  * !signal <koin>; tidak ada rumus baru, jadi hasilnya selalu konsisten dengan command per koin.
@@ -23,12 +22,11 @@
 const { t } = require("../../i18n");
 const { getAvailableCoins } = require("./kriptoList");
 const { getMarketRows } = require("./pasar");
-const { fetchTicker, fmtLevel } = require("./market");
+const { fetchTicker } = require("./market");
 
 const CONCURRENCY = 6; // koin diproses paralel; tiap koin menarik semua TF terpilih sekaligus
 const TTL_MS = 3 * 60_000;
 const MIN_SUCCESS_RATIO = 0.5;
-const MSG_MAX = 3000; // batas aman satu pesan WhatsApp (sama dengan kriptoList.js)
 const TF_LABEL = { "15M": "15m", "1H": "1H", "4H": "4H", "1D": "1D" };
 
 const cache = new Map(); // key -> { at, data }
@@ -137,112 +135,39 @@ async function collectAll(lang, tfs) {
 }
 
 // =====================================================================
-// Format pesan
-// =====================================================================
-const pad = (s, n) => String(s).padEnd(n, " ");
-const fmtRR = (v) => (v == null ? "-" : v.toFixed(2).replace(/\.?0+$/, ""));
-const dirLetter = (dir) => (dir === "long" ? "L" : "S");
-
-/** Pecah baris-baris jadi beberapa pesan <= MSG_MAX. `wrap` membungkus tiap pesan dengan ``` (tabel monospace). */
-function chunkLines(lines, { head = "", repeatHead = [], wrap = false } = {}) {
-  const wrapIt = (arr) => (wrap ? ["```", ...arr, "```"] : arr);
-  const out = [];
-  let cur = [...repeatHead];
-  let len = head.length + repeatHead.join("\n").length;
-  for (const line of lines) {
-    if (len + line.length + 1 > MSG_MAX - 8 && cur.length > repeatHead.length) {
-      out.push(cur);
-      cur = [...repeatHead];
-      len = repeatHead.join("\n").length;
-    }
-    cur.push(line);
-    len += line.length + 1;
-  }
-  if (cur.length) out.push(cur);
-  return out.map((arr, i) => (i === 0 && head ? `${head}\n` : "") + wrapIt(arr).join("\n"));
-}
-
-/** Tabel skenario VALID (monospace). */
-function validTable(lang, valid) {
-  const rows = valid.map((v) => {
-    const sc = v.sc;
-    return {
-      coin: v.ticker,
-      dir: `${dirLetter(v.dir)}${v.conditional ? "*" : ""}`,
-      entry: fmtLevel(sc.entry.price),
-      sl: fmtLevel(sc.sl.price),
-      tp1: fmtLevel(sc.tps[0].price),
-      rr: fmtRR(sc.tps[0].rr),
-    };
-  });
-  const hdr = { coin: t(lang, "sinyal.all.colCoin"), dir: t(lang, "sinyal.all.colDir"), entry: "Entry", sl: "SL", tp1: "TP1", rr: "RR" };
-  const w = {};
-  for (const k of Object.keys(hdr)) w[k] = Math.max(hdr[k].length, ...rows.map((r) => r[k].length));
-  const line = (r) => `${pad(r.coin, w.coin)} ${pad(r.dir, w.dir)} ${pad(r.entry, w.entry)} ${pad(r.sl, w.sl)} ${pad(r.tp1, w.tp1)} ${r.rr}`;
-  return { header: line(hdr), lines: rows.map(line) };
-}
-
-/** Pesan-pesan untuk satu TF. */
-function formatTf(lang, tf, groups, total, ver) {
-  const n = (k) => groups[k].length;
-  const head = t(lang, "sinyal.all.head", {
-    tf: TF_LABEL[tf],
-    ver,
-    total,
-    valid: n("VALID"),
-    wait: n("TUNGGU"),
-    avoid: n("HINDARI"),
-    side: n("SIDEWAYS"),
-  });
-
-  const messages = [];
-
-  // 1) Tabel VALID
-  if (n("VALID")) {
-    const tbl = validTable(lang, groups.VALID);
-    const title = `${head}\n\n${t(lang, "sinyal.all.validTitle", { n: n("VALID") })}`;
-    messages.push(...chunkLines(tbl.lines, { head: title, repeatHead: [tbl.header], wrap: true }));
-  } else {
-    messages.push(`${head}\n\n${t(lang, "sinyal.all.noneValid")}`);
-  }
-
-  // 2) Daftar singkat yang tidak valid (teks, bukan tabel: ratusan baris tabel tidak muat di layar HP)
-  const tag = (g) => (g.dir ? `${g.ticker}-${dirLetter(g.dir)}` : g.ticker);
-  const blocks = [];
-  for (const [key, titleKey] of [
-    ["TUNGGU", "sinyal.all.waitTitle"],
-    ["HINDARI", "sinyal.all.avoidTitle"],
-    ["SIDEWAYS", "sinyal.all.sideTitle"],
-    ["NODATA", "sinyal.all.nodataTitle"],
-  ]) {
-    if (!n(key)) continue;
-    blocks.push(`${t(lang, titleKey, { n: n(key) })}\n${groups[key].map(tag).join(", ")}`);
-  }
-  if (blocks.length) messages.push(...chunkLines(blocks.flatMap((b) => [b, ""]).slice(0, -1)));
-
-  return messages;
-}
-
-// =====================================================================
 // Runner
 // =====================================================================
+function stamp() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`;
+}
+
+/** Caption singkat di chat: hitungan per timeframe + disclaimer. Detail ada di PDF. */
+function buildCaption(lang, tfs, groupsByTf, total) {
+  const lines = tfs.map((tf) => {
+    const g = groupsByTf[tf];
+    return t(lang, "sinyal.all.caption.line", { tf: TF_LABEL[tf], valid: g.VALID.length, wait: g.TUNGGU.length, avoid: g.HINDARI.length, side: g.SIDEWAYS.length });
+  });
+  return [t(lang, "sinyal.all.caption.head", { total }), ...lines, "", t(lang, "sinyal.disclaimer")].join("\n");
+}
+
 async function runSinyalAll(sock, msg, ctx, { tfs }) {
   const { jid, lang } = ctx;
-  const { SIGNAL_VERSION } = require("./signal");
+  const { buildSignalAllPdf } = require("./signalAllPdf");
 
   await sock.sendMessage(jid, { text: t(lang, "sinyal.all.scanning", { tfs: tfs.map((x) => TF_LABEL[x]).join(", ") }) }, { quoted: msg });
 
   const { coins, total } = await collectAll(lang, tfs);
+  const groupsByTf = Object.fromEntries(tfs.map((tf) => [tf, groupByTf(coins, tf)]));
 
-  let first = true;
-  for (const tf of tfs) {
-    const groups = groupByTf(coins, tf);
-    for (const text of formatTf(lang, tf, groups, total, SIGNAL_VERSION)) {
-      await sock.sendMessage(jid, { text }, first ? { quoted: msg } : undefined);
-      first = false;
-    }
-  }
-  await sock.sendMessage(jid, { text: `${t(lang, "sinyal.all.note")}\n\n${t(lang, "sinyal.disclaimer")}` });
+  const buf = await buildSignalAllPdf(lang, { tfs, total, groupsByTf });
+  const tfPart = tfs.length === 4 ? "semua-TF" : tfs.map((x) => TF_LABEL[x]).join("-");
+  await sock.sendMessage(
+    jid,
+    { document: buf, mimetype: "application/pdf", fileName: `SIGNAL-semua-koin-${tfPart}-${stamp()}.pdf`, caption: buildCaption(lang, tfs, groupsByTf, total) },
+    { quoted: msg },
+  );
 }
 
-module.exports = { runSinyalAll, collectAll, classify, groupByTf, formatTf, chunkLines, validTable };
+module.exports = { runSinyalAll, collectAll, classify, groupByTf, buildCaption };
