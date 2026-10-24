@@ -33,7 +33,7 @@
 const { t } = require("../../i18n");
 const { SIGNAL_CONFIG: CFG } = require("../../config/indicatorConfig");
 const { computeEmas, atr: atrSeries } = require("./indicators");
-const { computeOverallBias, collectBias, confidenceLevel, parseBiasArgs } = require("./bias");
+const { computeOverallBias, collectBias, confidenceLevel, parseBiasArgs, BIAS_TFS } = require("./bias");
 const { computeProbability, formatProbLine, formatProbBasis, PROB_VERSION } = require("./probability");
 const sudden = require("./suddenMove");
 const { reasonText } = require("./suddenMoveText");
@@ -218,6 +218,7 @@ function computeScenario(input, cfg = CFG) {
  * Skenario semua TF yang diminta untuk satu koin. Skor bias = collectBias (sama persis dengan !bias),
  * candle yang sama dipakai untuk ATR dan level S/R, jadi tidak ada fetch tambahan.
  * TF gagal -> { tf, bias: null, scenario: {status:"nodata"}, err }, tidak menggagalkan TF lain.
+ * ctx.skipAmd = true -> AMD tidak dihitung (dipakai !signal all, yang hanya butuh status skenario).
  */
 async function collectSignal(coin, tfs, ctx) {
   const { computeLevels } = require("./market");
@@ -233,7 +234,7 @@ async function collectSignal(coin, tfs, ctx) {
     // AMD dari candle yang sama; gagal dihitung tidak boleh menggagalkan skenario sinyal.
     let amd = null;
     try {
-      amd = candles.length >= AMD_CFG.MIN_CANDLES ? detectAmd(candles, { computeSnr }) : null;
+      amd = !ctx.skipAmd && candles.length >= AMD_CFG.MIN_CANDLES ? detectAmd(candles, { computeSnr }) : null;
     } catch (err) {
       console.log(`[kripto] AMD ${coin} ${r.tf} gagal dihitung:`, err.message);
     }
@@ -445,7 +446,8 @@ async function sendAmdDetail(sock, msg, { jid, lang }, { coin, row, tick }) {
  * Satu TF: chart AMD + penjelasan fase dikirim dulu, lalu skenario sinyal (tanpa baris AMD ringkas, sudah ada di chart).
  * Banyak TF: satu pesan, tiap TF berisi skenario + satu baris AMD.
  */
-async function runSinyal(sock, msg, ctx, { coin, tfs }) {
+async function runSinyal(sock, msg, ctx, { coin, tfs, allCoins }) {
+  if (allCoins) return require("./signalAll").runSinyalAll(sock, msg, ctx, { tfs }); // !signal all [tf...] -> signalAll.js
   const { jid, lang } = ctx;
   const { fetchTicker, fmtUsd, UnsupportedCoinError } = require("./market");
   const stat = require("./statistik");
@@ -490,8 +492,25 @@ async function runSinyal(sock, msg, ctx, { coin, tfs }) {
 // !amd / !powerof3 / !po3 (command lama) sekarang masuk ke sini: satu command untuk skenario sinyal + kondisi AMD.
 const SIGNAL_COMMANDS = { sinyal: { re: /^!(?:sinyal|signal|amd|powerof3|po3)(?:\s+([\s\S]*))?$/i } };
 
-/** Format argumen sama persis dengan !bias: "btc" | "btc 4h" | "btc semua" | "4h btc". */
+/**
+ * Format argumen:
+ *   satu koin : sama persis dengan !bias -> "btc" | "btc 4h" | "btc semua" | "4h btc"
+ *   semua koin: tanpa koin, pakai "all"/"semua" -> { allCoins: true, tfs }
+ *               "all"        -> semua koin, semua timeframe
+ *               "all 4h"     -> semua koin, hanya 4H   (juga "4h all", "all 1h 4h")
+ */
 function parseSignalArgs(name, raw) {
+  const tokens = String(raw || "").trim().split(/\s+/).filter(Boolean);
+  const ups = tokens.map((x) => x.toUpperCase());
+  const hasAll = ups.includes("ALL") || ups.includes("SEMUA");
+  const rest = ups.filter((x) => x !== "ALL" && x !== "SEMUA");
+  if (hasAll && rest.length && rest.every((x) => BIAS_TFS.includes(x))) {
+    const tfs = BIAS_TFS.filter((x) => rest.includes(x)); // urutan tampil tetap 15m, 1H, 4H, 1D
+    return { allCoins: true, tfs };
+  }
+  if (hasAll && !rest.length && ups.filter((x) => x === "ALL" || x === "SEMUA").length === 1) {
+    return { allCoins: true, tfs: [...BIAS_TFS] };
+  }
   return parseBiasArgs(name, raw);
 }
 
