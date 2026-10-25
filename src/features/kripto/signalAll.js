@@ -8,6 +8,13 @@
  *   !signal all 1h 4h      -> semua koin, beberapa timeframe pilihan
  *   (urutan bebas: "!signal 4h all" sama saja)
  *
+ * Filter status (opsional, boleh digabung dengan timeframe, urutan bebas):
+ *   !signal all valid           -> PDF hanya berisi koin VALID
+ *   !signal all tunggu          -> hanya TUNGGU
+ *   !signal all tidak valid     -> hanya HINDARI ("hindari" / "invalid" / "avoid" juga bisa)
+ *   !signal all sideways        -> hanya SIDEWAYS
+ *   !signal all valid tunggu 4h -> VALID + TUNGGU di 4H
+ *
  * Hasil dikirim sebagai SATU PDF (signalAllPdf.js), satu bagian per timeframe. Tiap bagian berisi ringkasan
  * jumlah VALID / TUNGGU / HINDARI / SIDEWAYS, tabel VALID (arah, entry, SL, TP1, RR), tabel TUNGGU dan HINDARI
  * (lengkap dengan alasan), serta daftar koin SIDEWAYS dan data kurang. Chat hanya menerima caption ringkas.
@@ -143,29 +150,46 @@ function stamp() {
   return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`;
 }
 
-/** Caption singkat di chat: hitungan per timeframe + disclaimer. Detail ada di PDF. */
-function buildCaption(lang, tfs, groupsByTf, total) {
-  const lines = tfs.map((tf) => {
-    const g = groupsByTf[tf];
-    return t(lang, "sinyal.all.caption.line", { tf: TF_LABEL[tf], valid: g.VALID.length, wait: g.TUNGGU.length, avoid: g.HINDARI.length, side: g.SIDEWAYS.length });
-  });
-  return [t(lang, "sinyal.all.caption.head", { total }), ...lines, "", t(lang, "sinyal.disclaimer")].join("\n");
+const ALL_STATUS = ["VALID", "TUNGGU", "HINDARI", "SIDEWAYS"];
+const PART_KEY = { VALID: "valid", TUNGGU: "wait", HINDARI: "avoid", SIDEWAYS: "side" };
+
+/** Normalisasi filter status: kosong / tidak valid = semua status. */
+function normalizeOnly(only) {
+  const o = ALL_STATUS.filter((k) => (only || []).includes(k));
+  return o.length ? o : [...ALL_STATUS];
 }
 
-async function runSinyalAll(sock, msg, ctx, { tfs }) {
+/** Caption singkat di chat: hitungan per timeframe (hanya status yang dipilih) + disclaimer. Detail ada di PDF. */
+function buildCaption(lang, tfs, groupsByTf, total, only) {
+  const sel = normalizeOnly(only);
+  const filtered = sel.length < ALL_STATUS.length;
+  const lines = tfs.map((tf) => {
+    const g = groupsByTf[tf];
+    const parts = sel.map((k) => t(lang, `sinyal.all.part.${PART_KEY[k]}`, { n: g[k].length }));
+    return `*${TF_LABEL[tf]}*: ${parts.join(" | ")}`;
+  });
+  const head = [t(lang, "sinyal.all.caption.head", { total })];
+  if (filtered) head.push(t(lang, "sinyal.all.caption.filter", { f: sel.map((k) => t(lang, `sinyal.all.status.${PART_KEY[k]}`)).join(", ") }));
+  return [...head, ...lines, "", t(lang, "sinyal.disclaimer")].join("\n");
+}
+
+async function runSinyalAll(sock, msg, ctx, { tfs, only }) {
   const { jid, lang } = ctx;
   const { buildSignalAllPdf } = require("./signalAllPdf");
+  const sel = normalizeOnly(only);
+  const filtered = sel.length < ALL_STATUS.length;
 
   await sock.sendMessage(jid, { text: t(lang, "sinyal.all.scanning", { tfs: tfs.map((x) => TF_LABEL[x]).join(", ") }) }, { quoted: msg });
 
   const { coins, total } = await collectAll(lang, tfs);
   const groupsByTf = Object.fromEntries(tfs.map((tf) => [tf, groupByTf(coins, tf)]));
 
-  const buf = await buildSignalAllPdf(lang, { tfs, total, groupsByTf });
+  const buf = await buildSignalAllPdf(lang, { tfs, total, groupsByTf, only: sel });
   const tfPart = tfs.length === 4 ? "semua-TF" : tfs.map((x) => TF_LABEL[x]).join("-");
+  const statusPart = filtered ? `${sel.map((k) => PART_KEY[k]).join("-")}-` : "";
   await sock.sendMessage(
     jid,
-    { document: buf, mimetype: "application/pdf", fileName: `SIGNAL-semua-koin-${tfPart}-${stamp()}.pdf`, caption: buildCaption(lang, tfs, groupsByTf, total) },
+    { document: buf, mimetype: "application/pdf", fileName: `SIGNAL-${statusPart}semua-koin-${tfPart}-${stamp()}.pdf`, caption: buildCaption(lang, tfs, groupsByTf, total, only) },
     { quoted: msg },
   );
 }

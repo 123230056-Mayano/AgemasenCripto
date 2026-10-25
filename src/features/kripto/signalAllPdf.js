@@ -9,6 +9,7 @@
  *   - tabel TUNGGU  : Koin | Arah | Entry | Alasan
  *   - tabel HINDARI : Koin | Arah | Entry | Alasan
  *   - daftar koin SIDEWAYS dan koin dengan data kurang (grid ticker, tidak punya entry).
+ * Parameter `only` (mis. ["VALID"]) membatasi bagian yang dicetak; tanpa itu semua status dicetak.
  * Halaman terakhir: cara membaca. Pakai pdf-lib + Helvetica seperti allPdf.js (tanpa dependency baru).
  */
 
@@ -55,6 +56,10 @@ const TXT = {
     descSIDEWAYS: "Bias netral, tidak ada entry. Tunggu close keluar range.",
     descNODATA: "Data kurang atau gagal diambil.",
     none: "Belum ada skenario valid di timeframe ini.",
+    noneTUNGGU: "Tidak ada koin berstatus tunggu di timeframe ini.",
+    noneHINDARI: "Tidak ada koin berstatus hindari di timeframe ini.",
+    noneSIDEWAYS: "Tidak ada koin sideways di timeframe ini.",
+    filterNote: (f) => `Filter: ${f}`,
     cols: { coin: "Koin", dir: "Arah", entry: "Entry", sl: "SL", tp1: "TP1", rr: "RR", why: "Alasan" },
     cont: "(lanjutan)",
     page: (i, n) => `Halaman ${i}/${n}`,
@@ -85,6 +90,10 @@ const TXT = {
     descSIDEWAYS: "Neutral bias, no entry. Wait for a close outside the range.",
     descNODATA: "Insufficient data or failed to load.",
     none: "No valid scenario on this timeframe yet.",
+    noneTUNGGU: "No coin with a wait status on this timeframe.",
+    noneHINDARI: "No coin with an avoid status on this timeframe.",
+    noneSIDEWAYS: "No sideways coin on this timeframe.",
+    filterNote: (f) => `Filter: ${f}`,
     cols: { coin: "Coin", dir: "Dir", entry: "Entry", sl: "SL", tp1: "TP1", rr: "RR", why: "Reason" },
     cont: "(continued)",
     page: (i, n) => `Page ${i}/${n}`,
@@ -289,12 +298,16 @@ function reasonOf(lang, g) {
   return rs.slice(0, 2).map((r) => reasonText(lang, r)).join("; ");
 }
 
-function addTfSection(ctx, lang, tx, tf, groups, total, now) {
-  const head = { title: tx.title(TF_LABEL[tf]), sub: tx.sub(total, now), cont: tx.cont };
+function addTfSection(ctx, lang, tx, tf, groups, total, now, only) {
+  const show = (k) => only.includes(k);
+  const filtered = only.length < 4;
+  const sub = filtered ? `${tx.sub(total, now)}  |  ${tx.filterNote(only.map((k) => tx[k]).join(", "))}` : tx.sub(total, now);
+  const head = { title: tx.title(TF_LABEL[tf]), sub, cont: tx.cont };
   let st = newPage(ctx, { title: head.title, sub: head.sub });
   drawSummary(ctx, st, tx, groups);
 
   // VALID
+  if (show("VALID")) {
   st = ensure(ctx, st, 80, head);
   drawSectionTitle(ctx, st, tx, "VALID", groups.VALID.length);
   if (groups.VALID.length) {
@@ -321,12 +334,19 @@ function addTfSection(ctx, lang, tx, tf, groups, total, now) {
     st.page.drawText(ctx.clean(tx.none), { x: MARGIN + 12, y: st.y - 8, size: 9.5, font: ctx.reg, color: C.muted });
     st.y -= 44;
   }
+  }
 
   // TUNGGU & HINDARI: ada arah + entry, plus alasan
   for (const key of ["TUNGGU", "HINDARI"]) {
-    if (!groups[key].length) continue;
+    if (!show(key)) continue;
+    if (!groups[key].length && !filtered) continue; // tanpa filter, bagian kosong dilewati
     st = ensure(ctx, st, 80, head);
     drawSectionTitle(ctx, st, tx, key, groups[key].length);
+    if (!groups[key].length) {
+      st.page.drawText(ctx.clean(tx[`none${key}`]), { x: MARGIN + 12, y: st.y - 8, size: 9.5, font: ctx.reg, color: C.muted });
+      st.y -= 44;
+      continue;
+    }
     const cols = [
       { key: "coin", label: tx.cols.coin, w: 0.12 },
       { key: "dir", label: tx.cols.dir, w: 0.12 },
@@ -341,9 +361,15 @@ function addTfSection(ctx, lang, tx, tf, groups, total, now) {
 
   // SIDEWAYS & DATA KURANG: hanya daftar koin
   for (const key of ["SIDEWAYS", "NODATA"]) {
-    if (!groups[key].length) continue;
+    if (key === "NODATA" ? filtered : !show(key)) continue; // data kurang hanya tampil tanpa filter
+    if (!groups[key].length && !filtered) continue;
     st = ensure(ctx, st, 60, head);
     drawSectionTitle(ctx, st, tx, key, groups[key].length);
+    if (!groups[key].length) {
+      st.page.drawText(ctx.clean(tx[`none${key}`]), { x: MARGIN + 12, y: st.y - 8, size: 9.5, font: ctx.reg, color: C.muted });
+      st.y -= 44;
+      continue;
+    }
     st.y -= 6;
     st = drawGrid(ctx, st, head, groups[key].map((g) => g.ticker));
   }
@@ -366,14 +392,15 @@ function addHowPage(ctx, tx) {
 
 /**
  * @param {string} lang
- * @param {{ tfs: string[], total: number, groupsByTf: Record<string, object> }} data
+ * @param {{ tfs: string[], total: number, groupsByTf: Record<string, object>, only?: string[] }} data
  * @returns {Promise<Buffer>}
  */
-async function buildSignalAllPdf(lang, { tfs, total, groupsByTf }) {
+async function buildSignalAllPdf(lang, { tfs, total, groupsByTf, only }) {
+  const sel = ["VALID", "TUNGGU", "HINDARI", "SIDEWAYS"].filter((k) => !only || !only.length || only.includes(k));
   const tx = TXT[lang] || TXT.id;
   const ctx = await createDoc(tx.title(tfs.map((x) => TF_LABEL[x]).join(", ")));
   const now = fmtNow();
-  for (const tf of tfs) addTfSection(ctx, lang, tx, tf, groupsByTf[tf], total, now);
+  for (const tf of tfs) addTfSection(ctx, lang, tx, tf, groupsByTf[tf], total, now, sel);
   addHowPage(ctx, tx);
   drawFooters(ctx, tx);
   return Buffer.from(await ctx.pdf.save());

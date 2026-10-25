@@ -446,8 +446,8 @@ async function sendAmdDetail(sock, msg, { jid, lang }, { coin, row, tick }) {
  * Satu TF: chart AMD + penjelasan fase dikirim dulu, lalu skenario sinyal (tanpa baris AMD ringkas, sudah ada di chart).
  * Banyak TF: satu pesan, tiap TF berisi skenario + satu baris AMD.
  */
-async function runSinyal(sock, msg, ctx, { coin, tfs, allCoins }) {
-  if (allCoins) return require("./signalAll").runSinyalAll(sock, msg, ctx, { tfs }); // !signal all [tf...] -> signalAll.js
+async function runSinyal(sock, msg, ctx, { coin, tfs, allCoins, only }) {
+  if (allCoins) return require("./signalAll").runSinyalAll(sock, msg, ctx, { tfs, only }); // !signal all [status] [tf...] -> signalAll.js
   const { jid, lang } = ctx;
   const { fetchTicker, fmtUsd, UnsupportedCoinError } = require("./market");
   const stat = require("./statistik");
@@ -492,24 +492,55 @@ async function runSinyal(sock, msg, ctx, { coin, tfs, allCoins }) {
 // !amd / !powerof3 / !po3 (command lama) sekarang masuk ke sini: satu command untuk skenario sinyal + kondisi AMD.
 const SIGNAL_COMMANDS = { sinyal: { re: /^!(?:sinyal|signal|amd|powerof3|po3)(?:\s+([\s\S]*))?$/i } };
 
+// Kata filter status untuk !signal all (id + en). "tidak valid" = HINDARI (skenario ada, tapi kondisinya buruk).
+const STATUS_WORDS = {
+  VALID: "VALID",
+  TUNGGU: "TUNGGU",
+  WAIT: "TUNGGU",
+  HINDARI: "HINDARI",
+  AVOID: "HINDARI",
+  INVALID: "HINDARI",
+  TIDAKVALID: "HINDARI",
+  SIDEWAYS: "SIDEWAYS",
+  RANGE: "SIDEWAYS",
+};
+const STATUS_ORDER = ["VALID", "TUNGGU", "HINDARI", "SIDEWAYS"];
+
 /**
  * Format argumen:
  *   satu koin : sama persis dengan !bias -> "btc" | "btc 4h" | "btc semua" | "4h btc"
- *   semua koin: tanpa koin, pakai "all"/"semua" -> { allCoins: true, tfs }
- *               "all"        -> semua koin, semua timeframe
- *               "all 4h"     -> semua koin, hanya 4H   (juga "4h all", "all 1h 4h")
+ *   semua koin: tanpa koin, pakai "all"/"semua" -> { allCoins: true, tfs, only? }
+ *               "all"             -> semua koin, semua timeframe, semua status
+ *               "all 4h"          -> semua koin, hanya 4H   (juga "4h all", "all 1h 4h")
+ *               "all valid"       -> hanya koin VALID
+ *               "all tunggu"      -> hanya koin TUNGGU
+ *               "all tidak valid" -> hanya koin HINDARI ("hindari" / "invalid" / "avoid" juga bisa)
+ *               "all valid tunggu 4h" -> gabungan bebas; urutan token bebas
+ *   "valid" / "tunggu" / "hindari" tanpa koin juga dianggap !signal all <status>.
+ *   `only` = daftar status yang ditampilkan; tidak ada = tampilkan semua.
  */
 function parseSignalArgs(name, raw) {
-  const tokens = String(raw || "").trim().split(/\s+/).filter(Boolean);
+  // "tidak valid" / "gak valid" / "not valid" -> satu kata supaya tidak terbaca sebagai koin "TIDAK"
+  const norm = String(raw || "").replace(/\b(?:tidak|tak|gak|ga|nggak|ngga|not)\s+valid\b/gi, "tidakvalid");
+  const tokens = norm.trim().split(/\s+/).filter(Boolean);
   const ups = tokens.map((x) => x.toUpperCase());
-  const hasAll = ups.includes("ALL") || ups.includes("SEMUA");
-  const rest = ups.filter((x) => x !== "ALL" && x !== "SEMUA");
-  if (hasAll && rest.length && rest.every((x) => BIAS_TFS.includes(x))) {
+
+  const statuses = [...new Set(ups.map((x) => STATUS_WORDS[x]).filter(Boolean))];
+  const rest0 = ups.filter((x) => !STATUS_WORDS[x]);
+  const hasAll = rest0.includes("ALL") || rest0.includes("SEMUA");
+  const rest = rest0.filter((x) => x !== "ALL" && x !== "SEMUA");
+  const only = statuses.length ? STATUS_ORDER.filter((x) => statuses.includes(x)) : undefined;
+  const withOnly = (o) => (only ? { ...o, only } : o);
+
+  // Filter status tanpa kata "all" hanya sah kalau tidak ada koin (token sisanya timeframe saja).
+  const allCoinsMode = hasAll || (only && rest.every((x) => BIAS_TFS.includes(x)));
+
+  if (allCoinsMode && rest.length && rest.every((x) => BIAS_TFS.includes(x))) {
     const tfs = BIAS_TFS.filter((x) => rest.includes(x)); // urutan tampil tetap 15m, 1H, 4H, 1D
-    return { allCoins: true, tfs };
+    return withOnly({ allCoins: true, tfs });
   }
-  if (hasAll && !rest.length && ups.filter((x) => x === "ALL" || x === "SEMUA").length === 1) {
-    return { allCoins: true, tfs: [...BIAS_TFS] };
+  if (allCoinsMode && !rest.length && rest0.filter((x) => x === "ALL" || x === "SEMUA").length <= 1) {
+    return withOnly({ allCoins: true, tfs: [...BIAS_TFS] });
   }
   return parseBiasArgs(name, raw);
 }
