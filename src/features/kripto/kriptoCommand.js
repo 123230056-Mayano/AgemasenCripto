@@ -35,6 +35,7 @@
  *   !watch / !unwatch / !watchlist / !alert / !alertlevel / !alerts / !hapusalert /
  *   !harian / !stopharian -> watchlist & alert pribadi (watchlist.js, alertMonitor.js)
  *   !kurs / !konversi / !tf -> utilitas (utilitas.js)
+ *   !alertdusdt [tf] | list | off | hapus <id|semua>  (alarm USDT.D masuk golden zone Fibonacci, dusdtAlertCommand.js)
  *   !dusdt [tf]         -> USDT Dominance (USDT.D) seperti satu koin: nilai, perubahan, arah + HHLL + Fib (dusdt.js)
  *
  * [tf] = 15m | 1H | 4H | 1D; kosong -> default pengguna (awal 4H).
@@ -67,6 +68,7 @@ const { AMDALERT_COMMANDS, AMDALERT_RUNNERS, parseAmdAlertArgs } = require("./am
 const { WATCH_COMMANDS, WATCH_RUNNERS, parseWatchArgs } = require("./watchlist");
 const { UTIL_COMMANDS, UTIL_RUNNERS, parseUtilArgs } = require("./utilitas");
 const { DUSDT_COMMANDS, DUSDT_RUNNERS, parseDusdtArgs } = require("./dusdt");
+const { DUSDTALERT_COMMANDS, DUSDTALERT_RUNNERS, parseDusdtAlertArgs } = require("./dusdtAlertCommand");
 const { EMA_PERIODS, CROSS_LOOKBACK, computeEmas, classifyTrendAuto, detectCross, detectCrossStatuses } = require("./indicators");
 const {
   TIMEFRAMES,
@@ -576,6 +578,19 @@ async function handleKriptoCommand(sock, msg, { jid, text, lang }) {
       }
     }
   }
+  // Alarm USDT.D masuk golden zone (!alertdusdt) -> lihat dusdtAlertCommand.js
+  let isDusdtAlert = false;
+  if (!name) {
+    for (const [key, def] of Object.entries(DUSDTALERT_COMMANDS)) {
+      const m = text.match(def.re);
+      if (m) {
+        name = key;
+        match = m;
+        isDusdtAlert = true;
+        break;
+      }
+    }
+  }
   // USDT Dominance (!dusdt [tf]) -> lihat dusdt.js
   let isDusdt = false;
   if (!name) {
@@ -606,6 +621,7 @@ async function handleKriptoCommand(sock, msg, { jid, text, lang }) {
   else if (isAmdAlert) args = parseAmdAlertArgs(name, match[1] || "", getDefaultTf(senderId));
   else if (isWatch) args = parseWatchArgs(name, match[1] || "");
   else if (isUtil) args = parseUtilArgs(name, match[1] || "");
+  else if (isDusdtAlert) args = parseDusdtAlertArgs(name, match[1] || "", getDefaultTf(senderId));
   else if (isDusdt) args = parseDusdtArgs(name, match[1] || "", getDefaultTf(senderId));
   else if (name === "list") args = { coin: null, coin2: null, tf: null, keyword: match[1] || "" };
   else args = parseArgs(match[1] || "", COMMANDS[name]);
@@ -683,6 +699,10 @@ async function handleKriptoCommand(sock, msg, { jid, text, lang }) {
     }
     if (isUtil) {
       await UTIL_RUNNERS[name](sock, msg, { jid, lang, senderId }, args);
+      return true;
+    }
+    if (isDusdtAlert) {
+      await DUSDTALERT_RUNNERS[name](sock, msg, { jid, lang, senderId }, args);
       return true;
     }
     if (isDusdt) {

@@ -580,13 +580,24 @@ function renderDusdtCharts(r) {
       console.log("[dusdt] chart HHLL gagal:", err.message);
     }
   }
+  out.chart = renderDusdtChart(r);
+  return out;
+}
+
+/**
+ * Hanya grafik lengkap (sama dengan !chart: EMA, S/R, Fib + golden zone, MACD, RSI). Dipakai juga alarm !alertdusdt.
+ * @returns {Buffer|null} PNG, atau null kalau candle kurang / render gagal
+ */
+function renderDusdtChart(r) {
+  const candles = r.candles;
+  if (!candles || candles.length < 10) return null;
   try {
     const { resistance, support } = computeLevels(candles, r.level);
-    out.chart = renderChart({ candles, coin: "USDT.D", tf: r.tfLabel, resistance, support, fib: r.fib, title });
+    return renderChart({ candles, coin: "USDT.D", tf: r.tfLabel, resistance, support, fib: r.fib, title: `USDT.D  ${r.tfLabel}` });
   } catch (err) {
     console.log("[dusdt] chart gagal:", err.message);
+    return null;
   }
-  return out;
 }
 
 async function runDusdt(sock, msg, { jid, lang }, { tf }) {
@@ -623,6 +634,7 @@ module.exports = {
   buildCandles,
   buildStructure,
   renderDusdtCharts,
+  renderDusdtChart,
   ratioWindow,
   btcMove,
   direction,

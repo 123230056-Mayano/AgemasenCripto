@@ -17,6 +17,8 @@
  *     Mesinnya di hhllAlertEngine.js; banyak kejadian dikirim sebagai 1 PDF per penerima.
  *   - alarm Accumulation / Manipulation / Distribution (!alertamd): sweep range (dini) + break struktur (konfirmasi), dari candle closed.
  *     Mesinnya di amdAlertEngine.js; tiap kejadian dikirim sebagai gambar chart + caption berisi rencana SL/TP.
+ *   - alarm USDT.D masuk golden zone Fibonacci 0.5-0.618 (!alertdusdt): level USDT.D terkini vs swing fib candle closed USDT.D.
+ *     Mesinnya di dusdtAlertEngine.js; dikirim sebagai gambar chart + caption (teks saja kalau chart gagal dibuat).
  *   - alarm indikator lanjutan (!alertind, item 10): bias berubah + crossover baru, mode closed (tiap candle tutup)
  *     atau live (refresh berkala, candle belum closed ditandai jelas). Mesinnya di advAlertEngine.js; di sini hanya
  *     dibuat satu engine dan timer-nya. Tidak ada WebSocket (opsi 3 menunggu keputusan client).
@@ -69,7 +71,9 @@ const { createHhllEngine } = require("./hhllAlertEngine");
 const { buildHhllPdf } = require("./hhllPdf");
 const { createAmdEngine } = require("./amdAlertEngine");
 const { renderAmdChart } = require("./amd");
-const { ADV_ALERT_CONFIG: ADV, SNR_ALERT_CONFIG: SNR, SIGNAL_ALERT_CONFIG: SIGCFG, HHLL_ALERT_CONFIG: HHLL, AMD_ALERT_CONFIG: AMDCFG, POSITION_CONFIG: POSCFG } = require("../../config/indicatorConfig");
+const { createDusdtEngine } = require("./dusdtAlertEngine");
+const { getDusdt, renderDusdtChart } = require("./dusdt");
+const { ADV_ALERT_CONFIG: ADV, SNR_ALERT_CONFIG: SNR, SIGNAL_ALERT_CONFIG: SIGCFG, HHLL_ALERT_CONFIG: HHLL, AMD_ALERT_CONFIG: AMDCFG, DUSDT_ALERT_CONFIG: DUSDTCFG, POSITION_CONFIG: POSCFG } = require("../../config/indicatorConfig");
 
 const BINANCE = (process.env.BINANCE_BASE || "https://data-api.binance.vision").replace(/\/+$/, "");
 const POLL_MS = Math.max(10_000, Number(process.env.ALERT_POLL_MS) || 30_000);
@@ -91,6 +95,7 @@ let signalBusy = false;
 let posBusy = false;
 let hhllBusy = false;
 let amdBusy = false;
+let dusdtBusy = false;
 
 // ---------- helper ----------
 const langFor = (chat, userJid) => (chat.endsWith("@g.us") ? getLang("group", chat) : getLang("user", userJid));
@@ -661,6 +666,19 @@ const amdEngine = createAmdEngine({
 /** Pemeriksaan alarm AMD (dini + konfirmasi). Dipanggil timer; aman dipanggil manual untuk uji. */
 const checkAmdAlerts = (now) => (sockRef ? amdEngine.tick(now) : undefined);
 
+// ---------- alarm USDT.D masuk golden zone (!alertdusdt) ----------
+const dusdtEngine = createDusdtEngine({
+  store,
+  getDusdt,
+  notify,
+  notifyImage,
+  renderChart: renderDusdtChart,
+  langFor,
+});
+
+/** Pemeriksaan alarm USDT.D golden zone. Dipanggil timer; aman dipanggil manual untuk uji. */
+const checkDusdtAlerts = (now) => (sockRef ? dusdtEngine.tick(now) : undefined);
+
 // ---------- start ----------
 /** Dipanggil connection.js tiap socket baru dibuat; timer hanya dibuat sekali. */
 function setAlertSocket(sock) {
@@ -775,6 +793,18 @@ function setAlertSocket(sock) {
       amdBusy = false;
     }
   }, AMDCFG.CHECK_MS).unref?.();
+
+  setInterval(async () => {
+    if (dusdtBusy) return;
+    dusdtBusy = true;
+    try {
+      await checkDusdtAlerts();
+    } catch (err) {
+      console.log("[dusdtalert] pengecekan gagal:", err.message);
+    } finally {
+      dusdtBusy = false;
+    }
+  }, DUSDTCFG.CHECK_MS).unref?.();
 }
 
-module.exports = { setAlertSocket, notifyImage, checkPriceAlerts, checkDaily, checkDivergence, checkAdvAlerts, checkSnrAlerts, checkSignalAlerts, checkPositions, checkHhllAlerts, checkAmdAlerts, localNow, fetchPrices };
+module.exports = { setAlertSocket, notifyImage, checkPriceAlerts, checkDaily, checkDivergence, checkAdvAlerts, checkSnrAlerts, checkSignalAlerts, checkPositions, checkHhllAlerts, checkAmdAlerts, checkDusdtAlerts, localNow, fetchPrices };

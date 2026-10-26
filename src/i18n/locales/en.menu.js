@@ -95,6 +95,7 @@ Fufu... welcome, Trainer-san. Here's the list of available commands. For crypto 
 ▸ !alertsignal
 ▸ !alerthhll
 ▸ !alertamd
+▸ !alertdusdt
 ▸ !posisi
 ▸ !alerts
 ▸ !deletealert
@@ -516,5 +517,6 @@ The setting is saved permanently, so it won't reset when the bot restarts.`,
   "cmd.kurs": "💱 *!rate*\n\nShows the current 1 USDT to Rupiah rate.\n\n*Example:*\n```\n!rate\n```",
   "cmd.konversi": "🔄 *!convert <amount> <coin>*\n\nConverts an amount of a coin to USDT and Rupiah.\n\n*Example:*\n```\n!convert 2 SOL\n!convert 0.5 BTC\n```",
   "cmd.tf": "⏱️ *!tf <timeframe>*\n\nSaves your default timeframe, so [tf] in other commands can be left out. Options: 15m, 1H, 4H, 1D (initially 4H).\n\n*Example:*\n```\n!tf 1H\n```",
+  "cmd.alertdusdt": "🔔 *!alertdusdt <15m|1H|4H|1D>*\n\nAutomatic alert when USDT Dominance (USDT.D, same as !dusdt) *enters the Fibonacci golden zone* 0.5-0.618. The zone is computed from the Fibonacci swing of closed USDT.D candles on your chosen timeframe (same Fibonacci as in !dusdt and !fib) and compared with the current USDT.D value.\n\n*Examples:*\n```\n!alertdusdt 4h\n!alertdusdt 1d\n```\n\n*Manage:*\n```\n!alertdusdt list\n!alertdusdt delete d1\n!alertdusdt off\n```\n\n• The alert fires when the level *enters* the zone from outside, with a USDT.D chart (golden zone shaded), the current level, the zone bounds and the retracement depth.\n• After firing, it waits for the level to leave the zone (more than 0.03 of retracement depth past the edge) before it can fire again, so a level hovering on the zone edge won't flood the chat.\n• If the Fibonacci swing changes, the zone shifts with it and the status is recalculated without an alert.\n• Conditions that already exist when the alert is created are not announced; you're only told the current position. One alert per timeframe per chat.\n• The alert is sent to the chat where you created it (you're tagged in groups). Checked about every 2 minutes; USDT.D values can differ slightly from TradingView because the data providers differ.\n\n⚠️ Not a prediction. Educational, not investment advice.",
   "cmd.dusdt": "💵 *!dusdt [tf]*\n\nShows USDT Dominance (USDT.D) like a single coin: current value, change over your chosen timeframe, direction (up / down / sideways), plus USDT.D's Higher High / Lower Low structure and Fibonacci levels (in dominance percent). tf options: 15m, 1H, 4H, 1D. Empty = your default timeframe (!tf).\n\n*Example:*\n```\n!dusdt\n!dusdt 4h\n!dusdt 1d\n```\n\n_Market information only, not a trading signal or financial advice._",
 };

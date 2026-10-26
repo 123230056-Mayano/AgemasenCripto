@@ -74,7 +74,7 @@ const posInt = (v, d) => (Number.isInteger(Number(v)) && Number(v) > 0 ? Number(
 const MAX_DIV_ALERTS = posInt(process.env.DIV_ALERT_MAX_PER_USER, 10);
 const MAX_DIV_ALERTS_PER_CHAT = posInt(process.env.DIV_ALERT_MAX_PER_CHAT, 20);
 // Batas alarm indikator lanjutan (!alertind, item 10); angka sama dengan ADV_ALERT_CONFIG.
-const { ADV_ALERT_CONFIG, SNR_ALERT_CONFIG, SIGNAL_ALERT_CONFIG, HHLL_ALERT_CONFIG, AMD_ALERT_CONFIG, POSITION_CONFIG } = require("../config/indicatorConfig");
+const { ADV_ALERT_CONFIG, SNR_ALERT_CONFIG, SIGNAL_ALERT_CONFIG, HHLL_ALERT_CONFIG, AMD_ALERT_CONFIG, DUSDT_ALERT_CONFIG, POSITION_CONFIG } = require("../config/indicatorConfig");
 const MAX_ADV_ALERTS = ADV_ALERT_CONFIG.MAX_PER_USER;
 const MAX_ADV_ALERTS_PER_CHAT = ADV_ALERT_CONFIG.MAX_PER_CHAT;
 // Batas alarm titik balik S/R (!alertsnr); angka sama dengan SNR_ALERT_CONFIG.
@@ -93,6 +93,9 @@ const MAX_HHLL_ALERTS_PER_CHAT = HHLL_ALERT_CONFIG.MAX_PER_CHAT;
 // Batas alarm Accumulation / Manipulation / Distribution (!alertamd); angka sama dengan AMD_ALERT_CONFIG.
 const MAX_AMD_ALERTS = AMD_ALERT_CONFIG.MAX_PER_USER;
 const MAX_AMD_ALERTS_PER_CHAT = AMD_ALERT_CONFIG.MAX_PER_CHAT;
+// Batas alarm USDT.D masuk golden zone (!alertdusdt); angka sama dengan DUSDT_ALERT_CONFIG.
+const MAX_DUSDT_ALERTS = DUSDT_ALERT_CONFIG.MAX_PER_USER;
+const MAX_DUSDT_ALERTS_PER_CHAT = DUSDT_ALERT_CONFIG.MAX_PER_CHAT;
 // Kunci dedupe harus bertahan lebih lama dari jendela deteksi ulang (LOOKBACK + 1 candle 1D = 4 hari).
 const DIV_SENT_TTL_MS = posInt(process.env.DIV_SENT_TTL_DAYS, 7) * 86_400_000;
 
@@ -134,7 +137,7 @@ let failures = 0;
 let started = false;
 
 // ---------- helper ----------
-const isEmpty = (u) => !u || (!u.watch?.length && !u.alerts?.length && !u.divAlerts?.length && !u.advAlerts?.length && !u.snrAlerts?.length && !u.signalAlerts?.length && !u.hhllAlerts?.length && !u.amdAlerts?.length && !u.positions?.length && !u.daily && !u.tf);
+const isEmpty = (u) => !u || (!u.watch?.length && !u.alerts?.length && !u.divAlerts?.length && !u.advAlerts?.length && !u.snrAlerts?.length && !u.signalAlerts?.length && !u.hhllAlerts?.length && !u.amdAlerts?.length && !u.dusdtAlerts?.length && !u.positions?.length && !u.daily && !u.tf);
 const snap = (jid) => (isEmpty(users[jid]) ? null : JSON.stringify(users[jid]));
 const hasPending = () => dirtyUsers.size > 0 || dirtyClosed.size > 0 || dirtySent.size > 0 || pruneBefore != null;
 
@@ -454,6 +457,8 @@ function user(jid) {
   }
   if (!Array.isArray(u.amdAlerts)) u.amdAlerts = [];
   if (!u.nextAmdId) u.nextAmdId = 1;
+  if (!Array.isArray(u.dusdtAlerts)) u.dusdtAlerts = [];
+  if (!u.nextDusdtId) u.nextDusdtId = 1;
   if (!Array.isArray(u.positions)) u.positions = [];
   if (!u.nextPosId) u.nextPosId = 1;
   return u;
@@ -758,6 +763,65 @@ function allSnrAlerts() {
   const out = [];
   for (const [jid, u] of Object.entries(users)) {
     for (const a of u.snrAlerts || []) if (a.active !== false) out.push({ userJid: jid, sub: a });
+  }
+  return out;
+}
+
+// ---------- alarm USDT.D masuk golden zone (!alertdusdt) ----------
+/**
+ * dusdtAlerts: [{ id: "d1", chat, tf, createdAt, active: true,
+ *                 inZone: boolean|null,   // level USDT.D sedang di dalam golden zone? null = belum pernah dinilai
+ *                 swing: string|null }]   // penanda swing Fibonacci saat inZone dinilai (berganti -> disinkronkan ulang tanpa alarm)
+ * Tidak memakai kunci dedupe (wasSent / markSent): "masuk" dinilai dari perubahan status inZone, yang ikut tersimpan.
+ */
+const getDusdtAlerts = (jid) => [...user(jid).dusdtAlerts];
+
+/** @returns {object|"full"|"chatFull"|"exists"} */
+function addDusdtAlert(jid, sub) {
+  const u = user(jid);
+  if (u.dusdtAlerts.some((a) => a.chat === sub.chat && a.tf === sub.tf)) return "exists";
+  if (u.dusdtAlerts.length >= MAX_DUSDT_ALERTS) return "full";
+  if (countDusdtAlertsInChat(sub.chat) >= MAX_DUSDT_ALERTS_PER_CHAT) return "chatFull";
+  const entry = { ...sub, id: `d${u.nextDusdtId++}`, createdAt: Date.now(), active: true, inZone: null, swing: null };
+  u.dusdtAlerts.push(entry);
+  save(jid);
+  return entry;
+}
+
+function countDusdtAlertsInChat(chat) {
+  let n = 0;
+  for (const u of Object.values(users)) for (const a of u.dusdtAlerts || []) if (a.chat === chat) n++;
+  return n;
+}
+
+/** id boleh "d3" / "D3" / "3". @returns {boolean} */
+function removeDusdtAlert(jid, id) {
+  const u = user(jid);
+  const want = /^\d+$/.test(String(id)) ? `d${id}` : String(id).toLowerCase();
+  const i = u.dusdtAlerts.findIndex((a) => a.id === want);
+  if (i < 0) return false;
+  u.dusdtAlerts.splice(i, 1);
+  prune(jid);
+  save(jid);
+  return true;
+}
+
+/** @returns {number} jumlah alarm yang dihapus */
+function clearDusdtAlerts(jid) {
+  const u = user(jid);
+  const n = u.dusdtAlerts.length;
+  if (!n) return 0;
+  u.dusdtAlerts = [];
+  prune(jid);
+  save(jid);
+  return n;
+}
+
+/** Semua alarm USDT.D aktif semua user (untuk monitor). */
+function allDusdtAlerts() {
+  const out = [];
+  for (const [jid, u] of Object.entries(users)) {
+    for (const a of u.dusdtAlerts || []) if (a.active !== false) out.push({ userJid: jid, sub: a });
   }
   return out;
 }
@@ -1105,6 +1169,8 @@ module.exports = {
   MAX_ADV_ALERTS_PER_CHAT,
   MAX_SNR_ALERTS,
   MAX_SNR_ALERTS_PER_CHAT,
+  MAX_DUSDT_ALERTS,
+  MAX_DUSDT_ALERTS_PER_CHAT,
   MAX_SIGNAL_ALERTS,
   MAX_SIGNAL_ALERTS_PER_CHAT,
   MAX_POSITIONS,
@@ -1165,6 +1231,12 @@ module.exports = {
   clearHhllAlerts,
   allHhllAlerts,
   countHhllAlertsInChat,
+  getDusdtAlerts,
+  addDusdtAlert,
+  removeDusdtAlert,
+  clearDusdtAlerts,
+  allDusdtAlerts,
+  countDusdtAlertsInChat,
   getAmdAlerts,
   addAmdAlert,
   removeAmdAlert,

@@ -379,4 +379,27 @@ const AMD_ALERT_CONFIG = Object.freeze({
   CAPTION_MAX: 1000, // batas aman caption gambar WhatsApp (1024); lebih dari ini gambar dan teks dikirim terpisah
 });
 
-module.exports = { INDICATOR_CONFIG, BIAS_CONFIG, SIGNAL_CONFIG, PROB_CONFIG, SUDDEN_CONFIG, POSITION_CONFIG, ADV_ALERT_CONFIG, SNR_ALERT_CONFIG, SIGNAL_ALERT_CONFIG, HHLL_CONFIG, HHLL_CONTEXT_CONFIG, HHLL_BACKTEST_CONFIG, HHLL_ALERT_CONFIG, AMD_CONFIG, AMD_ALERT_CONFIG };
+/**
+ * Alarm USDT.D masuk golden zone (!alertdusdt): kirim kabar saat level USDT Dominance (nilai terkini, sama dengan
+ * !dusdt) MASUK ke golden zone Fibonacci 0.5-0.618 pada swing USDT.D di timeframe yang dipilih (fib dihitung dari
+ * candle closed USDT.D, persis seperti !dusdt / !fib).
+ *
+ * Aturan "masuk": sebelumnya di luar zona, sekarang di dalam. Zona baru dianggap ditinggalkan setelah level keluar
+ * lebih dari REARM_MARGIN (selisih kedalaman retracement) dari tepi zona, supaya level yang bolak-balik di tepi zona
+ * tidak memicu alarm berulang. Kalau swing Fibonacci berganti, status hanya disinkronkan ulang tanpa alarm (zona
+ * bergeser bukan berarti harga yang bergerak). Kondisi yang sudah ada saat alarm dibuat tidak diumumkan.
+ * Semua angka bisa diubah lewat env; naikkan VERSION kalau aturan diubah.
+ */
+const DUSDT_ALERT_CONFIG = Object.freeze({
+  VERSION: 1,
+  CHECK_MS: Math.max(5_000, _posInt(process.env.DUSDT_ALERT_CHECK_MS, 30_000)),
+  INTERVAL_MS: Math.max(60_000, _posInt(process.env.DUSDT_ALERT_INTERVAL_MS, 120_000)), // jeda ambil ulang per timeframe (data penyedia di-cache 1-5 menit)
+  ZONE_LOW: _num(process.env.DUSDT_ALERT_ZONE_LOW, 0.5), // tepi atas zona (kedalaman retracement)
+  ZONE_HIGH: _num(process.env.DUSDT_ALERT_ZONE_HIGH, 0.618), // tepi bawah zona
+  REARM_MARGIN: _num(process.env.DUSDT_ALERT_REARM_MARGIN, 0.03), // keluar zona > margin ini baru dianggap benar-benar keluar
+  MAX_MSG_PER_CHAT_HOUR: _posInt(process.env.DUSDT_ALERT_MAX_MSG_PER_CHAT_HOUR, 10),
+  MAX_PER_USER: _posInt(process.env.DUSDT_ALERT_MAX_PER_USER, 4),
+  MAX_PER_CHAT: _posInt(process.env.DUSDT_ALERT_MAX_PER_CHAT, 8),
+});
+
+module.exports = { INDICATOR_CONFIG, BIAS_CONFIG, SIGNAL_CONFIG, PROB_CONFIG, SUDDEN_CONFIG, POSITION_CONFIG, ADV_ALERT_CONFIG, SNR_ALERT_CONFIG, SIGNAL_ALERT_CONFIG, HHLL_CONFIG, HHLL_CONTEXT_CONFIG, HHLL_BACKTEST_CONFIG, HHLL_ALERT_CONFIG, AMD_CONFIG, AMD_ALERT_CONFIG, DUSDT_ALERT_CONFIG };
