@@ -291,6 +291,45 @@ const HHLL_CONTEXT_CONFIG = Object.freeze({
   STATS_MIN_N: _posInt(process.env.HHLL_STATS_MIN_N, 30), // statistik historis disembunyikan kalau sampel < ini
 });
 
+// !trenstate (trenState.js, trenStateCommand.js): lanjut tren / pullback sehat / waspada reversal / reversal terkonfirmasi / range.
+// SEMUA angka di bawah NILAI AWAL USULAN, belum divalidasi backtest (tampilkan sebagai heuristik). Naikkan VERSION kalau aturan diubah.
+// Fitur bukti bernilai ya / tidak / null (null = data tidak ada, tidak dihitung). Putusan dari selisih skor dua sisi.
+const TRENSTATE_CONFIG = Object.freeze({
+  VERSION: 1,
+  MIN_CANDLES: _posInt(process.env.TRENSTATE_MIN_CANDLES, 60), // candle closed minimal (EMA50 + ATR + struktur); kurang -> null "data belum cukup"
+  // --- fase (kedalaman retrace leg terakhir, 0 = di ujung leg, 1 = kembali ke awal leg) ---
+  CONTINUE_DEPTH: _num(process.env.TRENSTATE_CONTINUE_DEPTH, 0.236), // retrace < ini (atau close sudah membuat HH/LL baru) = LANJUT
+  HEALTHY_MIN: _num(process.env.TRENSTATE_HEALTHY_MIN, 0.382), // zona retrace sehat (condong lanjut)
+  HEALTHY_MAX: _num(process.env.TRENSTATE_HEALTHY_MAX, 0.618),
+  DEEP_MAX: _num(process.env.TRENSTATE_DEEP_MAX, 0.786), // di atas ini hampir pasti rusak: bukti retrace dalam berbobot DEEP_WEIGHT
+  DEEP_WEIGHT: _num(process.env.TRENSTATE_DEEP_WEIGHT, 2),
+  RECLAIM_DEPTH: _num(process.env.TRENSTATE_RECLAIM_DEPTH, 0.382), // level "lanjut jika close kembali di atas/bawah": retrace segini dari ujung leg
+  // --- fitur bukti ---
+  VOL_LOOKBACK: _posInt(process.env.TRENSTATE_VOL_LOOKBACK, 20), // pembanding volume spike: rata-rata sekian candle sebelum candle itu
+  VOL_CORR_MAX: _num(process.env.TRENSTATE_VOL_CORR_MAX, 0.8), // rata-rata volume koreksi <= ini x rata-rata volume leg impuls = mengering (lanjut)
+  VOL_SPIKE_MULT: _num(process.env.TRENSTATE_VOL_SPIKE_MULT, 1.5), // candle melawan tren dengan volume >= ini x rata-rata = spike (reversal)
+  BODY_ATR_MAX: _num(process.env.TRENSTATE_BODY_ATR_MAX, 0.6), // rata-rata body candle koreksi <= ini x ATR = body kecil (lanjut)
+  SPEED_MULT: _num(process.env.TRENSTATE_SPEED_MULT, 1.0), // kecepatan koreksi (ATR/candle) >= ini x kecepatan impuls = lebih cepat (reversal)
+  DIV_LOOKBACK: _posInt(process.env.TRENSTATE_DIV_LOOKBACK, 15), // divergence dihitung sampai pivot yang terkonfirmasi sekian candle terakhir
+  DIV_RADIUS: _posInt(process.env.TRENSTATE_DIV_RADIUS, 3), // pivot kedua divergence harus >= (index ekstrem - ini)
+  // --- putusan ---
+  VERDICT_GAP: _num(process.env.TRENSTATE_VERDICT_GAP, 2), // selisih skor >= ini = condong; di bawahnya "koreksi, belum jelas"
+  GRADE_STRONG_LEAD: _num(process.env.TRENSTATE_GRADE_STRONG_LEAD, 4), // selisih skor >= ini = grade kuat
+  MIN_APPLICABLE: _posInt(process.env.TRENSTATE_MIN_APPLICABLE, 4), // fitur yang bisa dinilai < ini = grade lemah (bukti tipis)
+  CONFIRM_BEYOND_ATR: _num(process.env.TRENSTATE_CONFIRM_BEYOND_ATR, 0.2), // grade reversal terkonfirmasi: close melewati level >= ini x ATR
+  // --- histeresis: status baru dianggap berubah setelah bertahan sekian candle closed berturut-turut ---
+  HYST_BARS: _posInt(process.env.TRENSTATE_HYST_BARS, 2),
+  HYST_WINDOW: _posInt(process.env.TRENSTATE_HYST_WINDOW, 12), // candle terakhir yang diputar ulang untuk menentukan status stabil
+  // --- backtest (trenStateBacktest.js) ---
+  BT_WARMUP: 80,
+  BT_WINDOW: 320, // sama dengan FETCH_LIMIT produksi
+  BT_HORIZON: 24, // candle ke depan yang diamati
+  BT_CONTINUE_ATR: 1, // reversal terkonfirmasi dianggap "jalan" bila bergerak >= ini x ATR sebelum close kembali ke level batal
+  MIN_N_SHOW: _posInt(process.env.TRENSTATE_MIN_N_SHOW, 30), // statistik historis disembunyikan kalau N < ini
+  TRAIN_FRAC: 0.6, // 60% waktu awal = stel, 40% akhir = ukur (walk-forward sederhana)
+  FOLDS: 3,
+});
+
 // Backtest HHLL (hhllBacktest.js, scripts/backtest-hhll.js).
 const HHLL_BACKTEST_CONFIG = Object.freeze({
   WARMUP: 60, // candle awal yang dilewati
@@ -402,4 +441,4 @@ const DUSDT_ALERT_CONFIG = Object.freeze({
   MAX_PER_CHAT: _posInt(process.env.DUSDT_ALERT_MAX_PER_CHAT, 8),
 });
 
-module.exports = { INDICATOR_CONFIG, BIAS_CONFIG, SIGNAL_CONFIG, PROB_CONFIG, SUDDEN_CONFIG, POSITION_CONFIG, ADV_ALERT_CONFIG, SNR_ALERT_CONFIG, SIGNAL_ALERT_CONFIG, HHLL_CONFIG, HHLL_CONTEXT_CONFIG, HHLL_BACKTEST_CONFIG, HHLL_ALERT_CONFIG, AMD_CONFIG, AMD_ALERT_CONFIG, DUSDT_ALERT_CONFIG };
+module.exports = { INDICATOR_CONFIG, BIAS_CONFIG, SIGNAL_CONFIG, PROB_CONFIG, SUDDEN_CONFIG, POSITION_CONFIG, ADV_ALERT_CONFIG, SNR_ALERT_CONFIG, SIGNAL_ALERT_CONFIG, HHLL_CONFIG, HHLL_CONTEXT_CONFIG, HHLL_BACKTEST_CONFIG, HHLL_ALERT_CONFIG, TRENSTATE_CONFIG, AMD_CONFIG, AMD_ALERT_CONFIG, DUSDT_ALERT_CONFIG };

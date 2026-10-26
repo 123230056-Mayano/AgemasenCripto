@@ -10,6 +10,7 @@
  *   !level <koin> [tf]   -> R1/R2/S1/S2 + jarak % dari harga sekarang
  *   !snr <koin> [tf]     -> Support & Resistance lengkap: R1-R3/S1-S3 + kekuatan level + chart (snr.js)
  *   !fib <koin> [tf]     -> Fibonacci retracement + extension otomatis, arah ikut tren + chart (fib.js)
+ *   !trenstate <koin> [tf|semua] -> lanjut tren / pullback sehat / waspada reversal / reversal terkonfirmasi / range + alasan + level batal (trenState.js). Alias: !ts, !pullback
  *   !hhll <koin> [tf]    -> market structure Higher High / Higher Low / Lower High / Lower Low + status tren + chart (hhll.js). Alias: !struktur
  *   !ema <koin> [tf]     -> EMA 20/50/200 + posisi harga (di atas / di bawah)
  *   !movave <koin> [tf] [sma|ema] -> Moving Average SMA & EMA 20/50/200 + posisi harga + golden/death cross (movave.js). Alias: !ma, !movingaverage
@@ -52,6 +53,7 @@ const { runSnr } = require("./snr");
 const { runFib, computeFib } = require("./fib");
 const { buildChartInsight } = require("./chartInsight");
 const { runHhll } = require("./hhll");
+const { runTrenState } = require("./trenStateCommand");
 const { ALL_RUNNERS } = require("./allPdf");
 const { runMovave, MOVAVE_TYPES } = require("./movave");
 const { PASAR_COMMANDS, PASAR_RUNNERS, parsePasarArgs } = require("./pasar");
@@ -96,6 +98,7 @@ const COMMANDS = {
   snr: { re: /^!(?:snr|sr)(?:\s+([\s\S]*))?$/i, useTf: true, allTf: true },
   fib: { re: /^!(?:fib|fibo|fibonacci)(?:\s+([\s\S]*))?$/i, useTf: true, allTf: true },
   hhll: { re: /^!(?:hhll|struktur|structure)(?:\s+([\s\S]*))?$/i, useTf: true },
+  trenstate: { re: /^!(?:trenstate|ts|pullback)(?:\s+([\s\S]*))?$/i, useTf: true, allTf: true, allWords: ["ALL", "SEMUA"] },
   ema: { re: /^!ema(?:\s+([\s\S]*))?$/i, useTf: true },
   movave: { re: /^!(?:movave|movingaverage|ma)(?:\s+([\s\S]*))?$/i, useTf: true, types: MOVAVE_TYPES },
   tren: { re: /^!(?:tren|trend)(?:\s+([\s\S]*))?$/i, useTf: true },
@@ -107,7 +110,7 @@ const COMMANDS = {
  * "sol 4h" -> { coin: "SOL", tf: "4H" | null }. null kalau format salah.
  * Command dua koin (coins: 2), mis. "sol eth" -> { coin: "SOL", coin2: "ETH", tf: null }.
  */
-function parseArgs(raw, { useTf, coins = 1, types = null, allTf = false }) {
+function parseArgs(raw, { useTf, coins = 1, types = null, allTf = false, allWords = ["ALL"] }) {
   const tokens = raw.trim().split(/\s+/).filter(Boolean);
   const found = [];
   let tf = null;
@@ -117,7 +120,7 @@ function parseArgs(raw, { useTf, coins = 1, types = null, allTf = false }) {
     const up = tok.toUpperCase();
     // "!snr all btc" / "!fib btc all": kata "all" = semua timeframe (satu PDF). Hanya dianggap flag
     // kalau masih ada token lain (koin), supaya "!snr all" sendirian tetap dianggap koin "ALL".
-    if (allTf && up === "ALL" && tokens.length > 1) all = true;
+    if (allTf && allWords.includes(up) && tokens.length > 1) all = true;
     else if (useTf && TIMEFRAMES[up]) tf = up;
     else if (types && types.includes(up)) type = up;
     else if (found.length < coins && /^[A-Z0-9]{1,15}$/.test(up)) found.push(up);
@@ -372,7 +375,7 @@ async function runBandingkan(sock, msg, { jid, lang, senderId }, { coin, coin2 }
   );
 }
 
-const RUNNERS = { chart: runChart, harga: runHarga, level: runLevel, snr: runSnr, fib: runFib, hhll: runHhll, ema: runEma, movave: runMovave, tren: runTren, mtf: runMtf, bandingkan: runBandingkan };
+const RUNNERS = { chart: runChart, harga: runHarga, level: runLevel, snr: runSnr, fib: runFib, hhll: runHhll, trenstate: runTrenState, ema: runEma, movave: runMovave, tren: runTren, mtf: runMtf, bandingkan: runBandingkan };
 
 async function runList(sock, msg, { jid, lang }, keyword) {
   const all = await getAvailableCoins(lang);
@@ -719,7 +722,7 @@ async function handleKriptoCommand(sock, msg, { jid, text, lang }) {
       return true;
     }
     const tf = args.tf || getDefaultTf(senderId);
-    await RUNNERS[name](sock, msg, { jid, lang, senderId }, { coin: args.coin, coin2: args.coin2, tf, type: args.type });
+    await RUNNERS[name](sock, msg, { jid, lang, senderId }, { coin: args.coin, coin2: args.coin2, tf, type: args.type, all: args.all });
   } catch (err) {
     console.log(`[kripto] !${name} gagal:`, err.message);
     let key = "kripto.fail";
