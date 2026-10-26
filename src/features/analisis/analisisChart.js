@@ -125,10 +125,11 @@ function findSwingIdx(candles, level, isHigh) {
  * @param {number[]} [o.resistance]
  * @param {number[]} [o.support]
  * @param {{now:object|null, series:Array|null}|null} [o.dominance]  hasil getDominance(); null = panel dominance dilewati
+ * @param {string|null} [o.title]  judul kustom (default "<coin>/USDT <tf>"), mis. "USDT.D 4H" untuk !dusdt
  * @param {object|null} [o.fib]  hasil computeFib() (kripto/fib.js); diisi = gambar level Fibonacci + golden zone (dipakai !chart)
  * @returns {Buffer} PNG
  */
-function renderChart({ candles, coin, tf, resistance = [], support = [], dominance = null, fib = null }) {
+function renderChart({ candles, coin, tf, resistance = [], support = [], dominance = null, fib = null, title: titleOverride = null }) {
   if (!candles || candles.length < 10) throw new Error("CANDLES_TOO_FEW");
   const family = fontFamily();
 
@@ -640,7 +641,7 @@ function renderChart({ candles, coin, tf, resistance = [], support = [], dominan
   g.textBaseline = "middle";
   g.font = `bold 28px ${family}`;
   g.fillStyle = C.title;
-  const title = `${coin}/USDT  ${tf}`;
+  const title = titleOverride || `${coin}/USDT  ${tf}`;
   g.fillText(title, Lm, 26);
   const titleW = g.measureText(title).width; // ukur sebelum font diganti
   const prev = candles[Math.max(0, n - 2)];

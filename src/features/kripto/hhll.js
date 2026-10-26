@@ -31,7 +31,7 @@ function fmtWhen(lang, ms, tf) {
 
 // ---------- chart ----------
 /** @returns {Buffer} PNG */
-function renderHhllChart({ candles, coin, tf, st }) {
+function renderHhllChart({ candles, coin, tf, st, title: titleOverride = null, minPct = CFG.MIN_SWING_PCT }) {
   if (!candles || candles.length < 10) throw new Error("CANDLES_TOO_FEW");
   const family = fontFamily();
   const n = candles.length;
@@ -225,7 +225,7 @@ function renderHhllChart({ candles, coin, tf, st }) {
   g.textBaseline = "middle";
   g.font = `bold 28px ${family}`;
   g.fillStyle = C.title;
-  const title = `${coin}/USDT  ${tf}  Higher High / Lower Low`;
+  const title = titleOverride || `${coin}/USDT  ${tf}  Higher High / Lower Low`;
   g.fillText(title, Lm, 26);
   const titleW = g.measureText(title).width;
   const prev = candles[Math.max(0, n - 2)];
@@ -236,7 +236,7 @@ function renderHhllChart({ candles, coin, tf, st }) {
   g.font = `19px ${family}`;
   g.fillStyle = C.axis;
   const trendTxt = st.trend === "up" ? "Uptrend (HH + HL)" : st.trend === "down" ? "Downtrend (LH + LL)" : "No clear direction";
-  g.fillText(`Close candle only · swing = pivot ±${CFG.PIVOT_WIN} candles, min move ${CFG.MIN_SWING_PCT}% · ${trendTxt}`, Lm, 56);
+  g.fillText(`Close candle only · swing = pivot ±${CFG.PIVOT_WIN} candles, min move ${minPct}% · ${trendTxt}`, Lm, 56);
 
   return canvas.toBuffer("image/png");
 }

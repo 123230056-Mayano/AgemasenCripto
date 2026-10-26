@@ -37,7 +37,9 @@ const axios = require("axios");
 const { t } = require("../../i18n");
 const { computeStructure, CFG: HHLL_CFG } = require("./hhllCore");
 const { computeFib, retraceDepth } = require("./fib");
-const { fmtWhen } = require("./hhll");
+const { fmtWhen, renderHhllChart } = require("./hhll");
+const { renderChart } = require("../analisis/analisisChart");
+const { computeLevels } = require("./market");
 
 const CG = (process.env.COINGECKO_BASE || "https://api.coingecko.com").replace(/\/+$/, "");
 const CMC = (process.env.CMC_DATA_BASE || "https://api.coinmarketcap.com").replace(/\/+$/, "");
@@ -377,7 +379,7 @@ async function getDusdt(tf) {
   const result = buildResult(tf, g, tether, cmc, klines);
   if (!result) return null;
   const candles = buildCandles(tetherLong, cmcLong, tf, result.level);
-  return { ...result, ...buildStructure(candles), candleCount: candles ? candles.length : 0 };
+  return { ...result, ...buildStructure(candles), candles, candleCount: candles ? candles.length : 0 };
 }
 
 // ---------- format pesan ----------
@@ -554,10 +556,57 @@ function parseDusdtArgs(name, raw, defaultTf = "4H") {
   return TF[tf] ? { tf } : null;
 }
 
+/**
+ * Dua gambar untuk !dusdt (masing-masing opsional; gagal render -> dilewati, teks tetap terkirim):
+ *   1. grafik HHLL (sama dengan !hhll)  2. grafik lengkap (sama dengan !chart: EMA, S/R, Fib, MACD, RSI)
+ * @returns {{hhll: Buffer|null, chart: Buffer|null}}
+ */
+function renderDusdtCharts(r) {
+  const out = { hhll: null, chart: null };
+  const candles = r.candles;
+  if (!candles || candles.length < 10) return out;
+  const title = `USDT.D  ${r.tfLabel}`;
+  if (r.hhll) {
+    try {
+      out.hhll = renderHhllChart({
+        candles,
+        coin: "USDT.D",
+        tf: r.tfLabel,
+        st: r.hhll,
+        title: `${title}  Higher High / Lower Low`,
+        minPct: DUSDT_MIN_SWING_PCT,
+      });
+    } catch (err) {
+      console.log("[dusdt] chart HHLL gagal:", err.message);
+    }
+  }
+  try {
+    const { resistance, support } = computeLevels(candles, r.level);
+    out.chart = renderChart({ candles, coin: "USDT.D", tf: r.tfLabel, resistance, support, fib: r.fib, title });
+  } catch (err) {
+    console.log("[dusdt] chart gagal:", err.message);
+  }
+  return out;
+}
+
 async function runDusdt(sock, msg, { jid, lang }, { tf }) {
   const result = await getDusdt(tf);
-  const text = result ? formatDusdt(lang, result) : t(lang, "dusdt.unavailable");
-  await sock.sendMessage(jid, { text }, { quoted: msg });
+  if (!result) {
+    await sock.sendMessage(jid, { text: t(lang, "dusdt.unavailable") }, { quoted: msg });
+    return;
+  }
+  const { hhll, chart } = renderDusdtCharts(result);
+  let quoted = msg;
+  // Gambar 1: HHLL (seperti !hhll), gambar 2: chart (seperti !chart). Teks lengkap menyusul sebagai pesan terpisah.
+  if (hhll) {
+    await sock.sendMessage(jid, { image: hhll, caption: t(lang, "dusdt.img.hhll", { tf: result.tfLabel }) }, { quoted });
+    quoted = undefined;
+  }
+  if (chart) {
+    await sock.sendMessage(jid, { image: chart, caption: t(lang, "dusdt.img.chart", { tf: result.tfLabel }) }, quoted ? { quoted } : undefined);
+    quoted = undefined;
+  }
+  await sock.sendMessage(jid, { text: formatDusdt(lang, result) }, quoted ? { quoted } : undefined);
 }
 
 const DUSDT_RUNNERS = { dusdt: runDusdt };
@@ -573,6 +622,7 @@ module.exports = {
   formatDusdtFull,
   buildCandles,
   buildStructure,
+  renderDusdtCharts,
   ratioWindow,
   btcMove,
   direction,

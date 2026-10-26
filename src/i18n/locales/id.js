@@ -622,6 +622,8 @@ module.exports = {
   "dusdt.fib.none": "ℹ️ Belum ada swing yang jelas di USDT.D {tf} (pergerakan masih terlalu kecil). Coba timeframe lain.",
   "dusdt.struct.na": "ℹ️ Riwayat USDT.D untuk HHLL dan Fib belum bisa diambil dari penyedia data. Coba lagi beberapa saat lagi.",
   "dusdt.note.short": "_Level HHLL & Fib dalam persen dominasi (pp = poin persentase), dihitung dari candle closed USDT.D. Bukan saran finansial._",
+  "dusdt.img.hhll": "📐 *USDT.D {tf}* · Higher High / Lower Low",
+  "dusdt.img.chart": "📈 *USDT.D {tf}* · Chart (EMA, S/R, Fibonacci, MACD, RSI)",
   "bias.head": "📊 *BIAS {coin}/USDT* (v{ver})\nHarga: {price}",
   "bias.col.score": "Skor",
   "bias.col.conf": "Yakin",
