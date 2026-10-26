@@ -272,6 +272,42 @@ const SIGNAL_ALERT_CONFIG = Object.freeze({
   CONCURRENCY: _posInt(process.env.SIGNAL_ALERT_CONCURRENCY, 8),
 });
 
+// Penilai konteks HHLL (hhllContext.js): menilai kejadian yang SUDAH dideteksi hhllCore/hhllAlertCore, tanpa mengubah detektor swing.
+// Semua angka = TITIK AWAL USULAN (rencana HHLL fase 1), bukan hasil backtest. Naikkan VERSION kalau aturan diubah, dan
+// setel per timeframe lewat ...BY_TF kalau backtest (scripts/backtest-hhll.js) menunjukkan satu angka global tidak cocok.
+const HHLL_CONTEXT_CONFIG = Object.freeze({
+  VERSION: 1,
+  HTF: Object.freeze({ "15M": "1H", "1H": "4H", "4H": "1D", "1D": null }), // timeframe konteks untuk tiap TF
+  VOL_LOOKBACK: 20, // pembanding volume: rata-rata sekian candle sebelum candle X
+  VOL_MULT: _num(process.env.HHLL_VOL_MULT, 1.5), // volume X >= ini x rata-rata = ok
+  CLOSE_BEYOND_ATR: _num(process.env.HHLL_CLOSE_BEYOND_ATR, 0.2), // close harus melewati level >= ini x ATR
+  CLOSE_POS: _num(process.env.HHLL_CLOSE_POS, 0.3), // close di 30% atas (naik) / bawah (turun) range candle
+  LEG_ATR: _num(process.env.HHLL_LEG_ATR, 2), // leg swing terakhir >= k x ATR
+  LEG_ATR_BY_TF: Object.freeze({}), // contoh: { "15M": 3, "1D": 1.5 }
+  PULLBACK_MIN: _num(process.env.HHLL_PULLBACK_MIN, 0.382), // kedalaman pullback HL/LH terhadap leg sebelumnya
+  PULLBACK_MAX: _num(process.env.HHLL_PULLBACK_MAX, 0.786),
+  FAIL_BARS: _posInt(process.env.HHLL_FAIL_BARS, 3), // tembusan gagal = close kembali ke dalam level dalam sekian candle
+  STATUS_LOOKBACK: _posInt(process.env.HHLL_STATUS_LOOKBACK, 12), // !hhll: tembusan sampai sekian candle terakhir masih dinilai berjalan
+  STATS_MIN_N: _posInt(process.env.HHLL_STATS_MIN_N, 30), // statistik historis disembunyikan kalau sampel < ini
+});
+
+// Backtest HHLL (hhllBacktest.js, scripts/backtest-hhll.js).
+const HHLL_BACKTEST_CONFIG = Object.freeze({
+  WARMUP: 60, // candle awal yang dilewati
+  WINDOW: 320, // sama dengan FETCH_LIMIT produksi: struktur dihitung dari paling banyak 320 candle
+  HORIZON: 24, // candle ke depan yang diamati
+  FAIL_BARS: 3, // gagal = close kembali ke dalam level dalam K candle
+  CONTINUE_ATR: 1, // lanjut = MFE >= ini x ATR sebelum close kembali ke level
+  FEE_PCT: 0.1, // fee per sisi (persen), tarif spot Binance reguler
+  SLIP_PCT: 0.05, // slip per sisi (persen), asumsi
+  MIN_N_SHOW: 30, // statistik di !hhll disembunyikan kalau N < ini
+  MIN_N_FILTER: 100, // sampel minimal per kelompok untuk memutuskan sebuah filter
+  MIN_GAIN_PP: 3, // filter dipertahankan hanya kalau tingkat lanjut naik >= sekian poin persen di periode ukur
+  MIN_KEEP_RATIO: 0.3, // ...dan masih menyisakan >= sekian bagian dari jumlah sinyal
+  TRAIN_FRAC: 0.6, // 60% waktu awal = stel, 40% akhir = ukur
+  FOLDS: 3, // walk-forward: jumlah potongan waktu berurutan
+});
+
 // Higher High / Lower Low (market structure): !hhll dan alarm !alerthhll.
 // Swing = pivot (high/low tertinggi/terendah dalam +-PIVOT_WIN candle closed). Pivot baru dianggap pasti setelah
 // PIVOT_WIN candle di kanannya closed, jadi candle yang belum closed tidak memunculkan atau mengubah swing.
@@ -285,7 +321,7 @@ const HHLL_CONFIG = Object.freeze({
 });
 
 const HHLL_ALERT_CONFIG = Object.freeze({
-  VERSION: 1,
+  VERSION: 2, // v2: grade konteks, opsi kuat/searah, tahap gagal. Kunci dedupe hhllKey sengaja tetap "v1" (lihat hhllAlertCore.js)
   CHECK_MS: Math.max(5_000, _posInt(process.env.HHLL_CHECK_MS, 15_000)),
   INTERVAL_MS: Math.max(30_000, _posInt(process.env.HHLL_INTERVAL_MS, 60_000)), // jeda ambil ulang per koin+TF
   MAX_PAIRS: _posInt(process.env.HHLL_MAX_PAIRS, 60), // batas koin+TF per putaran (sisanya bergilir)
@@ -297,6 +333,7 @@ const HHLL_ALERT_CONFIG = Object.freeze({
   MAX_PER_USER: _posInt(process.env.HHLL_ALERT_MAX_PER_USER, 10),
   MAX_PER_CHAT: _posInt(process.env.HHLL_ALERT_MAX_PER_CHAT, 20),
   CONCURRENCY: _posInt(process.env.HHLL_CONCURRENCY, 8),
+  HTF_CACHE_MS: _posInt(process.env.HHLL_HTF_CACHE_MS, 180_000), // cache candle TF besar per koin+TF (diambil hanya saat ada kejadian)
 });
 
 // Accumulation / Manipulation / Distribution (AMD, "Power of 3"): !signal (dulu !amd) dan alarm !alertamd.
@@ -342,4 +379,4 @@ const AMD_ALERT_CONFIG = Object.freeze({
   CAPTION_MAX: 1000, // batas aman caption gambar WhatsApp (1024); lebih dari ini gambar dan teks dikirim terpisah
 });
 
-module.exports = { INDICATOR_CONFIG, BIAS_CONFIG, SIGNAL_CONFIG, PROB_CONFIG, SUDDEN_CONFIG, POSITION_CONFIG, ADV_ALERT_CONFIG, SNR_ALERT_CONFIG, SIGNAL_ALERT_CONFIG, HHLL_CONFIG, HHLL_ALERT_CONFIG, AMD_CONFIG, AMD_ALERT_CONFIG };
+module.exports = { INDICATOR_CONFIG, BIAS_CONFIG, SIGNAL_CONFIG, PROB_CONFIG, SUDDEN_CONFIG, POSITION_CONFIG, ADV_ALERT_CONFIG, SNR_ALERT_CONFIG, SIGNAL_ALERT_CONFIG, HHLL_CONFIG, HHLL_CONTEXT_CONFIG, HHLL_BACKTEST_CONFIG, HHLL_ALERT_CONFIG, AMD_CONFIG, AMD_ALERT_CONFIG };

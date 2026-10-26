@@ -22,7 +22,8 @@ const L = {
     title: "Alarm Higher High / Lower Low",
     sub: (time, n) => `${time} | ${n} kejadian`,
     sec: (tf, n) => `Timeframe ${tf} (${n})`,
-    cols: ["No", "Koin", "Kejadian", "Arah", "Level", "Close"],
+    cols: ["No", "Koin", "Kejadian", "Arah", "Grade", "Level", "Close"],
+    grade: { strong: "Kuat", medium: "Sedang", weak: "Lemah" },
     what: {
       "early.up": "HL baru (dini)",
       "early.down": "LH baru (dini)",
@@ -30,6 +31,8 @@ const L = {
       "confirm.up.cont": "Tembus swing high, lanjut naik",
       "confirm.down.flip": "Tembus swing low, balik turun",
       "confirm.down.cont": "Tembus swing low, lanjut turun",
+      "failed.up": "Tembusan naik gagal",
+      "failed.down": "Tembusan turun gagal",
     },
     dir: { up: "Naik", down: "Turun" },
     foot: "Dini = swing baru terkonfirmasi (belum tembus). Konfirmasi = close tembus swing, dari candle closed. Edukasi, bukan ajakan beli/jual.",
@@ -39,7 +42,8 @@ const L = {
     title: "Higher High / Lower Low Alert",
     sub: (time, n) => `${time} | ${n} events`,
     sec: (tf, n) => `Timeframe ${tf} (${n})`,
-    cols: ["No", "Coin", "Event", "Dir", "Level", "Close"],
+    cols: ["No", "Coin", "Event", "Dir", "Grade", "Level", "Close"],
+    grade: { strong: "Strong", medium: "Medium", weak: "Weak" },
     what: {
       "early.up": "New HL (early)",
       "early.down": "New LH (early)",
@@ -47,6 +51,8 @@ const L = {
       "confirm.up.cont": "Broke swing high, uptrend continues",
       "confirm.down.flip": "Broke swing low, turns down",
       "confirm.down.cont": "Broke swing low, downtrend continues",
+      "failed.up": "Upside break failed",
+      "failed.down": "Downside break failed",
     },
     dir: { up: "Up", down: "Down" },
     foot: "Early = new swing confirmed (not broken yet). Confirmed = close broke the swing, from closed candles. Educational, not buy/sell advice.",
@@ -54,7 +60,7 @@ const L = {
   },
 };
 
-const whatKey = (ev) => (ev.stage === "early" ? `early.${ev.dir}` : `confirm.${ev.dir}.${ev.flip ? "flip" : "cont"}`);
+const whatKey = (ev) => (ev.stage === "early" ? `early.${ev.dir}` : ev.stage === "failed" ? `failed.${ev.dir}` : `confirm.${ev.dir}.${ev.flip ? "flip" : "cont"}`);
 
 /**
  * @param {{events: object[], lang?: string, ms: number}} p events = hasil engine (coin, tf, stage, dir, flip, level, now)
@@ -72,10 +78,11 @@ async function buildHhllPdf({ events, lang = "id", ms }) {
   const cols = [
     { x: 0, w: 28, a: "l" },
     { x: 28, w: 62, a: "l" },
-    { x: 90, w: 190, a: "l" },
-    { x: 280, w: 50, a: "l" },
-    { x: 330, w: 95, a: "r" },
-    { x: 425, w: cw - 425, a: "r" },
+    { x: 90, w: 160, a: "l" },
+    { x: 250, w: 45, a: "l" },
+    { x: 295, w: 50, a: "l" },
+    { x: 345, w: 90, a: "r" },
+    { x: 435, w: cw - 435, a: "r" },
   ];
   const put = (page, text, col, y, f, size, color) => {
     const pad = 4;
@@ -129,8 +136,10 @@ async function buildHhllPdf({ events, lang = "id", ms }) {
       put(page, clean(r.coin), cols[1], y, bold, 8.5, C.ink);
       put(page, clean(tx.what[whatKey(r)]), cols[2], y, r.flip ? bold : font, 8.5, r.flip && r.stage === "confirm" ? C.flip : C.ink);
       put(page, tx.dir[r.dir], cols[3], y, bold, 8.5, dirColor);
-      put(page, clean(fmtLevel(r.level)), cols[4], y, font, 8.5, C.ink);
-      put(page, clean(fmtUsd(r.now)), cols[5], y, font, 8.5, C.ink);
+      const gr = r.ctx?.grade;
+      put(page, gr ? clean(tx.grade[gr]) : "-", cols[4], y, gr === "strong" ? bold : font, 8.5, gr === "strong" ? C.up : gr === "weak" ? C.down : C.ink);
+      put(page, clean(fmtLevel(r.level)), cols[5], y, font, 8.5, C.ink);
+      put(page, clean(fmtUsd(r.now)), cols[6], y, font, 8.5, C.ink);
       y -= ROW_H;
     });
     y -= 14;

@@ -447,6 +447,11 @@ function user(jid) {
   if (!u.nextSignalId) u.nextSignalId = 1;
   if (!Array.isArray(u.hhllAlerts)) u.hhllAlerts = [];
   if (!u.nextHhllId) u.nextHhllId = 1;
+  // v2 (konteks HHLL): field baru diberi default "mati" supaya alarm lama berperilaku persis seperti sebelumnya
+  for (const a of u.hhllAlerts) {
+    if (typeof a.strongOnly !== "boolean") a.strongOnly = false;
+    if (typeof a.alignedOnly !== "boolean") a.alignedOnly = false;
+  }
   if (!Array.isArray(u.amdAlerts)) u.amdAlerts = [];
   if (!u.nextAmdId) u.nextAmdId = 1;
   if (!Array.isArray(u.positions)) u.positions = [];
@@ -893,7 +898,7 @@ function allPositions() {
 // ---------- alarm Higher High / Lower Low (!alerthhll) ----------
 /**
  * hhllAlerts: [{ id: "h1", chat, coin: "BTC"|"WATCHLIST", tf, dirs: ["HH","LL"], stages: [...],
- *                flipOnly: boolean, createdAt, active: true }]
+ *                flipOnly: boolean, strongOnly: boolean, alignedOnly: boolean (v2), createdAt, active: true }]
  * Penanda kejadian terkirim memakai kunci dedupe yang sama dengan alarm lain (wasSent / markSent).
  */
 const getHhllAlerts = (jid) => [...user(jid).hhllAlerts];
@@ -901,7 +906,7 @@ const getHhllAlerts = (jid) => [...user(jid).hhllAlerts];
 /** @returns {object|"full"|"chatFull"|"exists"} */
 function addHhllAlert(jid, sub) {
   const u = user(jid);
-  if (u.hhllAlerts.some((a) => a.chat === sub.chat && a.coin === sub.coin && a.tf === sub.tf && !!a.flipOnly === !!sub.flipOnly && sameList(a.dirs || [], sub.dirs || []) && sameList(a.stages || [], sub.stages || []))) {
+  if (u.hhllAlerts.some((a) => a.chat === sub.chat && a.coin === sub.coin && a.tf === sub.tf && !!a.flipOnly === !!sub.flipOnly && !!a.strongOnly === !!sub.strongOnly && !!a.alignedOnly === !!sub.alignedOnly && sameList(a.dirs || [], sub.dirs || []) && sameList(a.stages || [], sub.stages || []))) {
     return "exists";
   }
   if (u.hhllAlerts.length >= MAX_HHLL_ALERTS) return "full";

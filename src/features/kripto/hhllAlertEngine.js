@@ -17,6 +17,11 @@
  * Aturan pengiriman: kejadian dianggap TERKIRIM (kunci dedupe dicatat) hanya setelah pesan berhasil.
  * Hanya candle yang closed SETELAH alarm dibuat yang diumumkan (kejadian lama tidak).
  *
+ * Konteks (hhllContext.js): tiap kejadian dinilai (grade, searah/melawan TF besar, volume, invalidasi, target). Candle TF besar
+ * HANYA diambil kalau pasangan koin+TF itu memang menghasilkan kejadian, lalu di-cache per koin+TF besar (HTF_CACHE_MS), jadi beban
+ * MAX_PAIRS tidak berlipat. Kalau TF besar gagal diambil, kejadian tetap dikirim tanpa konteks, kecuali langganan memakai
+ * opsi kuat/searah (ditunda ke putaran berikutnya, dedupe mencegah ganda).
+ *
  * Banyak kejadian untuk satu penerima (>= HHLL.PDF_MIN) -> 1 pesan pengantar + 1 PDF (dikelompokkan per TF).
  * Kalau PDF gagal dibuat, otomatis jatuh ke teks berpotongan supaya alarm tidak hilang.
  */
@@ -25,7 +30,8 @@ const { HHLL_ALERT_CONFIG: HA } = require("../../config/indicatorConfig");
 const { TF_MS, COIN_WATCHLIST, ChatRateLimiter } = require("./divAlertCore");
 const { selectLivePairs } = require("./advAlertCore");
 const { runPool } = require("./advAlertEngine");
-const { detectEvents, matchSub, hhllKey, chunk, sortEvents, buildHhllText, buildHhllPdfIntro } = require("./hhllAlertCore");
+const { detectEvents, detectFailures, matchSub, hhllKey, chunk, sortEvents, buildHhllText, buildHhllPdfIntro } = require("./hhllAlertCore");
+const { assessAlertEvent, htfOf } = require("./hhllContext");
 
 const defaultSleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -50,14 +56,36 @@ function createHhllEngine(deps) {
   const pdfMin = deps.pdfMin ?? HA.PDF_MIN;
 
   const lastRun = new Map(); // "COIN|TF" -> ms hitung terakhir
+  const htfCache = new Map(); // "COIN|HTF" -> { at, promise }
+  const htfTtl = deps.htfCacheMs ?? HA.HTF_CACHE_MS;
+
+  /** Candle TF besar untuk koin+TF kecil (null kalau tidak ada TF besar atau gagal diambil). Dicache + permintaan serentak digabung. */
+  async function getHtf(coin, tf, now = Date.now()) {
+    const htfTf = htfOf(tf);
+    if (!htfTf) return null;
+    const k = `${coin}|${htfTf}`;
+    const hit = htfCache.get(k);
+    if (hit && now - hit.at < htfTtl) return hit.promise;
+    const promise = Promise.resolve()
+      .then(() => fetchCandles(coin, htfTf, { includeOpen: true }))
+      .catch((err) => {
+        htfCache.delete(k); // jangan cache kegagalan
+        if (!isUnsupported(err)) log(`[hhllalert] TF besar ${coin} ${htfTf} gagal diambil:`, err.message);
+        return null;
+      });
+    htfCache.set(k, { at: now, promise });
+    return promise;
+  }
   const resolveCoins = ({ userJid, sub }) => (sub.coin === COIN_WATCHLIST ? store.getWatch(userJid) : [sub.coin]);
 
   /**
    * Evaluasi satu langganan untuk satu koin. Tidak mengirim apa pun.
    * @param {object[]} candles hasil fetchCandles(coin, tf); candle yang belum closed (closed === false) diabaikan
+   * @param {object[]|null} htf candle TF besar (untuk konteks); null = tanpa konteks searah
+   * @param {boolean} probe true = hanya cocokkan arah/tahap (tanpa nilai konteks dan tanpa filter kuat/searah), untuk memutuskan perlu ambil TF besar atau tidak
    * @returns {{events:object[]}}
    */
-  function evaluate(entry, coin, candles, now = Date.now()) {
+  function evaluate(entry, coin, candles, now = Date.now(), htf = null, probe = false) {
     const { userJid, sub } = entry;
     const tf = sub.tf;
     const tfMs = TF_MS[tf];
@@ -71,8 +99,20 @@ function createHhllEngine(deps) {
     if (!finalReady || X.t + tfMs <= sub.createdAt) return out;
 
     const base = { chat: sub.chat, userJid, coin, tf, subId: sub.id };
-    for (const ev of detectEvents(closed)) {
-      if (!matchSub(ev, sub)) continue;
+    const baseSub = { ...sub, strongOnly: false, alignedOnly: false };
+    for (const raw of [...detectEvents(closed), ...detectFailures(closed)]) {
+      if (!matchSub(raw, baseSub)) continue;
+      let ev = raw;
+      if (!probe) {
+        let ctx = null;
+        try {
+          ctx = assessAlertEvent(closed, raw, htf, { tf });
+        } catch (err) {
+          log("[hhllalert] gagal menilai konteks:", err.message);
+        }
+        ev = { ...raw, ctx };
+        if (!matchSub(ev, sub)) continue;
+      }
       const key = hhllKey(sub.chat, userJid, coin, tf, ev.stage, ev.dir, X.t);
       if (store.wasSent(key)) continue;
       out.events.push({ ...base, ...ev, candleT: X.t, key });
@@ -183,6 +223,7 @@ function createHhllEngine(deps) {
       }
     }
     for (const k of lastRun.keys()) if (!byPair.has(k)) lastRun.delete(k);
+    for (const [k, v] of htfCache) if (now - v.at > htfTtl * 10) htfCache.delete(k);
 
     const chosen = selectLivePairs([...byPair.keys()], lastRun, now, { intervalMs: HA.INTERVAL_MS, max: HA.MAX_PAIRS });
     if (!chosen.length) return;
@@ -200,8 +241,12 @@ function createHhllEngine(deps) {
         if (!isUnsupported(err)) failures++;
         return;
       }
-      for (const e of byPair.get(pair)) {
-        for (const ev of evaluate(e, coin, candles, now).events) if (!byKey.has(ev.key)) byKey.set(ev.key, ev);
+      const entries = byPair.get(pair);
+      // TF besar hanya diambil kalau ada kejadian yang cocok (hemat panggilan; hasilnya di-cache)
+      const hasEvent = entries.some((e) => evaluate(e, coin, candles, now, null, true).events.length);
+      const htf = hasEvent ? await getHtf(coin, tf, now) : null;
+      for (const e of entries) {
+        for (const ev of evaluate(e, coin, candles, now, htf).events) if (!byKey.has(ev.key)) byKey.set(ev.key, ev);
       }
     });
     const events = [...byKey.values()];
@@ -210,7 +255,7 @@ function createHhllEngine(deps) {
     log(`[hhllalert] pasangan=${chosen.length}/${byPair.size} kejadian=${events.length} pesan=${totals.sent} gagal=${totals.failed + failures} ditunda_batas_jam=${totals.deferred} total=${Date.now() - startedAt}ms`);
   }
 
-  return { tick, evaluate, deliver, _state: { lastRun, limiter } };
+  return { tick, evaluate, deliver, getHtf, _state: { lastRun, limiter, htfCache } };
 }
 
 module.exports = { createHhllEngine };

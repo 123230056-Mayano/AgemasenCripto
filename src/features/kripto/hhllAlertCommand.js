@@ -10,6 +10,8 @@
  *   !alerthhll eth 1h konfirmasi       -> hanya saat close sudah menembus
  *   !alerthhll sol 1h dini             -> hanya tanda awal (HL baru / LH baru)
  *   !alerthhll watchlist 1h balik      -> hanya yang berbalik arah (bukan lanjutan tren)
+ *   !alerthhll btc 4h konfirmasi kuat  -> hanya tembusan ber-grade Kuat;  ... searah -> hanya yang searah struktur TF besar
+ *   !alerthhll btc 4h gagal            -> tambah kabar "tembusan gagal" (close kembali ke dalam level)
  *   !alerthhll list | off | hapus <id|semua>
  *
  * Hanya membuat/melihat/menghapus langganan (state/cryptoStore.js). Pemeriksaan dan pengiriman ada di
@@ -36,10 +38,10 @@ const isGroup = (chat) => String(chat).endsWith("@g.us");
 const targetLabel = (lang, coin) => (coin === COIN_WATCHLIST ? t(lang, "divalert.target.watch") : coin);
 
 async function runCreate(sock, msg, { jid, lang, senderId }, args) {
-  const { coin, tf, dirs, stages, flipOnly } = args;
+  const { coin, tf, dirs, stages, flipOnly, strongOnly = false, alignedOnly = false } = args;
   if (coin !== COIN_WATCHLIST) await fetchTicker(coin); // koin tidak ada di Binance -> UnsupportedCoinError (ditangani pemanggil)
 
-  const entry = store.addHhllAlert(senderId, { chat: jid, coin, tf, dirs, stages, flipOnly });
+  const entry = store.addHhllAlert(senderId, { chat: jid, coin, tf, dirs, stages, flipOnly, strongOnly, alignedOnly });
   if (entry === "exists") return say(sock, jid, msg, t(lang, "hhllalert.exists"));
   if (entry === "full") return say(sock, jid, msg, t(lang, "hhllalert.full", { max: store.MAX_HHLL_ALERTS }));
   if (entry === "chatFull") return say(sock, jid, msg, t(lang, "hhllalert.chatFull", { max: store.MAX_HHLL_ALERTS_PER_CHAT }));
