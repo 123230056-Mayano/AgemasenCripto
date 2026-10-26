@@ -35,6 +35,7 @@
  *   !watch / !unwatch / !watchlist / !alert / !alertlevel / !alerts / !hapusalert /
  *   !harian / !stopharian -> watchlist & alert pribadi (watchlist.js, alertMonitor.js)
  *   !kurs / !konversi / !tf -> utilitas (utilitas.js)
+ *   !dusdt [tf]         -> USDT Dominance (USDT.D): nilai, perubahan, arah, konfirmasi BTC.D & BTC + interpretasi (dusdt.js)
  *
  * [tf] = 15m | 1H | 4H | 1D; kosong -> default pengguna (awal 4H).
  */
@@ -65,6 +66,7 @@ const { HHLLALERT_COMMANDS, HHLLALERT_RUNNERS, parseHhllAlertArgs } = require(".
 const { AMDALERT_COMMANDS, AMDALERT_RUNNERS, parseAmdAlertArgs } = require("./amdAlertCommand");
 const { WATCH_COMMANDS, WATCH_RUNNERS, parseWatchArgs } = require("./watchlist");
 const { UTIL_COMMANDS, UTIL_RUNNERS, parseUtilArgs } = require("./utilitas");
+const { DUSDT_COMMANDS, DUSDT_RUNNERS, parseDusdtArgs } = require("./dusdt");
 const { EMA_PERIODS, CROSS_LOOKBACK, computeEmas, classifyTrendAuto, detectCross, detectCrossStatuses } = require("./indicators");
 const {
   TIMEFRAMES,
@@ -574,6 +576,19 @@ async function handleKriptoCommand(sock, msg, { jid, text, lang }) {
       }
     }
   }
+  // USDT Dominance (!dusdt [tf]) -> lihat dusdt.js
+  let isDusdt = false;
+  if (!name) {
+    for (const [key, def] of Object.entries(DUSDT_COMMANDS)) {
+      const m = text.match(def.re);
+      if (m) {
+        name = key;
+        match = m;
+        isDusdt = true;
+        break;
+      }
+    }
+  }
   if (!name) return false;
 
   const senderId = getSenderJid(msg) || jid;
@@ -591,6 +606,7 @@ async function handleKriptoCommand(sock, msg, { jid, text, lang }) {
   else if (isAmdAlert) args = parseAmdAlertArgs(name, match[1] || "", getDefaultTf(senderId));
   else if (isWatch) args = parseWatchArgs(name, match[1] || "");
   else if (isUtil) args = parseUtilArgs(name, match[1] || "");
+  else if (isDusdt) args = parseDusdtArgs(name, match[1] || "", getDefaultTf(senderId));
   else if (name === "list") args = { coin: null, coin2: null, tf: null, keyword: match[1] || "" };
   else args = parseArgs(match[1] || "", COMMANDS[name]);
   if (!args) {
@@ -667,6 +683,10 @@ async function handleKriptoCommand(sock, msg, { jid, text, lang }) {
     }
     if (isUtil) {
       await UTIL_RUNNERS[name](sock, msg, { jid, lang, senderId }, args);
+      return true;
+    }
+    if (isDusdt) {
+      await DUSDT_RUNNERS[name](sock, msg, { jid, lang, senderId }, args);
       return true;
     }
     if (name === "list") {

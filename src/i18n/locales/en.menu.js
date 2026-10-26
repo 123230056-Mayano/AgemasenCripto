@@ -103,6 +103,7 @@ Fufu... welcome, Trainer-san. Here's the list of available commands. For crypto 
 ▸ !rate
 ▸ !convert
 ▸ !tf
+▸ !dusdt
 
 ┏━━━━━━━━━━━━━━━┓
 ┃ 💬 *AI CHAT*
@@ -515,4 +516,5 @@ The setting is saved permanently, so it won't reset when the bot restarts.`,
   "cmd.kurs": "💱 *!rate*\n\nShows the current 1 USDT to Rupiah rate.\n\n*Example:*\n```\n!rate\n```",
   "cmd.konversi": "🔄 *!convert <amount> <coin>*\n\nConverts an amount of a coin to USDT and Rupiah.\n\n*Example:*\n```\n!convert 2 SOL\n!convert 0.5 BTC\n```",
   "cmd.tf": "⏱️ *!tf <timeframe>*\n\nSaves your default timeframe, so [tf] in other commands can be left out. Options: 15m, 1H, 4H, 1D (initially 4H).\n\n*Example:*\n```\n!tf 1H\n```",
+  "cmd.dusdt": "💵 *!dusdt [tf]*\n\nShows USDT Dominance (USDT.D): current value, change over your chosen timeframe, direction (up / down / sideways), BTC.D & BTC price confirmation, plus a short interpretation. tf options: 15m, 1H, 4H, 1D. Empty = your default timeframe (!tf).\n\n*Example:*\n```\n!dusdt\n!dusdt 4h\n!dusdt 1d\n```\n\n_Market information only, not a trading signal or financial advice._",
 };
