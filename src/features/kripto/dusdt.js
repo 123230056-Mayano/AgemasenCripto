@@ -3,8 +3,10 @@
 /**
  * features/kripto/dusdt.js
  * ------------------------------------------------------------------
- * !dusdt [15m|1H|4H|1D] -> USDT Dominance (USDT.D): nilai terkini, perubahan pada timeframe
- * yang dipilih, arah (NAIK / TURUN / SIDEWAYS), interpretasi, plus konfirmasi BTC.D & harga BTC.
+ * !dusdt [15m|1H|4H|1D] -> USDT Dominance (USDT.D) ditampilkan seperti sebuah koin: nilai terkini,
+ * perubahan pada timeframe yang dipilih, arah (NAIK / TURUN / SIDEWAYS), lalu struktur HHLL
+ * (Higher High / Lower Low) dan Fibonacci yang dihitung dari candle USDT.D itu sendiri
+ * (logika sama dengan !hhll -> hhllCore.js dan !fib -> fib.js; levelnya dalam persen dominasi).
  *
  * Sumber data (semua API publik yang terdokumentasi / dipakai resmi oleh proyek ini; TradingView
  * TIDAK di-scrape):
@@ -33,6 +35,9 @@
 
 const axios = require("axios");
 const { t } = require("../../i18n");
+const { computeStructure, CFG: HHLL_CFG } = require("./hhllCore");
+const { computeFib, retraceDepth } = require("./fib");
+const { fmtWhen } = require("./hhll");
 
 const CG = (process.env.COINGECKO_BASE || "https://api.coingecko.com").replace(/\/+$/, "");
 const CMC = (process.env.CMC_DATA_BASE || "https://api.coinmarketcap.com").replace(/\/+$/, "");
@@ -55,6 +60,24 @@ const TF = {
   "4H": { label: "4H", ms: 4 * HOUR, sideways: 0.06, btcFlat: 0.6, cgDays: 2, cmcInterval: "1h", cmcMs: HOUR },
   "1D": { label: "1D", ms: 24 * HOUR, sideways: 0.12, btcFlat: 1.0, cgDays: 2, cmcInterval: "1h", cmcMs: HOUR },
 };
+
+/**
+ * Riwayat untuk membangun candle USDT.D (dipakai HHLL & Fib).
+ * bucketMs : lebar satu candle (sejajar UTC seperti Binance) | cmcInterval : interval data total market cap
+ * spanMs   : panjang riwayat yang diminta                    | cgDays : parameter days kapitalisasi USDT CoinGecko
+ * (1 hari -> per 5 menit, 2-90 hari -> per jam)
+ */
+const DAY = 24 * HOUR;
+const SERIES = {
+  "15M": { bucketMs: 15 * MIN, cmcInterval: "15m", cmcMs: 15 * MIN, spanMs: DAY, cgDays: 1 },
+  "1H": { bucketMs: HOUR, cmcInterval: "15m", cmcMs: 15 * MIN, spanMs: 5 * DAY, cgDays: 7 },
+  "4H": { bucketMs: 4 * HOUR, cmcInterval: "1h", cmcMs: HOUR, spanMs: 30 * DAY, cgDays: 30 },
+  "1D": { bucketMs: DAY, cmcInterval: "1h", cmcMs: HOUR, spanMs: 90 * DAY, cgDays: 90 },
+};
+// Dominasi bergerak kecil (sekitar 5-6%), jadi gerak minimal antar swing HHLL dibuat lebih kecil dari koin biasa.
+const DUSDT_MIN_SWING_PCT = 0.3;
+const HHLL_SHOW = 4; // jumlah swing terakhir yang ditulis
+const FIB_EXT_SHOW = 2; // extension yang ditulis (1.272 & 1.618)
 
 const TTL = { global: 2 * MIN, tether: 5 * MIN, cmc: 5 * MIN, btc: 1 * MIN };
 const FAIL_TTL = 30_000; // gagal di-cache singkat agar API yang sedang down tidak digempur
@@ -119,32 +142,49 @@ function fetchTether(days) {
   });
 }
 
-/** Riwayat total market cap + BTC.D. Parser longgar: bentuk respons data-api bisa berubah. */
+/** Parser longgar: bentuk respons data-api bisa berubah. */
+function parseCmcQuotes(res) {
+  const quotes = res.data?.data?.quotes;
+  if (!Array.isArray(quotes)) return null;
+  const out = [];
+  for (const q of quotes) {
+    const t0 = Date.parse(q.timestamp || q.quote?.[0]?.timestamp);
+    const total = Number(q.quote?.[0]?.totalMarketCap ?? q.totalMarketCap);
+    const btcD = Number(q.btcDominance ?? q.quote?.[0]?.btcDominance);
+    if (!isNum(t0) || !isNum(total) || total <= 0) continue;
+    out.push({ t: t0, total, btcD: isNum(btcD) ? btcD : null });
+  }
+  out.sort((a, b) => a.t - b.t);
+  return out.length >= 2 ? out : null;
+}
+
+function cmcRequest(interval, fromMs, toMs) {
+  return axios.get(`${CMC}/data-api/v3/global-metrics/quotes/historical`, {
+    params: {
+      convertId: 2781, // USD
+      timeStart: Math.floor(fromMs / 1000),
+      timeEnd: Math.floor(toMs / 1000),
+      interval,
+    },
+    timeout: 12_000,
+  });
+}
+
+/** Riwayat total market cap + BTC.D untuk satu timeframe (jendela pendek, dipakai level & perubahan). */
 function fetchCmc(tf) {
   const def = TF[tf];
   return memo(`cmc:${tf}`, TTL.cmc, async () => {
     const now = Date.now();
-    const res = await axios.get(`${CMC}/data-api/v3/global-metrics/quotes/historical`, {
-      params: {
-        convertId: 2781, // USD
-        timeStart: Math.floor((now - def.ms - 2 * HOUR) / 1000),
-        timeEnd: Math.floor(now / 1000),
-        interval: def.cmcInterval,
-      },
-      timeout: 12_000,
-    });
-    const quotes = res.data?.data?.quotes;
-    if (!Array.isArray(quotes)) return null;
-    const out = [];
-    for (const q of quotes) {
-      const t0 = Date.parse(q.timestamp || q.quote?.[0]?.timestamp);
-      const total = Number(q.quote?.[0]?.totalMarketCap ?? q.totalMarketCap);
-      const btcD = Number(q.btcDominance ?? q.quote?.[0]?.btcDominance);
-      if (!isNum(t0) || !isNum(total) || total <= 0) continue;
-      out.push({ t: t0, total, btcD: isNum(btcD) ? btcD : null });
-    }
-    out.sort((a, b) => a.t - b.t);
-    return out.length >= 2 ? out : null;
+    return parseCmcQuotes(await cmcRequest(def.cmcInterval, now - def.ms - 2 * HOUR, now));
+  });
+}
+
+/** Riwayat total market cap yang panjang, untuk membangun candle HHLL / Fib. */
+function fetchCmcSeries(tf) {
+  const def = SERIES[tf];
+  return memo(`cmcs:${tf}`, TTL.cmc, async () => {
+    const now = Date.now();
+    return parseCmcQuotes(await cmcRequest(def.cmcInterval, now - def.spanMs - def.bucketMs, now));
   });
 }
 
@@ -215,6 +255,55 @@ function direction(deltaPp, def) {
 }
 
 /**
+ * Candle USDT.D (o/h/l/c dalam persen dominasi) dari riwayat: tiap titik total market cap CMC dipasangkan
+ * dengan kapitalisasi USDT terdekat, lalu dikelompokkan per bucket timeframe. Hanya candle yang sudah closed;
+ * candle pertama yang datanya tidak penuh dibuang. Seluruh deret diskalakan supaya titik terakhirnya
+ * sama dengan level resmi (`level`), sama seperti aturan di header file ini (hanya perubahan relatif yang dipakai).
+ * @returns {{t:number,o:number,h:number,l:number,c:number}[]|null}
+ */
+function buildCandles(tether, cmc, tf, level, nowMs = Date.now()) {
+  const def = SERIES[tf];
+  if (!def || !tether?.length || !cmc?.length || !isNum(level)) return null;
+  const tol = def.cgDays === 1 ? 10 * MIN : 45 * MIN;
+  const pts = [];
+  for (const p of cmc) {
+    const tt = nearest(tether, p.t, tol);
+    if (!tt) continue;
+    const r = (tt.v / p.total) * 100;
+    if (isNum(r) && r > 0 && r < 100) pts.push({ t: p.t, r });
+  }
+  if (pts.length < 2) return null;
+  if (nowMs - pts[pts.length - 1].t > 3 * def.cmcMs + 15 * MIN) return null; // riwayat terlalu basi
+  const k = level / pts[pts.length - 1].r;
+
+  const buckets = new Map();
+  for (const p of pts) {
+    const start = Math.floor(p.t / def.bucketMs) * def.bucketMs;
+    const b = buckets.get(start);
+    const v = p.r * k;
+    if (!b) buckets.set(start, { t: start, o: v, h: v, l: v, c: v, first: p.t });
+    else {
+      b.h = Math.max(b.h, v);
+      b.l = Math.min(b.l, v);
+      b.c = v;
+    }
+  }
+  const all = [...buckets.values()].sort((a, b) => a.t - b.t);
+  const out = all.filter((b, i) => b.t + def.bucketMs <= nowMs && !(i === 0 && b.first - b.t > 2 * def.cmcMs));
+  return out.length ? out.map(({ t: t0, o, h, l, c }) => ({ t: t0, o, h, l, c })) : null;
+}
+
+/** HHLL + Fib dari candle USDT.D. Tiap bagian null kalau datanya belum cukup. */
+function buildStructure(candles) {
+  if (!candles || candles.length < HHLL_CFG.MIN_CANDLES) return { hhll: null, fib: null };
+  const st = computeStructure(candles, { minPct: DUSDT_MIN_SWING_PCT });
+  return {
+    hhll: st.lastHigh && st.lastLow && st.trend ? st : null,
+    fib: computeFib(candles),
+  };
+}
+
+/**
  * Gabungkan semua sumber jadi satu hasil. Mengembalikan null kalau level terkini tidak bisa didapat.
  * @returns {object|null}
  */
@@ -276,8 +365,19 @@ function buildResult(tf, g, tether, cmc, klines, nowMs = Date.now()) {
 async function getDusdt(tf) {
   const def = TF[tf];
   if (!def) return null;
-  const [g, tether, cmc, klines] = await Promise.all([fetchGlobal(), fetchTether(def.cgDays), fetchCmc(tf), fetchBtc()]);
-  return buildResult(tf, g, tether, cmc, klines);
+  const sdef = SERIES[tf];
+  const [g, tether, cmc, klines, tetherLong, cmcLong] = await Promise.all([
+    fetchGlobal(),
+    fetchTether(def.cgDays),
+    fetchCmc(tf),
+    fetchBtc(),
+    fetchTether(sdef.cgDays),
+    fetchCmcSeries(tf),
+  ]);
+  const result = buildResult(tf, g, tether, cmc, klines);
+  if (!result) return null;
+  const candles = buildCandles(tetherLong, cmcLong, tf, result.level);
+  return { ...result, ...buildStructure(candles), candleCount: candles ? candles.length : 0 };
 }
 
 // ---------- format pesan ----------
@@ -305,8 +405,8 @@ function buildAnalysis(lang, r) {
   return parts.join(" ");
 }
 
-/** @returns {string} teks WhatsApp */
-function formatDusdt(lang, r) {
+/** Versi lengkap lama (analisis pasar + konfirmasi BTC.D / BTC). Tidak dipakai command; dipertahankan untuk referensi/uji. */
+function formatDusdtFull(lang, r) {
   const lines = [t(lang, "dusdt.title"), t(lang, "dusdt.level", { v: r.level.toFixed(2) })];
 
   if (isNum(r.deltaPp)) {
@@ -336,6 +436,107 @@ function formatDusdt(lang, r) {
   if (confirm.length) lines.push("", ...confirm);
 
   lines.push("", t(lang, "dusdt.analysis.title"), buildAnalysis(lang, r), "", t(lang, "dusdt.note"), t(lang, "dusdt.source", { src: r.sources.join(", ") }));
+  return lines.join("\n");
+}
+
+// ---------- tampilan bergaya koin: nilai + HHLL + Fib ----------
+const fmtDom = (v) => `${v.toFixed(3)}%`; // level dominasi (3 desimal supaya level Fib yang berdekatan tetap terbedakan)
+const fmtPp = (v) => `${v >= 0 ? "+" : ""}${v.toFixed(3)} pp`; // jarak dari level sekarang, dalam poin persentase
+
+function buildHhllSection(lang, r) {
+  const st = r.hhll;
+  if (!st) return t(lang, "dusdt.hhll.none", { tf: r.tfLabel });
+  const swings = st.swings
+    .slice(-HHLL_SHOW)
+    .map((s) => {
+      const label = s.label || (s.type === "H" ? "high" : "low");
+      const icon = { HH: "🔺", HL: "🟢", LH: "🔻", LL: "🔴", EH: "➖", EL: "➖" }[s.label] || "▫️";
+      return t(lang, "hhll.swing.line", { icon, label, price: fmtDom(s.price), when: fmtWhen(lang, s.t, r.tfLabel) });
+    })
+    .join("\n");
+  const trendKey = st.trend === "up" ? "hhll.trend.up" : st.trend === "down" ? "hhll.trend.down" : "hhll.trend.range";
+  return [
+    t(lang, "dusdt.hhll.title", { tf: r.tfLabel }),
+    t(lang, trendKey, { h: st.lastHighLabel || "-", l: st.lastLowLabel || "-" }),
+    "",
+    t(lang, "hhll.swings.title"),
+    swings,
+    "",
+    t(lang, "hhll.levels.high", { price: fmtDom(st.lastHigh.price), pct: fmtPp(st.lastHigh.price - r.level) }),
+    t(lang, "hhll.levels.low", { price: fmtDom(st.lastLow.price), pct: fmtPp(st.lastLow.price - r.level) }),
+    t(lang, `dusdt.hhll.note.${st.trend}`, { high: fmtDom(st.lastHigh.price), low: fmtDom(st.lastLow.price) }),
+  ].join("\n");
+}
+
+const ratioLabel = (x) => (Number.isInteger(x) && x > 1 ? x.toFixed(1) : String(x));
+
+function buildFibSection(lang, r) {
+  const fib = r.fib;
+  if (!fib) return t(lang, "dusdt.fib.none", { tf: r.tfLabel });
+  const up = fib.trend === "up";
+  const swingPct = (Math.abs(fib.end - fib.start) / fib.start) * 100;
+  const trend = t(lang, up ? "kripto.fib.trendUp" : "kripto.fib.trendDown", {
+    from: fmtDom(fib.start),
+    to: fmtDom(fib.end),
+    pct: swingPct.toFixed(1),
+  });
+
+  const items = [
+    ...fib.retracement.map((l) => ({ ...l, ext: false })),
+    ...fib.extension.slice(0, FIB_EXT_SHOW).map((l) => ({ ...l, ext: true })),
+  ].sort((a, b) => b.price - a.price); // tinggi -> rendah, sama dengan !fib
+  const rows = items.map((it) => {
+    const icon = it.ext ? "🎯" : it.ratio === 0.5 || it.ratio === 0.618 ? "⭐" : it.ratio === 0 || it.ratio === 1 ? "📍" : "▫️";
+    let suffix = "";
+    if (!it.ext && it.ratio === 0) suffix = ` · ${t(lang, up ? "kripto.fib.swingHigh" : "kripto.fib.swingLow")}`;
+    if (!it.ext && it.ratio === 1) suffix = ` · ${t(lang, up ? "kripto.fib.swingLow" : "kripto.fib.swingHigh")}`;
+    return { price: it.price, text: `${icon} ${ratioLabel(it.ratio)}  ${fmtDom(it.price)} (${fmtPp(it.price - r.level)})${suffix}` };
+  });
+  const nowRow = `▶️ ${t(lang, "kripto.fib.now")} ${fmtDom(r.level)}`;
+  let at = rows.findIndex((x) => x.price < r.level);
+  if (at === -1) at = rows.length;
+  const lines = rows.map((x) => x.text);
+  lines.splice(at, 0, nowRow);
+
+  // posisi level sekarang terhadap swing
+  const depth = retraceDepth(fib, r.level);
+  let note;
+  if (depth < 0) note = t(lang, "kripto.fib.beyond");
+  else if (depth > 1) note = t(lang, "kripto.fib.broken");
+  else {
+    let k = 0;
+    for (let i = 0; i < fib.retracement.length - 1; i++) if (depth >= fib.retracement[i].ratio) k = i;
+    const a = fib.retracement[k];
+    const b = fib.retracement[Math.min(k + 1, fib.retracement.length - 1)];
+    note = t(lang, "kripto.fib.depth", {
+      pct: (depth * 100).toFixed(1),
+      a: `${ratioLabel(a.ratio)} (${fmtDom(a.price)})`,
+      b: `${ratioLabel(b.ratio)} (${fmtDom(b.price)})`,
+    });
+  }
+  return [t(lang, "dusdt.fib.title", { tf: r.tfLabel }), trend, "", ...lines, "", note].join("\n");
+}
+
+/** @returns {string} teks WhatsApp: USDT.D seperti satu koin, lalu HHLL dan Fib-nya. */
+function formatDusdt(lang, r) {
+  const head = [t(lang, "dusdt.coin.title", { tf: r.tfLabel }), t(lang, "dusdt.level", { v: r.level.toFixed(2) })];
+  if (isNum(r.deltaPp)) head.push(t(lang, "dusdt.change", { tf: r.tfLabel, pp: fmtSigned(r.deltaPp), rel: fmtPctS(r.relPct) }));
+  else head.push(t(lang, "dusdt.change.na", { tf: r.tfLabel }));
+  const dirIcon = { up: "🔼", down: "🔽", side: "➡️" }[r.dir] || "❔";
+  head.push(t(lang, "dusdt.dir", { icon: dirIcon, dir: r.dir ? t(lang, `dusdt.dir.${r.dir}`) : t(lang, "dusdt.dir.na") }));
+
+  const lines = [...head, ""];
+  if (r.candleCount === 0) {
+    lines.push(t(lang, "dusdt.struct.na"));
+  } else {
+    lines.push(buildHhllSection(lang, r), "", buildFibSection(lang, r));
+  }
+  lines.push(
+    "",
+    r.updatedAt ? t(lang, "dusdt.update", { time: fmtTime(lang, r.updatedAt) }) : t(lang, "dusdt.update.fetched", { time: fmtTime(lang, r.fetchedAt) }),
+  );
+  if (r.stale) lines.push(t(lang, "dusdt.stale", { min: Math.round((r.fetchedAt - r.updatedAt) / MIN) }));
+  lines.push(t(lang, "dusdt.source", { src: r.sources.join(", ") }), "", t(lang, "dusdt.note.short"));
   return lines.join("\n");
 }
 
@@ -369,6 +570,9 @@ module.exports = {
   getDusdt,
   buildResult,
   formatDusdt,
+  formatDusdtFull,
+  buildCandles,
+  buildStructure,
   ratioWindow,
   btcMove,
   direction,

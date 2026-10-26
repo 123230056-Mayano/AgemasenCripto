@@ -35,7 +35,7 @@
  *   !watch / !unwatch / !watchlist / !alert / !alertlevel / !alerts / !hapusalert /
  *   !harian / !stopharian -> watchlist & alert pribadi (watchlist.js, alertMonitor.js)
  *   !kurs / !konversi / !tf -> utilitas (utilitas.js)
- *   !dusdt [tf]         -> USDT Dominance (USDT.D): nilai, perubahan, arah, konfirmasi BTC.D & BTC + interpretasi (dusdt.js)
+ *   !dusdt [tf]         -> USDT Dominance (USDT.D) seperti satu koin: nilai, perubahan, arah + HHLL + Fib (dusdt.js)
  *
  * [tf] = 15m | 1H | 4H | 1D; kosong -> default pengguna (awal 4H).
  */

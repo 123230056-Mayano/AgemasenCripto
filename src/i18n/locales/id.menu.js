@@ -72,5 +72,5 @@ module.exports = {
   "cmd.kurs": "💱 *!kurs*\n\nMenampilkan kurs 1 USDT ke Rupiah saat ini.\n\n*Contoh:*\n```\n!kurs\n```",
   "cmd.konversi": "🔄 *!konversi <jumlah> <koin>*\n\nMengonversi jumlah koin ke USDT dan Rupiah.\n\n*Contoh:*\n```\n!konversi 2 SOL\n!konversi 0,5 BTC\n```",
   "cmd.tf": "⏱️ *!tf <timeframe>*\n\nMenyimpan timeframe default-mu, jadi [tf] di command lain boleh dikosongkan. Pilihan: 15m, 1H, 4H, 1D (awal: 4H).\n\n*Contoh:*\n```\n!tf 1H\n```",
-  "cmd.dusdt": "💵 *!dusdt [tf]*\n\nMenampilkan USDT Dominance (USDT.D): nilai terkini, perubahan pada timeframe pilihanmu, arah (naik / turun / sideways), konfirmasi BTC.D & harga BTC, plus interpretasi singkat. Pilihan tf: 15m, 1H, 4H, 1D. Kosong = timeframe default-mu (!tf).\n\n*Contoh:*\n```\n!dusdt\n!dusdt 4h\n!dusdt 1d\n```\n\n_Hanya informasi pasar, bukan sinyal trading atau saran finansial._",
+  "cmd.dusdt": "💵 *!dusdt [tf]*\n\nMenampilkan USDT Dominance (USDT.D) seperti satu koin: nilai terkini, perubahan pada timeframe pilihanmu, arah (naik / turun / sideways), plus struktur Higher High / Lower Low dan level Fibonacci USDT.D (dalam persen dominasi). Pilihan tf: 15m, 1H, 4H, 1D. Kosong = timeframe default-mu (!tf).\n\n*Contoh:*\n```\n!dusdt\n!dusdt 4h\n!dusdt 1d\n```\n\n_Hanya informasi pasar, bukan sinyal trading atau saran finansial._",
 };
