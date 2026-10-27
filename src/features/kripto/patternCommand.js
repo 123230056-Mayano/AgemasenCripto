@@ -18,6 +18,7 @@ const { scanCandlePatterns } = require("./candlePatterns");
 const { scanSwingPatterns, capChoch } = require("./swingPatterns");
 const core = require("./patternCore");
 const { buildTrendline, trendlineStatus } = require("./patternTrendline");
+const { htfSummary, labelPatterns } = require("./htfPriority");
 const { STATUS, DIR } = core;
 
 const ALL_TFS = ["15M", "1H", "4H", "1D"];
@@ -77,6 +78,18 @@ function levelLine(lang, p) {
   return t(lang, `pola.lv.${side}`, { confirm, invalid });
 }
 
+/** Baris arah TF besar di atas hasil satu TF (kosong bila tidak ada TF besar, mis. 1D). */
+function htfHeadLine(lang, htf) {
+  if (!htf || htf.state === "none") return null;
+  return t(lang, `pola.htf.${htf.state}`, { htf: TF_LABEL[htf.tf] || htf.tf });
+}
+
+/** Label prioritas satu pola (null = pola berarah netral / tidak ada TF besar). */
+function priorityLine(lang, p, htf) {
+  if (!p.priority || !htf || !htf.tf) return null;
+  return t(lang, `pola.prio.${p.priority}`, { htf: TF_LABEL[htf.tf] || htf.tf });
+}
+
 /** Angka desimal kecil dengan koma di bahasa Indonesia. */
 const numTxt = (lang, v, d = 1) => (lang === "id" ? v.toFixed(d).replace(".", ",") : v.toFixed(d));
 
@@ -112,6 +125,8 @@ function trendlineBlock(lang, res) {
 function formatOne(lang, { res }) {
   const lines = [];
   const shown = res.patterns.slice(0, CFG.MAX_SHOW);
+  const htfLine = htfHeadLine(lang, res.htf);
+  if (htfLine) lines.push(htfLine, "");
   if (!shown.length) lines.push(t(lang, "pola.none", { n: CFG.RECENT_BARS }));
   for (const p of shown) {
     lines.push(
@@ -124,6 +139,8 @@ function formatOne(lang, { res }) {
       }),
     );
     lines.push(whenText(lang, res.lastI, p));
+    const pl = priorityLine(lang, p, res.htf);
+    if (pl) lines.push(pl);
     lines.push(...evidenceLines(lang, p));
     const ab = absorbedLine(lang, p);
     if (ab) lines.push(ab);
@@ -142,6 +159,10 @@ function formatOne(lang, { res }) {
 /** Ringkasan semua timeframe (res per TF boleh null = data belum cukup). */
 function formatAll(lang, { coin, results, price, change }) {
   const lines = [t(lang, "pola.all.title", { coin, price, change }), ""];
+  // kesimpulan arah TF besar: struktur 1D (TF tertinggi); tidak tersedia = ditulis, bukan ditebak
+  const top = results["1D"];
+  const topState = top && top.ok && top.trend ? top.trend : "na";
+  lines.push(t(lang, `pola.all.htf.${topState}`, { htf: TF_LABEL["1D"] }), "");
   for (const tf of ALL_TFS) {
     const res = results[tf];
     const label = TF_LABEL[tf];
@@ -165,6 +186,8 @@ function formatAll(lang, { coin, results, price, change }) {
         when: whenText(lang, res.lastI, p),
       }),
     );
+    const pl = priorityLine(lang, p, res.htf);
+    if (pl) lines.push("   " + pl);
   }
   lines.push("", t(lang, "pola.all.hint", { coin }), t(lang, "pola.heuristic"), t(lang, "pola.foot"));
   return lines.join("\n");
@@ -214,6 +237,12 @@ function scanTf(tf, candles, htfCandles) {
     htfTf,
   });
   const res = mergeScans(candle, swing);
+  if (res.ok) {
+    // Fitur 2: label prioritas dari tren TF besar yang sudah closed (tanpa lookahead). Tidak mengubah grade / status.
+    const htfTrend = htfTrendFn ? htfTrendFn(candles[candles.length - 1]) : null;
+    res.htf = htfSummary(htfTf, htfTrend);
+    labelPatterns(res.patterns, htfTrend, !!htfTf);
+  }
   // trendline = informasi tambahan (tidak mengubah grade / status pola); gagal hitung -> null, !pola tetap jalan
   if (res.ok) res.trendline = buildTrendline(candles, res.atrLast, res.trend);
   return res;
