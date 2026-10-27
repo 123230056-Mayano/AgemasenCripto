@@ -32,6 +32,7 @@
  *   !alertsignal <koin|watchlist> [tf] [long|short] [tunggu] | list | off | hapus <id|semua>  (alarm skenario sinyal seperti !signal, signalAlertCommand.js). Alias: !alertsinyal
  *   !alertamd <koin|watchlist> [tf] [naik|turun] [dini|konfirmasi] [rr<tp1>:<tp2>] [sl <harga>] [tp <harga>] | list | off | hapus <id|semua>  (alarm AMD, amdAlertCommand.js)
  *   !alerthhll <koin|watchlist> [tf] [naik|turun] [dini|konfirmasi] [balik] | list | off | hapus <id|semua>  (alarm Higher High / Lower Low, hhllAlertCommand.js)
+ *   !alertpola <koin|watchlist> [tf] [naik|turun] [dini|konfirmasi] [kuat] | list | off | hapus <id|semua>  (alarm pola baru / terkonfirmasi, patternAlertCommand.js). Alias: !alertpattern
  *   !alertdivergent (!alertdiv) <koin|semua|watchlist> [tf] [rsi|macd] | list | hapus <id|semua>
  *                        -> alarm divergence otomatis tiap candle closed (divAlertCommand.js, alertMonitor.js)
  *   !watch / !unwatch / !watchlist / !alert / !alertlevel / !alerts / !hapusalert /
@@ -68,6 +69,7 @@ const { SNRALERT_COMMANDS, SNRALERT_RUNNERS, parseSnrAlertArgs } = require("./sn
 const { SIGNALALERT_COMMANDS, SIGNALALERT_RUNNERS, parseSignalAlertArgs } = require("./signalAlertCommand");
 const { POSITION_COMMANDS, POSITION_RUNNERS, parsePositionCommandArgs } = require("./positionCommand");
 const { HHLLALERT_COMMANDS, HHLLALERT_RUNNERS, parseHhllAlertArgs } = require("./hhllAlertCommand");
+const { PATALERT_COMMANDS, PATALERT_RUNNERS, parsePatternAlertArgs } = require("./patternAlertCommand");
 const { AMDALERT_COMMANDS, AMDALERT_RUNNERS, parseAmdAlertArgs } = require("./amdAlertCommand");
 const { WATCH_COMMANDS, WATCH_RUNNERS, parseWatchArgs } = require("./watchlist");
 const { UTIL_COMMANDS, UTIL_RUNNERS, parseUtilArgs } = require("./utilitas");
@@ -545,6 +547,19 @@ async function handleKriptoCommand(sock, msg, { jid, text, lang }) {
       }
     }
   }
+  // Alarm pola (!alertpola: pola baru dini + terkonfirmasi, dari candle closed) -> lihat patternAlertCommand.js
+  let isPatAlert = false;
+  if (!name) {
+    for (const [key, def] of Object.entries(PATALERT_COMMANDS)) {
+      const m = text.match(def.re);
+      if (m) {
+        name = key;
+        match = m;
+        isPatAlert = true;
+        break;
+      }
+    }
+  }
   // Alarm Accumulation / Manipulation / Distribution (!alertamd: sweep dini + break struktur, konfirmasi) -> lihat amdAlertCommand.js
   let isAmdAlert = false;
   if (!name) {
@@ -624,6 +639,7 @@ async function handleKriptoCommand(sock, msg, { jid, text, lang }) {
   else if (isSignalAlert) args = parseSignalAlertArgs(name, match[1] || "", getDefaultTf(senderId));
   else if (isPosition) args = parsePositionCommandArgs(name, match[1] || "", getDefaultTf(senderId));
   else if (isHhllAlert) args = parseHhllAlertArgs(name, match[1] || "", getDefaultTf(senderId));
+  else if (isPatAlert) args = parsePatternAlertArgs(name, match[1] || "", getDefaultTf(senderId));
   else if (isAmdAlert) args = parseAmdAlertArgs(name, match[1] || "", getDefaultTf(senderId));
   else if (isWatch) args = parseWatchArgs(name, match[1] || "");
   else if (isUtil) args = parseUtilArgs(name, match[1] || "");
@@ -693,6 +709,10 @@ async function handleKriptoCommand(sock, msg, { jid, text, lang }) {
     }
     if (isHhllAlert) {
       await HHLLALERT_RUNNERS[name](sock, msg, { jid, lang, senderId }, args);
+      return true;
+    }
+    if (isPatAlert) {
+      await PATALERT_RUNNERS[name](sock, msg, { jid, lang, senderId }, args);
       return true;
     }
     if (isAmdAlert) {

@@ -81,6 +81,7 @@ function detectEvents(prevPatterns, nowPatterns) {
       level: p.confirmLevel,
       invalid: p.invalidLevel,
       id: patternId(p),
+      endI: p.endI, // index candle penutup di array yang dipindai; engine memakainya untuk kunci dedupe berbasis waktu
     });
   }
   return out;
@@ -91,8 +92,11 @@ function withMeta(events, { coin, tf, candleT, now }) {
   return events.map((e) => ({ ...e, coin, tf, candleT, now }));
 }
 
-/** Kejadian hanya sah kalau candle X dibuka pada/ setelah candle yang sedang berjalan saat alarm dibuat. */
-const isAfterCreation = (sub, candleT) => !isNum(sub?.createdAt) || candleT >= sub.createdAt;
+/**
+ * Kejadian hanya sah kalau candle X TUTUP setelah alarm dibuat (tfMs diberikan; sama dengan aturan hhllAlertEngine).
+ * Tanpa tfMs: candle X harus DIBUKA pada/sesudah alarm dibuat (lebih ketat; perilaku lama).
+ */
+const isAfterCreation = (sub, candleT, tfMs) => !isNum(sub?.createdAt) || (isNum(tfMs) && tfMs > 0 ? candleT + tfMs > sub.createdAt : candleT >= sub.createdAt);
 
 /**
  * Saring kejadian sesuai langganan { dirs, anyDir, stages, strongOnly }.

@@ -15,6 +15,7 @@
  *   - peringatan posisi (!posisi): WASPADA / CUT / time stop / saran break-even. Mesinnya di positionEngine.js.
  *   - alarm Higher High / Lower Low (!alerthhll): swing baru (dini) + close menembus swing (konfirmasi), dari candle closed.
  *     Mesinnya di hhllAlertEngine.js; banyak kejadian dikirim sebagai 1 PDF per penerima.
+ *   - alarm pola (!alertpola): pola candlestick/swing baru (dini) + terkonfirmasi, dari candle closed. Mesinnya di patternAlertEngine.js; dikirim sebagai teks berpotongan.
  *   - alarm Accumulation / Manipulation / Distribution (!alertamd): sweep range (dini) + break struktur (konfirmasi), dari candle closed.
  *     Mesinnya di amdAlertEngine.js; tiap kejadian dikirim sebagai gambar chart + caption berisi rencana SL/TP.
  *   - alarm USDT.D masuk golden zone Fibonacci 0.5-0.618 (!alertdusdt): level USDT.D terkini vs swing fib candle closed USDT.D.
@@ -68,12 +69,13 @@ const { createSnrEngine } = require("./snrAlertEngine");
 const { createSignalEngine } = require("./signalAlertEngine");
 const { createPositionEngine } = require("./positionEngine");
 const { createHhllEngine } = require("./hhllAlertEngine");
+const { createPatternEngine } = require("./patternAlertEngine");
 const { buildHhllPdf } = require("./hhllPdf");
 const { createAmdEngine } = require("./amdAlertEngine");
 const { renderAmdChart } = require("./amd");
 const { createDusdtEngine } = require("./dusdtAlertEngine");
 const { getDusdt, renderDusdtChart } = require("./dusdt");
-const { ADV_ALERT_CONFIG: ADV, SNR_ALERT_CONFIG: SNR, SIGNAL_ALERT_CONFIG: SIGCFG, HHLL_ALERT_CONFIG: HHLL, AMD_ALERT_CONFIG: AMDCFG, DUSDT_ALERT_CONFIG: DUSDTCFG, POSITION_CONFIG: POSCFG } = require("../../config/indicatorConfig");
+const { ADV_ALERT_CONFIG: ADV, SNR_ALERT_CONFIG: SNR, SIGNAL_ALERT_CONFIG: SIGCFG, HHLL_ALERT_CONFIG: HHLL, PATTERN_ALERT_CONFIG: PATCFG, AMD_ALERT_CONFIG: AMDCFG, DUSDT_ALERT_CONFIG: DUSDTCFG, POSITION_CONFIG: POSCFG } = require("../../config/indicatorConfig");
 
 const BINANCE = (process.env.BINANCE_BASE || "https://data-api.binance.vision").replace(/\/+$/, "");
 const POLL_MS = Math.max(10_000, Number(process.env.ALERT_POLL_MS) || 30_000);
@@ -94,6 +96,7 @@ let snrBusy = false;
 let signalBusy = false;
 let posBusy = false;
 let hhllBusy = false;
+let patBusy = false;
 let amdBusy = false;
 let dusdtBusy = false;
 
@@ -652,6 +655,18 @@ const hhllEngine = createHhllEngine({
 /** Pemeriksaan alarm HH/LL (dini + konfirmasi). Dipanggil timer; aman dipanggil manual untuk uji. */
 const checkHhllAlerts = (now) => (sockRef ? hhllEngine.tick(now) : undefined);
 
+// ---------- alarm pola (!alertpola) ----------
+const patternEngine = createPatternEngine({
+  store,
+  fetchCandles,
+  notify,
+  langFor,
+  isUnsupported: (err) => err instanceof UnsupportedCoinError,
+});
+
+/** Pemeriksaan alarm pola (dini + konfirmasi). Dipanggil timer; aman dipanggil manual untuk uji. */
+const checkPatternAlerts = (now) => (sockRef ? patternEngine.tick(now) : undefined);
+
 // ---------- alarm Accumulation / Manipulation / Distribution (!alertamd) ----------
 const amdEngine = createAmdEngine({
   store,
@@ -783,6 +798,18 @@ function setAlertSocket(sock) {
   }, HHLL.CHECK_MS).unref?.();
 
   setInterval(async () => {
+    if (patBusy) return;
+    patBusy = true;
+    try {
+      await checkPatternAlerts();
+    } catch (err) {
+      console.log("[patalert] pengecekan gagal:", err.message);
+    } finally {
+      patBusy = false;
+    }
+  }, PATCFG.CHECK_MS).unref?.();
+
+  setInterval(async () => {
     if (amdBusy) return;
     amdBusy = true;
     try {
@@ -807,4 +834,4 @@ function setAlertSocket(sock) {
   }, DUSDTCFG.CHECK_MS).unref?.();
 }
 
-module.exports = { setAlertSocket, notifyImage, checkPriceAlerts, checkDaily, checkDivergence, checkAdvAlerts, checkSnrAlerts, checkSignalAlerts, checkPositions, checkHhllAlerts, checkAmdAlerts, checkDusdtAlerts, localNow, fetchPrices };
+module.exports = { setAlertSocket, notifyImage, checkPriceAlerts, checkDaily, checkDivergence, checkAdvAlerts, checkSnrAlerts, checkSignalAlerts, checkPositions, checkHhllAlerts, checkPatternAlerts, checkAmdAlerts, checkDusdtAlerts, localNow, fetchPrices };

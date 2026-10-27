@@ -74,7 +74,7 @@ const posInt = (v, d) => (Number.isInteger(Number(v)) && Number(v) > 0 ? Number(
 const MAX_DIV_ALERTS = posInt(process.env.DIV_ALERT_MAX_PER_USER, 10);
 const MAX_DIV_ALERTS_PER_CHAT = posInt(process.env.DIV_ALERT_MAX_PER_CHAT, 20);
 // Batas alarm indikator lanjutan (!alertind, item 10); angka sama dengan ADV_ALERT_CONFIG.
-const { ADV_ALERT_CONFIG, SNR_ALERT_CONFIG, SIGNAL_ALERT_CONFIG, HHLL_ALERT_CONFIG, AMD_ALERT_CONFIG, DUSDT_ALERT_CONFIG, POSITION_CONFIG } = require("../config/indicatorConfig");
+const { ADV_ALERT_CONFIG, SNR_ALERT_CONFIG, SIGNAL_ALERT_CONFIG, HHLL_ALERT_CONFIG, AMD_ALERT_CONFIG, DUSDT_ALERT_CONFIG, POSITION_CONFIG, PATTERN_ALERT_CONFIG } = require("../config/indicatorConfig");
 const MAX_ADV_ALERTS = ADV_ALERT_CONFIG.MAX_PER_USER;
 const MAX_ADV_ALERTS_PER_CHAT = ADV_ALERT_CONFIG.MAX_PER_CHAT;
 // Batas alarm titik balik S/R (!alertsnr); angka sama dengan SNR_ALERT_CONFIG.
@@ -90,6 +90,9 @@ const MAX_POSITIONS_PER_CHAT = POSITION_CONFIG.MAX_PER_CHAT;
 // Batas alarm Higher High / Lower Low (!alerthhll); angka sama dengan HHLL_ALERT_CONFIG.
 const MAX_HHLL_ALERTS = HHLL_ALERT_CONFIG.MAX_PER_USER;
 const MAX_HHLL_ALERTS_PER_CHAT = HHLL_ALERT_CONFIG.MAX_PER_CHAT;
+// Batas alarm pola (!alertpola); angka sama dengan PATTERN_ALERT_CONFIG.
+const MAX_PATTERN_ALERTS = PATTERN_ALERT_CONFIG.MAX_PER_USER;
+const MAX_PATTERN_ALERTS_PER_CHAT = PATTERN_ALERT_CONFIG.MAX_PER_CHAT;
 // Batas alarm Accumulation / Manipulation / Distribution (!alertamd); angka sama dengan AMD_ALERT_CONFIG.
 const MAX_AMD_ALERTS = AMD_ALERT_CONFIG.MAX_PER_USER;
 const MAX_AMD_ALERTS_PER_CHAT = AMD_ALERT_CONFIG.MAX_PER_CHAT;
@@ -137,7 +140,7 @@ let failures = 0;
 let started = false;
 
 // ---------- helper ----------
-const isEmpty = (u) => !u || (!u.watch?.length && !u.alerts?.length && !u.divAlerts?.length && !u.advAlerts?.length && !u.snrAlerts?.length && !u.signalAlerts?.length && !u.hhllAlerts?.length && !u.amdAlerts?.length && !u.dusdtAlerts?.length && !u.positions?.length && !u.daily && !u.tf);
+const isEmpty = (u) => !u || (!u.watch?.length && !u.alerts?.length && !u.divAlerts?.length && !u.advAlerts?.length && !u.snrAlerts?.length && !u.signalAlerts?.length && !u.hhllAlerts?.length && !u.patternAlerts?.length && !u.amdAlerts?.length && !u.dusdtAlerts?.length && !u.positions?.length && !u.daily && !u.tf);
 const snap = (jid) => (isEmpty(users[jid]) ? null : JSON.stringify(users[jid]));
 const hasPending = () => dirtyUsers.size > 0 || dirtyClosed.size > 0 || dirtySent.size > 0 || pruneBefore != null;
 
@@ -455,6 +458,8 @@ function user(jid) {
     if (typeof a.strongOnly !== "boolean") a.strongOnly = false;
     if (typeof a.alignedOnly !== "boolean") a.alignedOnly = false;
   }
+  if (!Array.isArray(u.patternAlerts)) u.patternAlerts = [];
+  if (!u.nextPatternId) u.nextPatternId = 1;
   if (!Array.isArray(u.amdAlerts)) u.amdAlerts = [];
   if (!u.nextAmdId) u.nextAmdId = 1;
   if (!Array.isArray(u.dusdtAlerts)) u.dusdtAlerts = [];
@@ -1019,6 +1024,68 @@ function allHhllAlerts() {
   return out;
 }
 
+// ---------- alarm pola (!alertpola) ----------
+/**
+ * patternAlerts: [{ id: "p1", chat, coin: "BTC"|"WATCHLIST", tf, dirs: ["up","down"], anyDir: boolean,
+ *                   stages: ["early","confirm"], strongOnly: boolean, createdAt, active: true }]
+ * Bentuk sama dengan hasil parsePatternArgs (patternAlertCore.js). Penanda kejadian terkirim memakai kunci dedupe
+ * yang sama dengan alarm lain (wasSent / markSent). Batas jumlah ditegakkan di sini (per orang dan per chat).
+ */
+const getPatternAlerts = (jid) => [...user(jid).patternAlerts];
+
+/** Dua langganan dianggap sama kalau semua opsinya sama (id / waktu dibuat tidak dihitung). Sama dengan patternAlertCore.sameSub. */
+const samePatternSub = (a, b) => a.coin === b.coin && a.tf === b.tf && sameList(a.dirs || [], b.dirs || []) && !!a.anyDir === !!b.anyDir && sameList(a.stages || [], b.stages || []) && !!a.strongOnly === !!b.strongOnly;
+
+function countPatternAlertsInChat(chat) {
+  let n = 0;
+  for (const u of Object.values(users)) for (const a of u.patternAlerts || []) if (a.chat === chat) n++;
+  return n;
+}
+
+/** @returns {object|"full"|"chatFull"|"exists"} */
+function addPatternAlert(jid, sub) {
+  const u = user(jid);
+  if (u.patternAlerts.some((a) => a.chat === sub.chat && samePatternSub(a, sub))) return "exists";
+  if (u.patternAlerts.length >= MAX_PATTERN_ALERTS) return "full";
+  if (countPatternAlertsInChat(sub.chat) >= MAX_PATTERN_ALERTS_PER_CHAT) return "chatFull";
+  const entry = { ...sub, id: `p${u.nextPatternId++}`, createdAt: Date.now(), active: true };
+  u.patternAlerts.push(entry);
+  save(jid);
+  return entry;
+}
+
+/** id boleh "p3" / "P3" / "3". @returns {boolean} */
+function removePatternAlert(jid, id) {
+  const u = user(jid);
+  const want = /^\d+$/.test(String(id)) ? `p${id}` : String(id).toLowerCase();
+  const i = u.patternAlerts.findIndex((a) => a.id === want);
+  if (i < 0) return false;
+  u.patternAlerts.splice(i, 1);
+  prune(jid);
+  save(jid);
+  return true;
+}
+
+/** @returns {number} jumlah alarm yang dihapus */
+function clearPatternAlerts(jid) {
+  const u = user(jid);
+  const n = u.patternAlerts.length;
+  if (!n) return 0;
+  u.patternAlerts = [];
+  prune(jid);
+  save(jid);
+  return n;
+}
+
+/** Semua alarm pola aktif semua user (untuk monitor). */
+function allPatternAlerts() {
+  const out = [];
+  for (const [jid, u] of Object.entries(users)) {
+    for (const a of u.patternAlerts || []) if (a.active !== false) out.push({ userJid: jid, sub: a });
+  }
+  return out;
+}
+
 // ---------- alarm Accumulation / Manipulation / Distribution (!alertamd) ----------
 /**
  * amdAlerts: [{ id: "a1", chat, coin: "BTC"|"WATCHLIST", tf, dirs: ["up","down"], stages: ["early","confirm"],
@@ -1177,6 +1244,8 @@ module.exports = {
   MAX_POSITIONS_PER_CHAT,
   MAX_HHLL_ALERTS,
   MAX_HHLL_ALERTS_PER_CHAT,
+  MAX_PATTERN_ALERTS,
+  MAX_PATTERN_ALERTS_PER_CHAT,
   MAX_AMD_ALERTS,
   MAX_AMD_ALERTS_PER_CHAT,
   DIV_SENT_TTL_MS,
@@ -1231,6 +1300,12 @@ module.exports = {
   clearHhllAlerts,
   allHhllAlerts,
   countHhllAlertsInChat,
+  getPatternAlerts,
+  addPatternAlert,
+  removePatternAlert,
+  clearPatternAlerts,
+  allPatternAlerts,
+  countPatternAlertsInChat,
   getDusdtAlerts,
   addDusdtAlert,
   removeDusdtAlert,
