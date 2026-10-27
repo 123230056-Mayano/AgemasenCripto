@@ -11,6 +11,7 @@
  *   !snr <koin> [tf]     -> Support & Resistance lengkap: R1-R3/S1-S3 + kekuatan level + chart (snr.js)
  *   !fib <koin> [tf]     -> Fibonacci retracement + extension otomatis, arah ikut tren + chart (fib.js)
  *   !trenstate <koin> [tf|semua] -> lanjut tren / pullback sehat / waspada reversal / reversal terkonfirmasi / range + alasan + level batal (trenState.js). Alias: !ts, !pullback
+ *   !pola <koin> [tf|semua] -> pola candlestick (engulfing, pin bar, doji, star, inside bar, tweezer, harami, piercing/dark cloud, marubozu, three soldiers/crows, three methods) di ekstrem swing / zona SNR, bukti bersyarat dengan level konfirmasi + batal (candlePatterns.js, patternCommand.js). Alias: !pattern
  *   !hhll <koin> [tf]    -> market structure Higher High / Higher Low / Lower High / Lower Low + status tren + chart (hhll.js). Alias: !struktur
  *   !ema <koin> [tf]     -> EMA 20/50/200 + posisi harga (di atas / di bawah)
  *   !movave <koin> [tf] [sma|ema] -> Moving Average SMA & EMA 20/50/200 + posisi harga + golden/death cross (movave.js). Alias: !ma, !movingaverage
@@ -54,6 +55,7 @@ const { runFib, computeFib } = require("./fib");
 const { buildChartInsight } = require("./chartInsight");
 const { runHhll } = require("./hhll");
 const { runTrenState } = require("./trenStateCommand");
+const { runPola } = require("./patternCommand");
 const { ALL_RUNNERS } = require("./allPdf");
 const { runMovave, MOVAVE_TYPES } = require("./movave");
 const { PASAR_COMMANDS, PASAR_RUNNERS, parsePasarArgs } = require("./pasar");
@@ -99,6 +101,7 @@ const COMMANDS = {
   fib: { re: /^!(?:fib|fibo|fibonacci)(?:\s+([\s\S]*))?$/i, useTf: true, allTf: true },
   hhll: { re: /^!(?:hhll|struktur|structure)(?:\s+([\s\S]*))?$/i, useTf: true },
   trenstate: { re: /^!(?:trenstate|ts|pullback)(?:\s+([\s\S]*))?$/i, useTf: true, allTf: true, allWords: ["ALL", "SEMUA"] },
+  pola: { re: /^!(?:pola|pattern)(?:\s+([\s\S]*))?$/i, useTf: true, allTf: true, allWords: ["ALL", "SEMUA"] },
   ema: { re: /^!ema(?:\s+([\s\S]*))?$/i, useTf: true },
   movave: { re: /^!(?:movave|movingaverage|ma)(?:\s+([\s\S]*))?$/i, useTf: true, types: MOVAVE_TYPES },
   tren: { re: /^!(?:tren|trend)(?:\s+([\s\S]*))?$/i, useTf: true },
@@ -375,7 +378,7 @@ async function runBandingkan(sock, msg, { jid, lang, senderId }, { coin, coin2 }
   );
 }
 
-const RUNNERS = { chart: runChart, harga: runHarga, level: runLevel, snr: runSnr, fib: runFib, hhll: runHhll, trenstate: runTrenState, ema: runEma, movave: runMovave, tren: runTren, mtf: runMtf, bandingkan: runBandingkan };
+const RUNNERS = { chart: runChart, harga: runHarga, level: runLevel, snr: runSnr, fib: runFib, hhll: runHhll, trenstate: runTrenState, pola: runPola, ema: runEma, movave: runMovave, tren: runTren, mtf: runMtf, bandingkan: runBandingkan };
 
 async function runList(sock, msg, { jid, lang }, keyword) {
   const all = await getAvailableCoins(lang);

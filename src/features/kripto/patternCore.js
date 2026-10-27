@@ -102,7 +102,7 @@ function makePattern(p) {
     target: isNum(p.target) ? p.target : null,
     trendBefore: p.trendBefore ?? null, // wajib untuk BOS / CHoCH
     stage: p.stage ?? null, // mis. "retest" (tahap lanjutan pola induk)
-    evidence: Array.isArray(p.evidence) ? p.evidence.map((e) => ({ sign: e.sign, text: e.text })) : [],
+    evidence: Array.isArray(p.evidence) ? p.evidence.map((e) => ({ sign: e.sign, text: e.text, ...(e.key ? { key: e.key } : {}), ...(e.params ? { params: e.params } : {}) })) : [], // key/params = kunci i18n + parameter (opsional)
     notes: Array.isArray(p.notes) ? [...p.notes] : [], // sub-jenis dan pola yang diserap (keterangan, bukan label sendiri)
     grade: null,
   };
@@ -151,6 +151,11 @@ const PRIORITY_RULES = Object.freeze([
   { winner: "piercing", losers: ["harami"], mode: "same", why: "piercing > harami" },
   { winner: "darkCloud", losers: ["harami"], mode: "same", why: "dark cloud > harami" },
   { winner: "harami", losers: ["insideBar"], mode: "same", why: "harami (body di dalam body) > inside bar" },
+  // Tambahan Langkah 1 (Fase 1 candlestick): candle yang sama tidak boleh dilaporkan dobel.
+  { winner: "pinBar", losers: ["doji"], mode: "same", why: "pin bar (punya arah) > doji pada candle yang sama" },
+  { winner: "morningStar", losers: ["engulfing", "piercing", "darkCloud", "harami", "insideBar"], mode: "same", why: "pola lebih besar (3 candle) menang atas pola 2 candle di candle penutup yang sama" },
+  { winner: "eveningStar", losers: ["engulfing", "piercing", "darkCloud", "harami", "insideBar"], mode: "same", why: "pola lebih besar (3 candle) menang atas pola 2 candle di candle penutup yang sama" },
+  { winner: "threeMethods", losers: ["engulfing", "marubozu", "insideBar"], mode: "same", why: "three methods menyerap candle penutupnya" },
   { winner: "threeWhiteSoldiers", losers: ["marubozu"], mode: "overlap", why: "three soldiers menyerap marubozu di dalamnya" },
   { winner: "threeBlackCrows", losers: ["marubozu"], mode: "overlap", why: "three crows menyerap marubozu di dalamnya" },
   { winner: "doubleTop", losers: ["tweezerTop"], mode: "overlap", why: "double top > tweezer (beda skala)" },
@@ -171,7 +176,8 @@ const spanOf = (p) => p.endI - p.startI + 1;
 
 function absorb(winner, loser, why) {
   winner.notes.push(`${loser.kind} (${why})`);
-  for (const e of loser.evidence) winner.evidence.push(e);
+  // bukti yang sama (tanda + teks/kunci) tidak dihitung dua kali, supaya penyerapan tidak menggelembungkan grade
+  for (const e of loser.evidence) if (!winner.evidence.some((w) => w.sign === e.sign && (w.key || w.text) === (e.key || e.text))) winner.evidence.push(e);
 }
 
 /**

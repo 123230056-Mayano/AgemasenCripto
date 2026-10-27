@@ -449,7 +449,7 @@ const DUSDT_ALERT_CONFIG = Object.freeze({
 // SEMUA angka di bawah NILAI AWAL USULAN, belum divalidasi backtest (tampilkan sebagai heuristik). Naikkan VERSION kalau aturan diubah.
 // Pola = bukti bersyarat (level konfirmasi + level batal), bukan sinyal. Toleransi dalam ATR, bukan persen tetap.
 const PATTERN_CONFIG = Object.freeze({
-  VERSION: 1,
+  VERSION: 2, // 2 = Fase 1 candlestick ditambahkan
   MIN_CANDLES: _posInt(process.env.PATTERN_MIN_CANDLES, 60), // candle closed minimal (ATR + swing); kurang -> null "data belum cukup"
   MIN_SWINGS: _posInt(process.env.PATTERN_MIN_SWINGS, 4), // swing berlabel minimal untuk pola swing/garis
   // --- ukuran umum (satuan ATR) ---
@@ -467,6 +467,47 @@ const PATTERN_CONFIG = Object.freeze({
   // --- histeresis dan dedupe (seperti !trenstate) ---
   HYST_BARS: _posInt(process.env.PATTERN_HYST_BARS, 2), // status baru berlaku setelah bertahan sekian candle closed berturut-turut
   HYST_WINDOW: _posInt(process.env.PATTERN_HYST_WINDOW, 12),
+  // --- Fase 1: candlestick (candlePatterns.js). Semua NILAI AWAL USULAN, belum tervalidasi. ---
+  MAX_SHOW: _posInt(process.env.PATTERN_MAX_SHOW, 4), // pola yang ditampilkan per timeframe (sisanya diringkas)
+  RECENT_BARS: _posInt(process.env.PATTERN_RECENT_BARS, 3), // pola yang berakhir <= sekian candle closed terakhir ditampilkan
+  BIG_BODY_ATR: _num(process.env.PATTERN_BIG_BODY_ATR, 0.8), // candle "besar" (star candle 1, piercing / dark cloud candle 1)
+  HARAMI_BODY_ATR: _num(process.env.PATTERN_HARAMI_BODY_ATR, 1.0), // body candle induk harami
+  THREE_METHODS_BIG_ATR: _num(process.env.PATTERN_THREE_METHODS_BIG_ATR, 1.0), // body candle besar pertama/terakhir three methods
+  SMALL_BODY_ATR: _num(process.env.PATTERN_SMALL_BODY_ATR, 0.3), // body candle tengah star (<= ini x ATR)
+  PIN_WICK_PCT: _num(process.env.PATTERN_PIN_WICK_PCT, 0.6), // pin bar: sumbu panjang >= 60% range
+  PIN_WICK_BODY_MULT: _num(process.env.PATTERN_PIN_WICK_BODY_MULT, 2), // pin bar: sumbu >= 2 x body
+  PIN_RANGE_ATR: _num(process.env.PATTERN_PIN_RANGE_ATR, 0.8), // pin bar: range >= ini x ATR
+  DOJI_BODY_PCT: _num(process.env.PATTERN_DOJI_BODY_PCT, 0.1), // doji: body <= 10% range
+  DOJI_RANGE_ATR: _num(process.env.PATTERN_DOJI_RANGE_ATR, 0.5), // doji: range >= ini x ATR (buang noise)
+  DOJI_LONG_WICK_PCT: _num(process.env.PATTERN_DOJI_LONG_WICK_PCT, 0.6), // dragonfly / gravestone: sumbu panjang >= 60% range
+  DOJI_SHORT_WICK_PCT: _num(process.env.PATTERN_DOJI_SHORT_WICK_PCT, 0.1), // dragonfly / gravestone: sumbu sisi lain <= 10% range
+  LEGGED_WICK_PCT: _num(process.env.PATTERN_LEGGED_WICK_PCT, 0.35), // long-legged doji: tiap sumbu >= 35% range
+  LEGGED_RANGE_ATR: _num(process.env.PATTERN_LEGGED_RANGE_ATR, 1.0), // long-legged doji: range >= ini x ATR
+  SPINNING_BODY_PCT: _num(process.env.PATTERN_SPINNING_BODY_PCT, 0.3), // spinning top: body <= 30% range
+  SPINNING_WICK_PCT: _num(process.env.PATTERN_SPINNING_WICK_PCT, 0.25), // spinning top: tiap sumbu >= 25% range
+  MARUBOZU_BODY_PCT: _num(process.env.PATTERN_MARUBOZU_BODY_PCT, 0.9), // marubozu: body >= 90% range
+  MARUBOZU_RANGE_ATR: _num(process.env.PATTERN_MARUBOZU_RANGE_ATR, 1.2), // marubozu: range >= ini x ATR
+  BELT_OPEN_WICK_PCT: _num(process.env.PATTERN_BELT_OPEN_WICK_PCT, 0.05), // belt hold: sumbu di sisi open <= 5% range
+  TWEEZER_TOL_ATR: _num(process.env.PATTERN_TWEEZER_TOL_ATR, 0.15), // tweezer: selisih high (low) <= ini x ATR
+  TWEEZER_RANGE_ATR: _num(process.env.PATTERN_TWEEZER_RANGE_ATR, 0.5), // tweezer: range tiap candle >= ini x ATR
+  PIERCE_OPEN_TOL_ATR: _num(process.env.PATTERN_PIERCE_OPEN_TOL_ATR, 0.1), // piercing / dark cloud: open candle 2 <= (>=) close candle 1 +- ini x ATR. LONGGAR dari usulan "open melewati ekstrem" yang jarang terjadi di pasar 24 jam tanpa gap
+  INSIDE_MOTHER_MIN_ATR: _num(process.env.PATTERN_INSIDE_MOTHER_MIN_ATR, 0.8), // inside bar: range candle induk >= ini x ATR
+  SOLDIER_BODY_ATR: _num(process.env.PATTERN_SOLDIER_BODY_ATR, 0.5), // three soldiers / crows: body tiap candle >= ini x ATR
+  SOLDIER_WICK_PCT: _num(process.env.PATTERN_SOLDIER_WICK_PCT, 0.3), // three soldiers / crows: sumbu lawan <= 30% range
+  THREE_METHODS_SMALL_RATIO: _num(process.env.PATTERN_THREE_METHODS_SMALL_RATIO, 0.5), // three methods: body tiap candle koreksi <= ini x body candle besar pertama
+  PRIOR_MOVE_BARS: _posInt(process.env.PATTERN_PRIOR_MOVE_BARS, 2), // engulfing / tweezer: gerak searah >= sekian candle (close menurun/menaik beruntun) sebelum pola
+  // --- konteks wajib: ekstrem swing / zona SNR (tanpa lookahead) ---
+  EXT_LOOKBACK: _posInt(process.env.PATTERN_EXT_LOOKBACK, 20), // ekstrem berjalan: low/high pola dibanding sekian candle sebelum pola
+  EXT_TOL_ATR: _num(process.env.PATTERN_EXT_TOL_ATR, 0.5), // toleransi "di ekstrem" (x ATR)
+  SWING_TOL_ATR: _num(process.env.PATTERN_SWING_TOL_ATR, 0.5), // dekat swing terkonfirmasi (x ATR)
+  SWING_LOOKBACK: _posInt(process.env.PATTERN_SWING_LOOKBACK, 80), // swing yang dipakai: yang terbentuk <= sekian candle sebelum pola
+  SNR_ZONE_ATR: _num(process.env.PATTERN_SNR_ZONE_ATR, 0.25), // zona SNR (x ATR), sama dengan SUDDEN_CONFIG.ZONE_ATR
+  BREAKOUT_LOOKBACK: _posInt(process.env.PATTERN_BREAKOUT_LOOKBACK, 20), // marubozu / three soldiers: "keluar range" = close melewati ekstrem sekian candle sebelumnya
+  // --- bukti tambahan (+/-) ---
+  EV_BIG_BODY_ATR: _num(process.env.PATTERN_EV_BIG_BODY_ATR, 1.0), // bukti (+) bila body candle penentu >= ini x ATR
+  EV_VOL_LOOKBACK: _posInt(process.env.PATTERN_EV_VOL_LOOKBACK, 20),
+  EV_VOL_HIGH: _num(process.env.PATTERN_EV_VOL_HIGH, 1.2), // volume >= ini x rata-rata = bukti (+)
+  EV_VOL_LOW: _num(process.env.PATTERN_EV_VOL_LOW, 0.8), // volume <= ini x rata-rata = bukti (-)
   // --- statistik historis (Bagian 12) ---
   STATS_MIN_N: _posInt(process.env.PATTERN_STATS_MIN_N, 30), // statistik disembunyikan kalau sampel < ini
 });
