@@ -130,6 +130,7 @@ function detectDoubleTopBottom(ctx) {
       evidence: [{ sign: "+", text: "equalPeaks", key: "equalPeaks", params: { atr: Number((Math.abs(a.price - b.price) / A).toFixed(2)) } }],
     });
     p.knownI = kI;
+    p.pts = [a, v, b].map((s, j) => ({ i: s.i, price: s.price, role: (top ? ["peak1", "valley", "peak2"] : ["trough1", "valley", "trough2"])[j] }));
     p.neckline = { i1: v.i, p1: neck, i2: v.i, p2: neck };
     p.height = Math.abs(extreme - neck);
     settleLine(p, candles, kI + 1, lastI, () => neck);
@@ -180,6 +181,7 @@ function detectHeadShoulders(ctx) {
       evidence: [{ sign: "+", text: "headOverShoulders", key: "headOverShoulders", params: { atr: Number((headOver / A).toFixed(2)) } }],
     });
     p.knownI = kI;
+    p.pts = [ls, n1, hd, n2, rs].map((s, j) => ({ i: s.i, price: s.price, role: ["leftShoulder", "valley", "head", "valley", "rightShoulder"][j] }));
     p.neckline = { i1: n1.i, p1: n1.price, i2: n2.i, p2: n2.price };
     p.height = Math.abs(hd.price - necklineAt(hd.i));
     settleLine(p, candles, kI + 1, lastI, necklineAt);
@@ -232,6 +234,7 @@ function detectEqualLevels(ctx) {
       evidence: [{ sign: "+", text: "equalPeaks", key: "equalPeaks", params: { atr: Number((Math.abs(a.price - b.price) / A).toFixed(2)) } }],
     });
     p.knownI = kI;
+    p.pts = [a, b].map((s) => ({ i: s.i, price: s.price, role: "equal" }));
     out.push(p);
   }
   return out;
@@ -310,6 +313,7 @@ function detectRectangle(ctx) {
   p.knownI = kI;
   p.confirmI = confirmI;
   p.rect = { top: topLvl, bottom: botLvl, height, breakI: confirmI };
+  p.pts = win.map((s) => ({ i: s.i, price: s.price, role: "range" }));
   return [p];
 }
 
@@ -474,6 +478,17 @@ function detectBreakoutRetest(ctx, levels) {
 
 const GRADE_RANK = { kuat: 3, sedang: 2, lemah: 1 };
 
+/** CHoCH lemah sampai ada BOS searah baru setelahnya (Bagian 4). Dipanggil ulang bila daftar digabung dan grade dihitung ulang. */
+function capChoch(list) {
+  for (const p of list) {
+    if (p.kind === "choch" && !list.some((q) => q.kind === "bos" && q.dir === p.dir && q.endI > p.endI)) {
+      p.grade = core.GRADE.WEAK;
+      if (!p.notes.some((n) => String(n).startsWith("CHoCH:"))) p.notes.push("CHoCH: grade lemah sampai ada BOS searah baru");
+    }
+  }
+  return list;
+}
+
 /**
  * Pindai pola swing pada candle closed.
  * @param {object[]} candles candle closed, lama -> baru
@@ -518,13 +533,7 @@ function scanSwingPatterns(candles, opts = {}) {
   const res = core.resolvePatterns(fresh, prep.atrLast);
   const kept = res.kept;
 
-  // CHoCH lemah sampai ada BOS searah baru setelahnya (Bagian 4).
-  for (const p of kept) {
-    if (p.kind === "choch" && !kept.some((q) => q.kind === "bos" && q.dir === p.dir && q.endI > p.endI)) {
-      p.grade = core.GRADE.WEAK;
-      p.notes.push("CHoCH: grade lemah sampai ada BOS searah baru");
-    }
-  }
+  capChoch(kept);
 
   const invalidated = kept.filter((p) => p.status === STATUS.INVALIDATED).length;
   const patterns = kept
@@ -554,5 +563,6 @@ module.exports = {
   detectRectangle,
   detectBosChoch,
   detectBreakoutRetest,
+  capChoch,
   scanSwingPatterns,
 };

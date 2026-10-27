@@ -15,7 +15,9 @@ const { t } = require("../../i18n");
 const { PATTERN_CONFIG: CFG, HHLL_CONFIG } = require("../../config/indicatorConfig");
 const { computeStructure } = require("./hhllCore");
 const { scanCandlePatterns } = require("./candlePatterns");
-const { STATUS, DIR } = require("./patternCore");
+const { scanSwingPatterns, capChoch } = require("./swingPatterns");
+const core = require("./patternCore");
+const { STATUS, DIR } = core;
 
 const ALL_TFS = ["15M", "1H", "4H", "1D"];
 const TF_LABEL = { "15M": "15m", "1H": "1H", "4H": "4H", "1D": "1D" };
@@ -151,16 +153,36 @@ function makeHtfTrendFn(tf, htfCandles) {
   };
 }
 
+/** Gabungkan hasil candlestick (Fase 1) dan pola swing (Fase 2); aturan prioritas dijalankan ulang di atas gabungan (satu episode, satu pola). */
+function mergeScans(a, b) {
+  if (!a.ok) return a;
+  if (!b || !b.ok) return a; // pola swing butuh lebih banyak swing; kalau belum cukup, candlestick tetap tampil
+  const res = core.resolvePatterns([...a.patterns, ...b.patterns], a.atrLast);
+  capChoch(res.kept);
+  const rank = { kuat: 3, sedang: 2, lemah: 1 };
+  const patterns = res.kept
+    .filter((p) => p.status !== STATUS.INVALIDATED)
+    .sort((x, y) => (y.confirmI ?? y.endI) - (x.confirmI ?? x.endI) || rank[y.grade] - rank[x.grade]);
+  return { ...a, patterns, absorbed: [...a.absorbed, ...b.absorbed, ...res.absorbed], dropped: [...a.dropped, ...b.dropped, ...res.dropped], invalidated: a.invalidated + b.invalidated };
+}
+
 /** Pindai satu TF dengan level SNR (computeLevels) dan tren TF besar. Hasil ok:false bila data belum cukup. */
 function scanTf(tf, candles, htfCandles) {
   const { computeLevels } = require("./market");
   const { htfOf } = require("./hhllContext");
   const htfTf = htfOf(tf);
-  return scanCandlePatterns(candles, {
+  const htfTrendFn = makeHtfTrendFn(tf, htfCandles);
+  const candle = scanCandlePatterns(candles, {
     levelsFn: (slice, price) => computeLevels(slice, price, { count: 3 }),
-    htfTrendFn: makeHtfTrendFn(tf, htfCandles),
+    htfTrendFn,
     htfTf,
   });
+  const swing = scanSwingPatterns(candles, {
+    levels: computeLevels(candles, candles[candles.length - 1].c, { count: 3 }),
+    htfTrend: htfTrendFn ? htfTrendFn(candles[candles.length - 1]) : null,
+    htfTf,
+  });
+  return mergeScans(candle, swing);
 }
 
 async function runPola(sock, msg, { jid, lang }, { coin, tf, all }) {
@@ -211,4 +233,4 @@ async function runPola(sock, msg, { jid, lang }, { coin, tf, all }) {
   }
 }
 
-module.exports = { runPola, formatOne, formatAll, scanTf, makeHtfTrendFn, ALL_TFS };
+module.exports = { runPola, formatOne, formatAll, scanTf, mergeScans, makeHtfTrendFn, ALL_TFS };

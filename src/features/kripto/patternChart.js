@@ -7,7 +7,9 @@
  * Per pola (maks MAX_SHOW): kotak sorotan di candle pembentuk, chip label + status di atas/bawah candle.
  * Untuk pola utama (yang terbaru): garis KONFIRMASI (putus-putus biru), garis BATAL (oranye), dan lingkaran putih
  * di close yang mengonfirmasi (kalau sudah terkonfirmasi). Pola netral: batas atas / bawah.
- * Hanya menggambar hasil scanCandlePatterns (tanpa lookahead); tidak menghitung pola sendiri.
+ * Pola swing (double top/bottom, H&S, equal highs/lows, rectangle): garis biru lewat swing pembentuk + lingkaran + label,
+ * neckline (boleh miring) diperpanjang ke kanan, panah SKENARIO ke target di zona kanan (bersyarat, bukan ramalan).
+ * Hanya menggambar hasil scan (tanpa lookahead); tidak menghitung pola sendiri.
  *
  * `createCanvasFn` bisa disuntik (untuk uji tanpa @napi-rs/canvas). Default: @napi-rs/canvas.
  */
@@ -54,16 +56,31 @@ function renderPatternChart({ lang, candles, coin, tf, res, maxShow = CFG.MAX_SH
   const bars = candles.slice(from);
   const nb = bars.length;
 
-  // level yang digambar (hanya pola utama)
+  // ruang kosong di kanan untuk panah skenario (hanya bila pola utama berarah dan punya target)
+  const fut = primary && primary.dir !== DIR.NEUTRAL && isNum(primary.target) ? 10 : 0;
+  const necklineAt = (p, i) => {
+    const nl = p.neckline;
+    if (!nl) return null;
+    return nl.i2 === nl.i1 ? nl.p1 : nl.p1 + ((nl.p2 - nl.p1) / (nl.i2 - nl.i1)) * (i - nl.i1);
+  };
+
+  // level yang digambar (hanya pola utama). noLine = hanya tag di sumbu kanan (garisnya digambar terpisah).
   const levels = [];
   if (primary) {
-    if (primary.dir === DIR.NEUTRAL) {
+    if (primary.rect) {
+      levels.push({ price: primary.rect.top, label: t(lang, "pola.chart.upper"), color: CONFIRM_COLOR });
+      levels.push({ price: primary.rect.bottom, label: t(lang, "pola.chart.lower"), color: INVALID_COLOR });
+    } else if (primary.dir === DIR.NEUTRAL) {
       levels.push({ price: primary.confirmLevel, label: t(lang, "pola.chart.upper"), color: CONFIRM_COLOR });
       levels.push({ price: primary.invalidLevel, label: t(lang, "pola.chart.lower"), color: INVALID_COLOR });
+    } else if (primary.confirmLevel === primary.invalidLevel) {
+      levels.push({ price: primary.confirmLevel, label: t(lang, "pola.chart.level"), color: CONFIRM_COLOR });
     } else {
-      levels.push({ price: primary.confirmLevel, label: t(lang, "pola.chart.confirm"), color: CONFIRM_COLOR });
+      const nlLast = necklineAt(primary, n - 1);
+      levels.push({ price: nlLast ?? primary.confirmLevel, label: t(lang, primary.neckline ? "pola.chart.neckline" : "pola.chart.confirm"), color: CONFIRM_COLOR, noLine: !!primary.neckline });
       levels.push({ price: primary.invalidLevel, label: t(lang, "pola.chart.invalid"), color: INVALID_COLOR });
     }
+    if (fut) levels.push({ price: primary.target, label: t(lang, "pola.chart.target"), color: DIR_COLOR[primary.dir], noLine: true, isTarget: true });
   }
 
   let lo = Math.min(...bars.map((b) => b.l));
@@ -83,7 +100,7 @@ function renderPatternChart({ lang, candles, coin, tf, res, maxShow = CFG.MAX_SH
 
   const W = 1600;
   const Lm = 20;
-  const Rm = 190;
+  const Rm = 215;
   const T = 96;
   const hP = 760;
   const B = 52;
@@ -98,7 +115,7 @@ function renderPatternChart({ lang, candles, coin, tf, res, maxShow = CFG.MAX_SH
   g.fillRect(pp.x, pp.y, pp.w, pp.h);
 
   const Yp = (p) => pp.y + ((hi - p) / (hi - lo)) * pp.h;
-  const slot = cw / nb;
+  const slot = cw / (nb + fut);
   const X = (i) => Lm + slot * (i - from) + slot / 2;
   const bodyW = Math.max(2, slot * 0.62);
 
@@ -161,6 +178,7 @@ function renderPatternChart({ lang, candles, coin, tf, res, maxShow = CFG.MAX_SH
 
   // garis level pola utama: dari candle awal pola sampai tepi kanan
   for (const k of drawn) {
+    if (k.noLine) continue;
     const yy = Math.round(Yp(k.price)) + 0.5;
     const x0 = Math.max(pp.x, X(primary.startI) - slot * 0.5);
     g.save();
@@ -207,6 +225,148 @@ function renderPatternChart({ lang, candles, coin, tf, res, maxShow = CFG.MAX_SH
   g.lineWidth = 1;
   g.strokeRect(pp.x + 0.5, pp.y + 0.5, pp.w, pp.h);
 
+
+  // ---- GEOMETRI POLA: garis swing, neckline, zona + panah skenario ----
+  const LINE = C.arrow;
+  const xRight = pp.x + pp.w;
+  const idxAtRight = from + (xRight - Lm) / slot - 0.5;
+  const inWin = (i) => i >= from;
+  const arrow = (x0, y0, x1, y1, color) => {
+    const a = Math.atan2(y1 - y0, x1 - x0);
+    g.save();
+    g.strokeStyle = color;
+    g.fillStyle = color;
+    g.lineWidth = 3.2;
+    g.setLineDash([12, 8]);
+    g.beginPath();
+    g.moveTo(x0, y0);
+    g.lineTo(x1, y1);
+    g.stroke();
+    g.setLineDash([]);
+    g.beginPath();
+    g.moveTo(x1, y1);
+    g.lineTo(x1 - 16 * Math.cos(a - 0.4), y1 - 16 * Math.sin(a - 0.4));
+    g.lineTo(x1 - 16 * Math.cos(a + 0.4), y1 - 16 * Math.sin(a + 0.4));
+    g.closePath();
+    g.fill();
+    g.restore();
+  };
+
+  // zona skenario (kanan)
+  if (fut) {
+    const zx = X(n - 1) + slot * 0.5;
+    g.save();
+    g.fillStyle = "rgba(120,140,190,0.07)";
+    g.fillRect(zx, pp.y, xRight - zx, pp.h);
+    g.strokeStyle = "rgba(160,170,200,0.45)";
+    g.lineWidth = 1;
+    g.setLineDash([4, 5]);
+    g.beginPath();
+    g.moveTo(zx + 0.5, pp.y);
+    g.lineTo(zx + 0.5, pp.y + pp.h);
+    g.stroke();
+    g.setLineDash([]);
+    g.fillStyle = "#9aa3b5";
+    g.font = `bold 18px ${family}`;
+    g.textAlign = "left";
+    g.textBaseline = "top";
+    g.fillText(t(lang, "pola.chart.scenario"), zx + 10, pp.y + 8);
+    if (primary.status !== STATUS.CONFIRMED) {
+      g.font = `15px ${family}`;
+      g.fillStyle = "#7d8696";
+      g.fillText(t(lang, "pola.chart.scenarioIf"), zx + 10, pp.y + 30);
+    }
+    g.restore();
+  }
+
+  const ptLabels = [];
+  for (const p of shown) {
+    const isPrimary = p === primary;
+    // neckline (boleh miring) dari titik lembah pertama sampai tepi kanan
+    if (p.neckline && inWin(p.neckline.i2) && isPrimary) {
+      const i0 = Math.max(from, p.neckline.i1);
+      const y0 = Yp(necklineAt(p, i0));
+      const y1 = Yp(necklineAt(p, idxAtRight));
+      g.save();
+      g.strokeStyle = CONFIRM_COLOR;
+      g.lineWidth = 2;
+      g.setLineDash([10, 7]);
+      g.beginPath();
+      g.moveTo(X(i0), y0);
+      g.lineTo(xRight, y1);
+      g.stroke();
+      g.restore();
+    }
+    // batas rectangle: dua garis horizontal dari swing pertama
+    if (p.rect && isPrimary) {
+      const x0 = Math.max(pp.x, X(p.startI) - slot * 0.5);
+      g.save();
+      g.lineWidth = 2;
+      g.setLineDash([]);
+      for (const [lvl, col] of [[p.rect.top, CONFIRM_COLOR], [p.rect.bottom, INVALID_COLOR]]) {
+        g.strokeStyle = col;
+        g.beginPath();
+        g.moveTo(x0, Yp(lvl));
+        g.lineTo(xRight, Yp(lvl));
+        g.stroke();
+      }
+      g.restore();
+    }
+    // garis zigzag lewat swing pembentuk + lingkaran
+    const pts = (p.pts || []).filter((q) => inWin(q.i));
+    if (pts.length >= 2 && p.kind !== "equalHighs" && p.kind !== "equalLows") {
+      g.save();
+      g.strokeStyle = LINE;
+      g.lineWidth = isPrimary ? 3 : 2;
+      g.globalAlpha = isPrimary ? 1 : 0.7;
+      g.lineJoin = "round";
+      g.beginPath();
+      pts.forEach((q, k) => (k ? g.lineTo(X(q.i), Yp(q.price)) : g.moveTo(X(q.i), Yp(q.price))));
+      g.stroke();
+      g.restore();
+    }
+    if (p.kind === "equalHighs" || p.kind === "equalLows") {
+      // garis datar tipis melewati dua swing setara, diperpanjang ke kanan (area likuiditas)
+      const q0 = pts[0];
+      if (q0) {
+        g.save();
+        g.strokeStyle = "#9ca3af";
+        g.lineWidth = 1.8;
+        g.setLineDash([3, 6]);
+        g.beginPath();
+        g.moveTo(X(q0.i), Yp(p.confirmLevel));
+        g.lineTo(xRight, Yp(p.confirmLevel));
+        g.stroke();
+        g.restore();
+      }
+    }
+    for (const q of pts) {
+      g.save();
+      g.strokeStyle = LINE;
+      g.fillStyle = C.panel;
+      g.lineWidth = 3;
+      g.beginPath();
+      g.arc(X(q.i), Yp(q.price), 7, 0, Math.PI * 2);
+      g.fill();
+      g.stroke();
+      g.restore();
+      const key = `pola.chart.pt.${q.role}`;
+      const txt = t(lang, key);
+      if (isPrimary && q.role && txt !== key) {
+        const above = p.dir !== DIR.BULL || q.role === "head" ? q.price >= (p.pts.reduce((a, b) => a + b.price, 0) / p.pts.length) : false;
+        ptLabels.push({ txt, x: X(q.i), y: Yp(q.price) + (above ? -30 : 30), color: LINE });
+      }
+    }
+  }
+  // panah skenario: dari close terakhir ke target (hanya bila target ada di area gambar)
+  if (fut && drawn.some((k) => k.isTarget)) {
+    const x0 = X(n - 1);
+    const y0 = Yp(last.c);
+    const x1 = X(n - 1 + fut - 2);
+    const y1 = Yp(primary.target);
+    arrow(x0, y0, x1, y1, DIR_COLOR[primary.dir]);
+  }
+
   // lingkaran putih di close yang mengonfirmasi pola utama
   if (primary && primary.status === STATUS.CONFIRMED && isNum(primary.confirmI) && primary.confirmI >= from) {
     const x = X(primary.confirmI);
@@ -224,6 +384,7 @@ function renderPatternChart({ lang, candles, coin, tf, res, maxShow = CFG.MAX_SH
 
   // chip label pola (bullish di bawah candle, bearish/netral di atas)
   const placed = [];
+  for (const l of ptLabels) chip(g, family, l.txt, l.x, l.y, pp, l.color, placed);
   for (const p of shown) {
     const color = DIR_COLOR[p.dir] || C.axis;
     const label = t(lang, `pola.kind.${p.variant || p.kind}`);

@@ -160,6 +160,8 @@ const PRIORITY_RULES = Object.freeze([
   { winner: "threeBlackCrows", losers: ["marubozu"], mode: "overlap", why: "three crows menyerap marubozu di dalamnya" },
   { winner: "doubleTop", losers: ["tweezerTop"], mode: "overlap", why: "double top > tweezer (beda skala)" },
   { winner: "doubleBottom", losers: ["tweezerBottom"], mode: "overlap", why: "double bottom > tweezer (beda skala)" },
+  { winner: "doubleTop", losers: ["equalHighs"], mode: "overlap", why: "double top sudah memuat dua puncak setara" },
+  { winner: "doubleBottom", losers: ["equalLows"], mode: "overlap", why: "double bottom sudah memuat dua dasar setara" },
   { winner: "rectangle", losers: ["equalHighs", "equalLows"], mode: "overlap", why: "rectangle menyerap equal highs/lows" },
   // Sub-jenis hanya keterangan pola induk (Lampiran A):
   { winner: "doji", losers: ["dragonflyDoji", "gravestoneDoji", "longLeggedDoji", "spinningTop"], mode: "same", why: "sub-jenis doji" },
