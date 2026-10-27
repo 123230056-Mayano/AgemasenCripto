@@ -449,7 +449,7 @@ const DUSDT_ALERT_CONFIG = Object.freeze({
 // SEMUA angka di bawah NILAI AWAL USULAN, belum divalidasi backtest (tampilkan sebagai heuristik). Naikkan VERSION kalau aturan diubah.
 // Pola = bukti bersyarat (level konfirmasi + level batal), bukan sinyal. Toleransi dalam ATR, bukan persen tetap.
 const PATTERN_CONFIG = Object.freeze({
-  VERSION: 2, // 2 = Fase 1 candlestick ditambahkan
+  VERSION: 3, // 2 = Fase 1 candlestick; 3 = Fase 2 pola swing (swingPatterns.js)
   MIN_CANDLES: _posInt(process.env.PATTERN_MIN_CANDLES, 60), // candle closed minimal (ATR + swing); kurang -> null "data belum cukup"
   MIN_SWINGS: _posInt(process.env.PATTERN_MIN_SWINGS, 4), // swing berlabel minimal untuk pola swing/garis
   // --- ukuran umum (satuan ATR) ---
@@ -508,6 +508,22 @@ const PATTERN_CONFIG = Object.freeze({
   EV_VOL_LOOKBACK: _posInt(process.env.PATTERN_EV_VOL_LOOKBACK, 20),
   EV_VOL_HIGH: _num(process.env.PATTERN_EV_VOL_HIGH, 1.2), // volume >= ini x rata-rata = bukti (+)
   EV_VOL_LOW: _num(process.env.PATTERN_EV_VOL_LOW, 0.8), // volume <= ini x rata-rata = bukti (-)
+  // --- Fase 2: pola swing (swingPatterns.js). Semua NILAI AWAL USULAN, belum tervalidasi. ---
+  SW_MIN_BARS: _posInt(process.env.PATTERN_SW_MIN_BARS, 5), // double top/bottom + equal highs/lows: jarak antar puncak >= sekian candle
+  SW_MAX_BARS: _posInt(process.env.PATTERN_SW_MAX_BARS, 60), // ... dan <= sekian candle
+  DT_VALLEY_ATR: _num(process.env.PATTERN_DT_VALLEY_ATR, 1.5), // double top/bottom: lembah (puncak) antara sedalam >= ini x ATR
+  HS_HEAD_ATR: _num(process.env.PATTERN_HS_HEAD_ATR, 0.5), // head and shoulders: kepala melewati kedua bahu >= ini x ATR
+  EQ_TOL_ATR: _num(process.env.PATTERN_EQ_TOL_ATR, 0.3), // equal highs/lows: selisih <= ini x ATR
+  RECT_TOL_ATR: _num(process.env.PATTERN_RECT_TOL_ATR, 0.5), // rectangle: tiap sisi setara dalam ini x ATR
+  RECT_MIN_HEIGHT_ATR: _num(process.env.PATTERN_RECT_MIN_HEIGHT_ATR, 2), // rectangle: tinggi >= ini x ATR
+  RECT_MIN_BARS: _posInt(process.env.PATTERN_RECT_MIN_BARS, 15), // rectangle: lebar >= sekian candle
+  RECT_MAX_SWINGS: _posInt(process.env.PATTERN_RECT_MAX_SWINGS, 10), // rectangle: swing terakhir yang dicoba dirangkai
+  BREAK_BODY_ATR: _num(process.env.PATTERN_BREAK_BODY_ATR, 0.5), // breakout-retest: body candle tembus >= ini x ATR
+  RETEST_MIN_BARS: _posInt(process.env.PATTERN_RETEST_MIN_BARS, 3), // retest: sentuhan ulang paling cepat sekian candle setelah tembus
+  RETEST_MAX_BARS: _posInt(process.env.PATTERN_RETEST_MAX_BARS, 20), // ... paling lambat
+  RETEST_TOUCH_ATR: _num(process.env.PATTERN_RETEST_TOUCH_ATR, 0.3), // retest: jarak sentuh ke level <= ini x ATR
+  SW_RECENT_BARS: _posInt(process.env.PATTERN_SW_RECENT_BARS, 5), // pola swing terkonfirmasi / BOS / CHoCH ditampilkan bila <= sekian candle terakhir
+  SW_CANDIDATE_BARS: _posInt(process.env.PATTERN_SW_CANDIDATE_BARS, 40), // calon masih ditampilkan bila swing terakhirnya sah <= sekian candle lalu
   // --- chart bukti !pola (patternChart.js) ---
   CHART_BARS: _posInt(process.env.PATTERN_CHART_BARS, 70), // candle yang digambar (nilai awal usulan)
   // --- statistik historis (Bagian 12) ---
