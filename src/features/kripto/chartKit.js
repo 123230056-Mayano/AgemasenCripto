@@ -69,21 +69,29 @@ const tickLabel = (t, tf) => {
   return `${day} ${d.toLocaleString("en-GB", { ...WIB, hour: "2-digit", minute: "2-digit", hour12: false })}`;
 };
 
-/** Panah biru dengan kepala segitiga. */
-function arrow(g, x1, y1, x2, y2) {
+/**
+ * Panah dengan kepala segitiga. Default: biru tebal (dipakai chart lama, tidak berubah).
+ * opts (opsional): { color, width, dash:[a,b] (garis putus), alpha, head }.
+ */
+function arrow(g, x1, y1, x2, y2, opts = {}) {
+  const color = opts.color || C.arrow;
+  const width = opts.width || 4;
   const ang = Math.atan2(y2 - y1, x2 - x1);
-  const head = 20;
+  const head = opts.head || 20;
   const bx = x2 - Math.cos(ang) * head * 0.8;
   const by = y2 - Math.sin(ang) * head * 0.8;
   g.save();
-  g.strokeStyle = C.arrow;
-  g.fillStyle = C.arrow;
-  g.lineWidth = 4;
+  g.strokeStyle = color;
+  g.fillStyle = color;
+  g.lineWidth = width;
   g.lineCap = "round";
+  if (opts.alpha != null) g.globalAlpha = opts.alpha;
+  if (opts.dash) g.setLineDash(opts.dash);
   g.beginPath();
   g.moveTo(x1, y1);
   g.lineTo(bx, by);
   g.stroke();
+  g.setLineDash([]);
   g.beginPath();
   g.moveTo(x2, y2);
   g.lineTo(x2 - Math.cos(ang - 0.42) * head, y2 - Math.sin(ang - 0.42) * head);

@@ -18,6 +18,7 @@ const { htfOf } = require("./hhllContext");
 const { assessTrenState, STATUS, CFG } = require("./trenState");
 const { lookupTrenStats } = require("./trenStateBacktest");
 const { TF_LABEL: TF_NAMES } = require("./divAlertCore");
+const CAPTION_MAX = 1000; // batas aman caption gambar WhatsApp (1024)
 
 const ALL_TFS = ["15M", "1H", "4H", "1D"];
 const ICON = { continue: "🟢", pullback: "🔄", warn: "⚠️", reversal: "🔴", range: "↔️", correction: "🟡" };
@@ -34,6 +35,14 @@ function loadStats(file = STATS_FILE) {
   } catch {
     return null;
   }
+}
+
+/** Teks chart (id/en) untuk renderTrenStateChart. Status tanpa ikon karena font canvas. */
+function chartLabels(lang, res) {
+  const k = (x) => t(lang, `trenstate.chart.${x}`);
+  const status = t(lang, `trenstate.status.${res.status}`);
+  const grade = res.grade ? ` (${t(lang, GRADE_KEY[res.grade])})` : "";
+  return { title: k("title"), status: status + grade, cont: k("cont"), rev: k("rev"), cancel: k("cancel"), brkUp: k("brkUp"), brkDown: k("brkDown"), zone: k("zone"), foot: k("foot"), inv: k("inv"), reclaim: k("reclaim"), high: k("high"), low: k("low") };
 }
 
 const gradePart = (lang, grade) => (grade ? t(lang, "trenstate.grade.part", { grade: t(lang, GRADE_KEY[grade]) }) : "");
@@ -163,7 +172,22 @@ async function runTrenState(sock, msg, { jid, lang }, { coin, tf, all }) {
     return;
   }
   const head = t(lang, "trenstate.title", { coin, tf: TF_LABEL[tf], price: fmtUsd(tick.price), change: fmtPct(tick.changePct) });
-  await sock.sendMessage(jid, { text: head + "\n" + formatOne(lang, { coin, tf, res, stats }) }, { quoted: msg });
+  const caption = head + "\n" + formatOne(lang, { coin, tf, res, stats });
+
+  // chart skenario (panah lanjut / reversal); kalau render gagal tetap kirim teks supaya fitur tidak mati
+  let png = null;
+  try {
+    const { renderTrenStateChart } = require("./trenStateChart");
+    png = renderTrenStateChart({ candles, coin, tf: TF_LABEL[tf], res, labels: chartLabels(lang, res) });
+  } catch (err) {
+    console.log("[kripto] !trenstate chart gagal, kirim teks saja:", err.message);
+  }
+  if (!png) await sock.sendMessage(jid, { text: caption }, { quoted: msg });
+  else if (caption.length <= CAPTION_MAX) await sock.sendMessage(jid, { image: png, caption }, { quoted: msg });
+  else {
+    await sock.sendMessage(jid, { image: png }, { quoted: msg });
+    await sock.sendMessage(jid, { text: caption });
+  }
 }
 
-module.exports = { runTrenState, formatOne, formatAll, loadStats, ALL_TFS };
+module.exports = { runTrenState, formatOne, formatAll, chartLabels, loadStats, ALL_TFS };

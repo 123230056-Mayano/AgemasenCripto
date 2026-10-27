@@ -328,6 +328,10 @@ const TRENSTATE_CONFIG = Object.freeze({
   MIN_N_SHOW: _posInt(process.env.TRENSTATE_MIN_N_SHOW, 30), // statistik historis disembunyikan kalau N < ini
   TRAIN_FRAC: 0.6, // 60% waktu awal = stel, 40% akhir = ukur (walk-forward sederhana)
   FOLDS: 3,
+  // --- chart skenario (trenStateChart.js); nilai awal usulan ---
+  CHART_BARS: _posInt(process.env.TRENSTATE_CHART_BARS, 90), // candle yang digambar
+  CHART_PROJ_BARS: _posInt(process.env.TRENSTATE_CHART_PROJ_BARS, 16), // lebar zona skenario di kanan (dalam slot candle)
+  CHART_ARROW_ATR: _num(process.env.TRENSTATE_CHART_ARROW_ATR, 3), // panjang panah arah (x ATR) kalau tidak ada level target; skematis, bukan target harga
 });
 
 // Backtest HHLL (hhllBacktest.js, scripts/backtest-hhll.js).
