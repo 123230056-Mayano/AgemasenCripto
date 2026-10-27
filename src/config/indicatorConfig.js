@@ -508,6 +508,8 @@ const PATTERN_CONFIG = Object.freeze({
   EV_VOL_LOOKBACK: _posInt(process.env.PATTERN_EV_VOL_LOOKBACK, 20),
   EV_VOL_HIGH: _num(process.env.PATTERN_EV_VOL_HIGH, 1.2), // volume >= ini x rata-rata = bukti (+)
   EV_VOL_LOW: _num(process.env.PATTERN_EV_VOL_LOW, 0.8), // volume <= ini x rata-rata = bukti (-)
+  // --- chart bukti !pola (patternChart.js) ---
+  CHART_BARS: _posInt(process.env.PATTERN_CHART_BARS, 70), // candle yang digambar (nilai awal usulan)
   // --- statistik historis (Bagian 12) ---
   STATS_MIN_N: _posInt(process.env.PATTERN_STATS_MIN_N, 30), // statistik disembunyikan kalau sampel < ini
 });

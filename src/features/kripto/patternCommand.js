@@ -7,7 +7,7 @@
  * Runner + pemformat teks untuk candlePatterns.js (logika murni). Data langsung dari Binance (market.js).
  * Teks ada di i18n id.js / en.js (kunci "pola.*"). Hasil = bukti bersyarat (level konfirmasi + level batal), bukan sinyal.
  *
- * Fase 1: hanya candlestick, hanya teks (chart pola menyusul bersama pola swing di Fase 2). Statistik historis belum ada
+ * Fase 1: hanya candlestick. Satu TF = chart bukti (patternChart.js) + teks; mode semua = teks ringkas. Statistik historis belum ada
  * (Fase 4), jadi keluaran selalu memuat catatan heuristik.
  */
 
@@ -21,6 +21,7 @@ const ALL_TFS = ["15M", "1H", "4H", "1D"];
 const TF_LABEL = { "15M": "15m", "1H": "1H", "4H": "4H", "1D": "1D" };
 const ICON = { bullish: "🟢", bearish: "🔴", netral: "⚪" };
 const GRADE_KEY = { kuat: "hhllalert.grade.strong", sedang: "hhllalert.grade.medium", lemah: "hhllalert.grade.weak" };
+const CAPTION_MAX = 1000; // batas aman caption gambar WhatsApp (1024)
 const NEEDS_NEXT_CLOSE = new Set(["hangingMan", "invertedHammer"]); // konfirmasi = candle berikutnya close searah
 
 /** Sama dengan market.fmtLevel; ditulis ulang supaya modul ini bisa diuji tanpa memuat canvas/axios. */
@@ -188,7 +189,26 @@ async function runPola(sock, msg, { jid, lang }, { coin, tf, all }) {
     return;
   }
   const head = t(lang, "pola.title", { coin, tf: TF_LABEL[tf], price: fmtUsd(tick.price), change: fmtPct(tick.changePct) });
-  await sock.sendMessage(jid, { text: head + "\n\n" + formatOne(lang, { coin, tf, res }) }, { quoted: msg });
+  const caption = head + "\n\n" + formatOne(lang, { coin, tf, res });
+
+  // Chart bukti. Kalau render gagal (font/canvas bermasalah) tetap kirim teks supaya fitur tidak mati total.
+  let png = null;
+  try {
+    const { renderPatternChart } = require("./patternChart");
+    png = renderPatternChart({ lang, candles, coin, tf: TF_LABEL[tf], res });
+  } catch (err) {
+    console.log("[kripto] !pola chart gagal, kirim teks saja:", err.message);
+  }
+
+  if (!png) {
+    await sock.sendMessage(jid, { text: caption }, { quoted: msg });
+  } else if (caption.length <= CAPTION_MAX) {
+    await sock.sendMessage(jid, { image: png, caption }, { quoted: msg });
+  } else {
+    // Batas caption WhatsApp 1024 karakter -> gambar (dengan judul) dan teks lengkap dikirim terpisah.
+    await sock.sendMessage(jid, { image: png, caption: head }, { quoted: msg });
+    await sock.sendMessage(jid, { text: caption });
+  }
 }
 
 module.exports = { runPola, formatOne, formatAll, scanTf, makeHtfTrendFn, ALL_TFS };
