@@ -350,6 +350,34 @@ const TRENSTATE_CONFIG = Object.freeze({
   TL_FLAT_SLOPE_ATR: _num(process.env.TRENSTATE_TL_FLAT_SLOPE_ATR, 0.025), // |kemiringan| <= ini x ATR per candle = datar
 });
 
+// Kekuatan tren (Fitur 3, trendStrength.js). SEMUA angka NILAI AWAL USULAN, belum divalidasi backtest. Naikkan VERSION kalau aturan diubah.
+// Output hanya tiga tingkat (KUAT / SEDANG / LEMAH); skor internal tidak ditampilkan.
+const STRENGTH_CONFIG = Object.freeze({
+  VERSION: 1,
+  MIN_CANDLES: _posInt(process.env.STRENGTH_MIN_CANDLES, 60), // candle closed minimal; kurang -> "data belum cukup"
+  SWING_RUN_MIN: _posInt(process.env.STRENGTH_SWING_RUN_MIN, 3), // swing berlabel beruntun searah tren (HH/HL atau LL/LH) minimal
+  SLOPE_ATR_MIN: _num(process.env.STRENGTH_SLOPE_ATR_MIN, 0.08), // kemiringan garis searah tren >= ini x ATR per candle
+  R2_MIN: _num(process.env.STRENGTH_R2_MIN, 0.6), // kerapian garis (R2 regresi) >= ini
+  CANDLE_BARS: _posInt(process.env.STRENGTH_CANDLE_BARS, 5), // candle terakhir yang dinilai (body + sumbu)
+  CANDLE_MIN: _posInt(process.env.STRENGTH_CANDLE_MIN, 3), // minimal sekian dari CANDLE_BARS yang searah, body besar, sumbu lawan pendek
+  BODY_ATR_MIN: _num(process.env.STRENGTH_BODY_ATR_MIN, 0.5), // body "besar" >= ini x ATR
+  WICK_AGAINST_MAX: _num(process.env.STRENGTH_WICK_AGAINST_MAX, 0.35), // sumbu melawan arah tren <= ini x range candle
+  RETRACE_MAX: _num(process.env.STRENGTH_RETRACE_MAX, 0.382), // retrace leg terakhir <= ini = dangkal
+  VOL_BARS: _posInt(process.env.STRENGTH_VOL_BARS, 10), // candle terakhir untuk membandingkan volume searah vs berlawanan
+  VOL_RATIO_MIN: _num(process.env.STRENGTH_VOL_RATIO_MIN, 1.1), // rata-rata volume candle searah >= ini x candle berlawanan
+  MIN_APPLICABLE: _posInt(process.env.STRENGTH_MIN_APPLICABLE, 4), // komponen yang bisa dinilai < ini = paling tinggi LEMAH
+  STRONG_RATIO: _num(process.env.STRENGTH_STRONG_RATIO, 0.75), // lolos >= ini dari yang bisa dinilai = KUAT
+  WEAK_RATIO: _num(process.env.STRENGTH_WEAK_RATIO, 0.4), // lolos <= ini = LEMAH; di antaranya SEDANG
+  // --- backtest (trendStrengthBacktest.js): apakah tren KUAT benar lebih sering lanjut daripada LEMAH ---
+  BT_WARMUP: 80,
+  BT_WINDOW: 320, // sama dengan FETCH_LIMIT produksi
+  BT_HORIZON: 24, // candle ke depan yang diamati
+  BT_STEP: _posInt(process.env.STRENGTH_BT_STEP, 4), // sampel tiap sekian candle (mengurangi tumpang tindih; tetap tidak independen)
+  TRAIN_FRAC: 0.6, // 60% waktu awal = stel, 40% akhir = ukur (walk-forward sederhana)
+  MIN_N_SHOW: _posInt(process.env.STRENGTH_MIN_N_SHOW, 30), // kesimpulan KUAT vs LEMAH hanya dibuat kalau N kedua kelompok >= ini
+  Z_MIN: _num(process.env.STRENGTH_Z_MIN, 1.64), // selisih % lanjut KUAT vs LEMAH dianggap nyata kalau z >= ini (satu sisi, ~95%)
+});
+
 // Backtest HHLL (hhllBacktest.js, scripts/backtest-hhll.js).
 const HHLL_BACKTEST_CONFIG = Object.freeze({
   WARMUP: 60, // candle awal yang dilewati
@@ -578,4 +606,4 @@ const PATTERN_CONFIG = Object.freeze({
   STATS_MIN_N: _posInt(process.env.PATTERN_STATS_MIN_N, 30), // statistik disembunyikan kalau sampel < ini
 });
 
-module.exports = { INDICATOR_CONFIG, BIAS_CONFIG, SIGNAL_CONFIG, PROB_CONFIG, SUDDEN_CONFIG, POSITION_CONFIG, ADV_ALERT_CONFIG, SNR_ALERT_CONFIG, SIGNAL_ALERT_CONFIG, HHLL_CONFIG, HHLL_CONTEXT_CONFIG, HHLL_BACKTEST_CONFIG, HHLL_ALERT_CONFIG, TRENSTATE_CONFIG, PATTERN_CONFIG, AMD_CONFIG, AMD_ALERT_CONFIG, DUSDT_ALERT_CONFIG };
+module.exports = { INDICATOR_CONFIG, BIAS_CONFIG, SIGNAL_CONFIG, PROB_CONFIG, SUDDEN_CONFIG, POSITION_CONFIG, ADV_ALERT_CONFIG, SNR_ALERT_CONFIG, SIGNAL_ALERT_CONFIG, HHLL_CONFIG, HHLL_CONTEXT_CONFIG, HHLL_BACKTEST_CONFIG, HHLL_ALERT_CONFIG, TRENSTATE_CONFIG, STRENGTH_CONFIG, PATTERN_CONFIG, AMD_CONFIG, AMD_ALERT_CONFIG, DUSDT_ALERT_CONFIG };

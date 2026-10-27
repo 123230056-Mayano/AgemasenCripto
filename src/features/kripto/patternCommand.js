@@ -19,6 +19,7 @@ const { scanSwingPatterns, capChoch } = require("./swingPatterns");
 const core = require("./patternCore");
 const { buildTrendline, trendlineStatus } = require("./patternTrendline");
 const { htfSummary, labelPatterns } = require("./htfPriority");
+const { trendStrength } = require("./trendStrength");
 const { STATUS, DIR } = core;
 
 const ALL_TFS = ["15M", "1H", "4H", "1D"];
@@ -93,6 +94,82 @@ function priorityLine(lang, p, htf) {
 /** Angka desimal kecil dengan koma di bahasa Indonesia. */
 const numTxt = (lang, v, d = 1) => (lang === "id" ? v.toFixed(d).replace(".", ",") : v.toFixed(d));
 
+/** Kata tingkat kekuatan (kunci i18n) dan arah. */
+const STR_LEVEL_KEY = { strong: "pola.str.level.strong", medium: "pola.str.level.medium", weak: "pola.str.level.weak" };
+
+/** Satu baris alasan [+] / [-] untuk satu komponen kekuatan tren (null = tidak bisa dinilai, tidak ditampilkan). */
+function strengthReason(lang, it, st) {
+  if (it.ok == null) return null;
+  const sign = it.ok ? "+" : "-";
+  const yn = it.ok ? "yes" : "no";
+  const d = st.dir === "up" ? "up" : "down";
+  let key;
+  let params = {};
+  switch (it.key) {
+    case "swing":
+      key = `pola.str.ev.swing.${d}.${yn}`;
+      params = { n: it.value };
+      break;
+    case "slope":
+      key = `pola.str.ev.slope.${yn}`;
+      params = { atr: numTxt(lang, it.value ?? 0, 2) };
+      break;
+    case "r2":
+      key = `pola.str.ev.r2.${yn}`;
+      params = { r2: numTxt(lang, it.value ?? 0, 2) };
+      break;
+    case "candles":
+      key = `pola.str.ev.candles.${d}.${yn}`;
+      params = { n: it.value.count, of: it.value.of };
+      break;
+    case "retrace":
+      if (it.value == null) key = "pola.str.ev.broken";
+      else {
+        key = `pola.str.ev.retrace.${yn}`;
+        params = { pct: Math.round(it.value * 100) };
+      }
+      break;
+    case "volume":
+      key = `pola.str.ev.volume.${yn}`;
+      params = { x: numTxt(lang, it.value ?? 0, 1) };
+      break;
+    case "htf":
+      key = `pola.str.ev.htf.${yn}`;
+      params = { htf: TF_LABEL[st.htfTf] || st.htfTf, dir: t(lang, `pola.str.dir.${d}`) };
+      break;
+    default:
+      return null;
+  }
+  return `[${sign}] ${t(lang, key, params)}`;
+}
+
+/**
+ * Blok "Kekuatan tren" untuk satu TF: tingkat KUAT / SEDANG / LEMAH + alasan [+] / [-]. Tanpa persen. Informasi saja:
+ * tidak mengubah grade / status pola. Kosong bila hasil tidak ada (gagal hitung).
+ * @returns {string[]}
+ */
+function strengthBlock(lang, tf, st) {
+  if (!st) return [];
+  const label = TF_LABEL[tf] || tf;
+  if (st.state === "range") return [t(lang, "pola.str.range", { tf: label })];
+  if (st.state !== "ok") return [t(lang, "pola.str.nodata", { tf: label })];
+  const out = [t(lang, "pola.str.head", { tf: label, level: t(lang, STR_LEVEL_KEY[st.level]), dir: t(lang, `pola.str.dir.${st.dir}`) })];
+  for (const it of st.items) {
+    const line = strengthReason(lang, it, st);
+    if (line) out.push(line);
+  }
+  if (st.capped) out.push(t(lang, "pola.str.capped"));
+  out.push(t(lang, "pola.str.note"));
+  return out;
+}
+
+/** Satu baris ringkas kekuatan tren untuk mode semua TF (kosong bila data belum cukup). */
+function strengthLine(lang, st) {
+  if (!st || st.state === "nodata") return null;
+  if (st.state === "range") return "   " + t(lang, "pola.str.all.range");
+  return "   " + t(lang, "pola.str.all.line", { level: t(lang, STR_LEVEL_KEY[st.level]), dir: t(lang, `pola.str.dir.${st.dir}`) });
+}
+
 /**
  * Blok trendline untuk satu TF (kosong bila tidak ada). Informasi saja: tidak mengubah grade / status pola.
  * Status: garis utuh / dekat garis / baru tembus; tanpa garis swing valid = jalur regresi cadangan.
@@ -122,7 +199,7 @@ function trendlineBlock(lang, res) {
  * Pesan untuk satu timeframe (tanpa baris harga; ditambah pemanggil). Murni: tidak ada jaringan.
  * @param {{coin:string, tf:string, res:object}} a res = hasil scanCandlePatterns (ok:true)
  */
-function formatOne(lang, { res }) {
+function formatOne(lang, { tf, res }) {
   const lines = [];
   const shown = res.patterns.slice(0, CFG.MAX_SHOW);
   const htfLine = htfHeadLine(lang, res.htf);
@@ -150,6 +227,8 @@ function formatOne(lang, { res }) {
   }
   if (res.patterns.length > shown.length) lines.push(t(lang, "pola.more", { n: res.patterns.length - shown.length }), "");
   if (res.invalidated > 0) lines.push(t(lang, "pola.hidden", { n: res.invalidated }), "");
+  const strLines = strengthBlock(lang, tf, res.strength);
+  if (strLines.length) lines.push(...strLines, "");
   const tlLines = trendlineBlock(lang, res);
   if (tlLines.length) lines.push(...tlLines, "");
   lines.push(t(lang, "pola.heuristic"), t(lang, "pola.foot"));
@@ -173,6 +252,8 @@ function formatAll(lang, { coin, results, price, change }) {
     const p = res.patterns[0];
     if (!p) {
       lines.push(t(lang, "pola.all.none", { tf: label }));
+      const sl0 = strengthLine(lang, res.strength);
+      if (sl0) lines.push(sl0);
       continue;
     }
     lines.push(
@@ -188,6 +269,8 @@ function formatAll(lang, { coin, results, price, change }) {
     );
     const pl = priorityLine(lang, p, res.htf);
     if (pl) lines.push("   " + pl);
+    const sl = strengthLine(lang, res.strength);
+    if (sl) lines.push(sl);
   }
   lines.push("", t(lang, "pola.all.hint", { coin }), t(lang, "pola.heuristic"), t(lang, "pola.foot"));
   return lines.join("\n");
@@ -245,6 +328,14 @@ function scanTf(tf, candles, htfCandles) {
   }
   // trendline = informasi tambahan (tidak mengubah grade / status pola); gagal hitung -> null, !pola tetap jalan
   if (res.ok) res.trendline = buildTrendline(candles, res.atrLast, res.trend);
+  // Fitur 3: kekuatan tren (informasi saja, tidak mengubah grade / status); gagal hitung -> null, !pola tetap jalan
+  if (res.ok) {
+    try {
+      res.strength = trendStrength(candles, htfCandles, { tf, trendline: res.trendline || undefined });
+    } catch {
+      res.strength = null;
+    }
+  }
   return res;
 }
 
@@ -296,4 +387,4 @@ async function runPola(sock, msg, { jid, lang }, { coin, tf, all }) {
   }
 }
 
-module.exports = { runPola, trendlineBlock, formatOne, formatAll, scanTf, mergeScans, makeHtfTrendFn, ALL_TFS };
+module.exports = { runPola, strengthBlock, trendlineBlock, formatOne, formatAll, scanTf, mergeScans, makeHtfTrendFn, ALL_TFS };
