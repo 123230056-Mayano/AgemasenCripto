@@ -445,4 +445,30 @@ const DUSDT_ALERT_CONFIG = Object.freeze({
   MAX_PER_CHAT: _posInt(process.env.DUSDT_ALERT_MAX_PER_CHAT, 8),
 });
 
-module.exports = { INDICATOR_CONFIG, BIAS_CONFIG, SIGNAL_CONFIG, PROB_CONFIG, SUDDEN_CONFIG, POSITION_CONFIG, ADV_ALERT_CONFIG, SNR_ALERT_CONFIG, SIGNAL_ALERT_CONFIG, HHLL_CONFIG, HHLL_CONTEXT_CONFIG, HHLL_BACKTEST_CONFIG, HHLL_ALERT_CONFIG, TRENSTATE_CONFIG, AMD_CONFIG, AMD_ALERT_CONFIG, DUSDT_ALERT_CONFIG };
+// !pola (patternCore.js): fondasi pengenal pola (catatan saran "Pengenalan Pola", Bagian 2, 9, 11).
+// SEMUA angka di bawah NILAI AWAL USULAN, belum divalidasi backtest (tampilkan sebagai heuristik). Naikkan VERSION kalau aturan diubah.
+// Pola = bukti bersyarat (level konfirmasi + level batal), bukan sinyal. Toleransi dalam ATR, bukan persen tetap.
+const PATTERN_CONFIG = Object.freeze({
+  VERSION: 1,
+  MIN_CANDLES: _posInt(process.env.PATTERN_MIN_CANDLES, 60), // candle closed minimal (ATR + swing); kurang -> null "data belum cukup"
+  MIN_SWINGS: _posInt(process.env.PATTERN_MIN_SWINGS, 4), // swing berlabel minimal untuk pola swing/garis
+  // --- ukuran umum (satuan ATR) ---
+  BODY_MIN_ATR: _num(process.env.PATTERN_BODY_MIN_ATR, 0.5), // body minimal pola candlestick bermakna
+  EQUAL_TOL_ATR: _num(process.env.PATTERN_EQUAL_TOL_ATR, 0.6), // dua level dianggap setara (double top/bottom)
+  SHOULDER_TOL_ATR: _num(process.env.PATTERN_SHOULDER_TOL_ATR, 1.0), // bahu setara (head and shoulders)
+  CONFIRM_BEYOND_ATR: _num(process.env.PATTERN_CONFIRM_BEYOND_ATR, 0.2), // grade kuat: close melewati level konfirmasi >= ini x ATR
+  // --- grade tiga tingkat (kuat / sedang / lemah), tanpa persentase ---
+  GRADE_STRONG_NET: _posInt(process.env.PATTERN_GRADE_STRONG_NET, 2), // bukti (+) dikurangi (-) >= ini (dan terkonfirmasi) = kuat
+  GRADE_MEDIUM_NET: _posInt(process.env.PATTERN_GRADE_MEDIUM_NET, 0), // >= ini = sedang; di bawahnya lemah
+  MIN_EVIDENCE: _posInt(process.env.PATTERN_MIN_EVIDENCE, 2), // bukti yang bisa dinilai < ini = paling tinggi lemah
+  // --- aturan prioritas (Bagian 9) ---
+  LOCATION_TOL_CANDLES: _posInt(process.env.PATTERN_LOCATION_TOL_CANDLES, 2), // candlestick dianggap "di lokasi pola besar" bila <= sekian candle dari titik kunci
+  OB_BOS_MAX_GAP: _posInt(process.env.PATTERN_OB_BOS_MAX_GAP, 10), // order block hanya sah bila BOS searah terjadi <= sekian candle setelahnya
+  // --- histeresis dan dedupe (seperti !trenstate) ---
+  HYST_BARS: _posInt(process.env.PATTERN_HYST_BARS, 2), // status baru berlaku setelah bertahan sekian candle closed berturut-turut
+  HYST_WINDOW: _posInt(process.env.PATTERN_HYST_WINDOW, 12),
+  // --- statistik historis (Bagian 12) ---
+  STATS_MIN_N: _posInt(process.env.PATTERN_STATS_MIN_N, 30), // statistik disembunyikan kalau sampel < ini
+});
+
+module.exports = { INDICATOR_CONFIG, BIAS_CONFIG, SIGNAL_CONFIG, PROB_CONFIG, SUDDEN_CONFIG, POSITION_CONFIG, ADV_ALERT_CONFIG, SNR_ALERT_CONFIG, SIGNAL_ALERT_CONFIG, HHLL_CONFIG, HHLL_CONTEXT_CONFIG, HHLL_BACKTEST_CONFIG, HHLL_ALERT_CONFIG, TRENSTATE_CONFIG, PATTERN_CONFIG, AMD_CONFIG, AMD_ALERT_CONFIG, DUSDT_ALERT_CONFIG };
