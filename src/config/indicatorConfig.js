@@ -621,4 +621,14 @@ const PATTERN_CONFIG = Object.freeze({
   STATS_MIN_N: _posInt(process.env.PATTERN_STATS_MIN_N, 30), // statistik disembunyikan kalau sampel < ini
 });
 
-module.exports = { INDICATOR_CONFIG, BIAS_CONFIG, SIGNAL_CONFIG, PROB_CONFIG, SUDDEN_CONFIG, POSITION_CONFIG, ADV_ALERT_CONFIG, SNR_ALERT_CONFIG, SIGNAL_ALERT_CONFIG, HHLL_CONFIG, HHLL_CONTEXT_CONFIG, HHLL_BACKTEST_CONFIG, HHLL_ALERT_CONFIG, TRENSTATE_CONFIG, STRENGTH_CONFIG, GAUSSIAN_CONFIG, PATTERN_CONFIG, AMD_CONFIG, AMD_ALERT_CONFIG, DUSDT_ALERT_CONFIG };
+// Alarm pola !alertpola (patternAlertCore.js). Paket 1 hanya butuh batas jumlah alarm dan koin; interval cek, jeda kirim, dan
+// pemecah pesan dipakai paket berikutnya (engine / command). Angkanya NILAI AWAL USULAN, bukan hasil pengukuran.
+const PATTERN_ALERT_CONFIG = Object.freeze({
+  VERSION: 1,
+  MAX_PER_USER: _posInt(process.env.PATALERT_MAX_PER_USER, 10), // alarm per orang
+  MAX_PER_CHAT: _posInt(process.env.PATALERT_MAX_PER_CHAT, 20), // alarm per chat (grup)
+  MAX_COINS_PER_ALERT: _posInt(process.env.PATALERT_MAX_COINS, 30), // koin yang dipantau satu alarm `watchlist` (sisanya dipotong, bukan semua koin)
+  LINES_PER_MSG: _posInt(process.env.PATALERT_LINES_PER_MSG, 8), // kejadian per pesan (satu kejadian = beberapa baris)
+});
+
+module.exports = { PATTERN_ALERT_CONFIG, INDICATOR_CONFIG, BIAS_CONFIG, SIGNAL_CONFIG, PROB_CONFIG, SUDDEN_CONFIG, POSITION_CONFIG, ADV_ALERT_CONFIG, SNR_ALERT_CONFIG, SIGNAL_ALERT_CONFIG, HHLL_CONFIG, HHLL_CONTEXT_CONFIG, HHLL_BACKTEST_CONFIG, HHLL_ALERT_CONFIG, TRENSTATE_CONFIG, STRENGTH_CONFIG, GAUSSIAN_CONFIG, PATTERN_CONFIG, AMD_CONFIG, AMD_ALERT_CONFIG, DUSDT_ALERT_CONFIG };
