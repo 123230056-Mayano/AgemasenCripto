@@ -17,6 +17,7 @@ const { computeStructure } = require("./hhllCore");
 const { scanCandlePatterns } = require("./candlePatterns");
 const { scanSwingPatterns, capChoch } = require("./swingPatterns");
 const core = require("./patternCore");
+const { buildTrendline, trendlineStatus } = require("./patternTrendline");
 const { STATUS, DIR } = core;
 
 const ALL_TFS = ["15M", "1H", "4H", "1D"];
@@ -76,6 +77,34 @@ function levelLine(lang, p) {
   return t(lang, `pola.lv.${side}`, { confirm, invalid });
 }
 
+/** Angka desimal kecil dengan koma di bahasa Indonesia. */
+const numTxt = (lang, v, d = 1) => (lang === "id" ? v.toFixed(d).replace(".", ",") : v.toFixed(d));
+
+/**
+ * Blok trendline untuk satu TF (kosong bila tidak ada). Informasi saja: tidak mengubah grade / status pola.
+ * Status: garis utuh / dekat garis / baru tembus; tanpa garis swing valid = jalur regresi cadangan.
+ * @returns {string[]}
+ */
+function trendlineBlock(lang, res) {
+  const tl = res && res.trendline;
+  const st = trendlineStatus(tl);
+  if (!st) return [];
+  const out = [t(lang, "pola.tl.head")];
+  const slopeWord = (d) => t(lang, `trenstate.tl.slope.${d}`);
+  const lineTxt = (key, ln) => t(lang, key, { slope: slopeWord(ln.dir), level: fmtLevel(ln.levelNow), touches: ln.touches, derived: ln.derived ? t(lang, "trenstate.tl.derived") : "" });
+  if (st.kind === "regression") {
+    const r = tl.regression;
+    out.push(t(lang, "pola.tl.reg", { bars: r.bars, slope: slopeWord(r.dir), fit: t(lang, `trenstate.tl.fit.${r.fit}`), r2: numTxt(lang, r.r2, 2) }));
+  } else {
+    if (tl.resistance) out.push(lineTxt("pola.tl.res", tl.resistance));
+    if (tl.support) out.push(lineTxt("pola.tl.sup", tl.support));
+    const key = st.kind === "intact" ? "pola.tl.st.intact" : st.kind === "near" ? `pola.tl.st.near.${st.side}` : `pola.tl.st.broke.${st.side}`;
+    out.push(t(lang, key, { dist: numTxt(lang, st.dist ?? 0), level: fmtLevel(st.level) }));
+  }
+  out.push(t(lang, "pola.tl.note"));
+  return out;
+}
+
 /**
  * Pesan untuk satu timeframe (tanpa baris harga; ditambah pemanggil). Murni: tidak ada jaringan.
  * @param {{coin:string, tf:string, res:object}} a res = hasil scanCandlePatterns (ok:true)
@@ -104,6 +133,8 @@ function formatOne(lang, { res }) {
   }
   if (res.patterns.length > shown.length) lines.push(t(lang, "pola.more", { n: res.patterns.length - shown.length }), "");
   if (res.invalidated > 0) lines.push(t(lang, "pola.hidden", { n: res.invalidated }), "");
+  const tlLines = trendlineBlock(lang, res);
+  if (tlLines.length) lines.push(...tlLines, "");
   lines.push(t(lang, "pola.heuristic"), t(lang, "pola.foot"));
   return lines.join("\n");
 }
@@ -182,7 +213,10 @@ function scanTf(tf, candles, htfCandles) {
     htfTrend: htfTrendFn ? htfTrendFn(candles[candles.length - 1]) : null,
     htfTf,
   });
-  return mergeScans(candle, swing);
+  const res = mergeScans(candle, swing);
+  // trendline = informasi tambahan (tidak mengubah grade / status pola); gagal hitung -> null, !pola tetap jalan
+  if (res.ok) res.trendline = buildTrendline(candles, res.atrLast, res.trend);
+  return res;
 }
 
 async function runPola(sock, msg, { jid, lang }, { coin, tf, all }) {
@@ -233,4 +267,4 @@ async function runPola(sock, msg, { jid, lang }, { coin, tf, all }) {
   }
 }
 
-module.exports = { runPola, formatOne, formatAll, scanTf, mergeScans, makeHtfTrendFn, ALL_TFS };
+module.exports = { runPola, trendlineBlock, formatOne, formatAll, scanTf, mergeScans, makeHtfTrendFn, ALL_TFS };

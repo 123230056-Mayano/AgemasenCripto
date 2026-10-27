@@ -18,9 +18,11 @@ const { PATTERN_CONFIG: CFG } = require("../../config/indicatorConfig");
 const { t } = require("../../i18n");
 const { C, fontFamily, fmtPrice, niceStep, tickLabel, chip } = require("./chartKit");
 const { STATUS, DIR } = require("./patternCore");
+const { priceAt } = require("./trenStateTrendline");
 
 const CONFIRM_COLOR = "#38bdf8";
 const INVALID_COLOR = "#f59e0b";
+const TL_COLOR = "#c084fc"; // trendline swing (sama dengan !trenstate)
 const GRADE_KEY = { kuat: "hhllalert.grade.strong", sedang: "hhllalert.grade.medium", lemah: "hhllalert.grade.weak" };
 const DIR_COLOR = { [DIR.BULL]: C.bull, [DIR.BEAR]: C.bear, [DIR.NEUTRAL]: "#9ca3af" };
 
@@ -81,6 +83,15 @@ function renderPatternChart({ lang, candles, coin, tf, res, maxShow = CFG.MAX_SH
       levels.push({ price: primary.invalidLevel, label: t(lang, "pola.chart.invalid"), color: INVALID_COLOR });
     }
     if (fut) levels.push({ price: primary.target, label: t(lang, "pola.chart.target"), color: DIR_COLOR[primary.dir], noLine: true, isTarget: true });
+  }
+
+  // trendline (informasi saja): tag harga di sumbu kanan; garisnya digambar terpisah di bawah candle
+  const tl = res.trendline;
+  const tlLines = [];
+  if (tl && tl.mode === "swing") {
+    if (tl.resistance) tlLines.push({ line: tl.resistance, label: t(lang, "pola.chart.tlRes") });
+    if (tl.support) tlLines.push({ line: tl.support, label: t(lang, "pola.chart.tlSup") });
+    for (const d of tlLines) levels.push({ price: priceAt(d.line, n - 1), label: d.label, color: TL_COLOR, noLine: true });
   }
 
   let lo = Math.min(...bars.map((b) => b.l));
@@ -190,6 +201,42 @@ function renderPatternChart({ lang, candles, coin, tf, res, maxShow = CFG.MAX_SH
     g.moveTo(x0, yy);
     g.lineTo(pp.x + pp.w, yy);
     g.stroke();
+    g.restore();
+  }
+
+  // trendline swing (di bawah candle): dari jangkar pertama sampai tepi kanan panel, dipotong oleh panel
+  if (tlLines.length) {
+    const idxEnd = from + nb + fut - 0.5;
+    g.save();
+    g.beginPath();
+    g.rect(pp.x, pp.y, pp.w, pp.h);
+    g.clip();
+    for (const d of tlLines) {
+      const ln = d.line;
+      const a = Math.max(ln.i0, from);
+      g.save();
+      g.strokeStyle = TL_COLOR;
+      g.lineWidth = ln.derived ? 2 : 2.6;
+      g.globalAlpha = ln.derived ? 0.8 : 0.95;
+      if (ln.derived) g.setLineDash([9, 7]);
+      g.beginPath();
+      g.moveTo(X(a), Yp(priceAt(ln, a)));
+      g.lineTo(X(idxEnd), Yp(priceAt(ln, idxEnd)));
+      g.stroke();
+      g.restore();
+      for (const an of ln.anchors || []) {
+        if (an.i < from) continue;
+        g.save();
+        g.fillStyle = C.bg;
+        g.strokeStyle = TL_COLOR;
+        g.lineWidth = 2.2;
+        g.beginPath();
+        g.arc(X(an.i), Yp(an.price), 5, 0, Math.PI * 2);
+        g.fill();
+        g.stroke();
+        g.restore();
+      }
+    }
     g.restore();
   }
 
