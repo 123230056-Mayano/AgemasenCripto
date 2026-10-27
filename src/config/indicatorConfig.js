@@ -526,6 +526,38 @@ const PATTERN_CONFIG = Object.freeze({
   SW_CANDIDATE_BARS: _posInt(process.env.PATTERN_SW_CANDIDATE_BARS, 40), // calon masih ditampilkan bila swing terakhirnya sah <= sekian candle lalu
   // --- chart bukti !pola (patternChart.js) ---
   CHART_BARS: _posInt(process.env.PATTERN_CHART_BARS, 70), // candle yang digambar (nilai awal usulan)
+  // --- Fase 5: pola garis dan zona (linePatterns.js, zonePatterns.js). NILAI AWAL USULAN, belum tervalidasi. ---
+  LN_MAX_SWINGS: _posInt(process.env.PATTERN_LN_MAX_SWINGS, 8), // segitiga/wedge/channel: swing terakhir yang dicoba dirangkai
+  LN_MIN_BARS: _posInt(process.env.PATTERN_LN_MIN_BARS, 15), // lebar pola >= sekian candle
+  LN_MIN_HEIGHT_ATR: _num(process.env.PATTERN_LN_MIN_HEIGHT_ATR, 1.5), // lebar awal (jarak dua garis) >= ini x ATR
+  LN_TOUCH_ATR: _num(process.env.PATTERN_LN_TOUCH_ATR, 0.3), // sentuhan: jarak swing ke garis <= ini x ATR
+  LN_MIN_TOUCHES: _posInt(process.env.PATTERN_LN_MIN_TOUCHES, 3), // sentuhan total minimal
+  LN_FLAT_SLOPE_ATR: _num(process.env.PATTERN_LN_FLAT_SLOPE_ATR, 0.02), // garis rata: |kemiringan| <= ini (ATR per candle)
+  LN_PARALLEL_TOL: _num(process.env.PATTERN_LN_PARALLEL_TOL, 0.02), // channel: selisih kemiringan <= ini (ATR per candle)
+  LN_CONTRACT_RATIO: _num(process.env.PATTERN_LN_CONTRACT_RATIO, 0.8), // menyempit: lebar akhir <= ini x lebar awal
+  FLAG_POLE_ATR: _num(process.env.PATTERN_FLAG_POLE_ATR, 3), // flag: impuls >= ini x ATR
+  FLAG_POLE_BARS: _posInt(process.env.PATTERN_FLAG_POLE_BARS, 8), // ... dalam <= sekian candle
+  FLAG_RETRACE_MAX: _num(process.env.PATTERN_FLAG_RETRACE_MAX, 0.5), // koreksi <= ini x impuls (lebih dalam = batal)
+  FLAG_MIN_BARS: _posInt(process.env.PATTERN_FLAG_MIN_BARS, 3), // koreksi minimal sekian candle
+  FLAG_MAX_BARS: _posInt(process.env.PATTERN_FLAG_MAX_BARS, 15), // koreksi maksimal sekian candle (lebih lama = kedaluwarsa)
+  FLAG_SCAN_BARS: _posInt(process.env.PATTERN_FLAG_SCAN_BARS, 30), // puncak impuls dicari dalam sekian candle terakhir
+  ZN_GAP_ATR: _num(process.env.PATTERN_ZN_GAP_ATR, 0.3), // FVG: ukuran gap >= ini x ATR
+  ZN_IMPULSE_ATR: _num(process.env.PATTERN_ZN_IMPULSE_ATR, 1), // FVG: range candle 2 >= ini x ATR
+  ZN_OB_IMPULSE_ATR: _num(process.env.PATTERN_ZN_OB_IMPULSE_ATR, 3), // order block: impuls >= ini x ATR
+  ZN_OB_IMPULSE_BARS: _posInt(process.env.PATTERN_ZN_OB_IMPULSE_BARS, 8), // ... dalam <= sekian candle
+  ZN_OB_BACK: _posInt(process.env.PATTERN_ZN_OB_BACK, 3), // candle berlawanan dicari mundur sekian candle dari dasar impuls
+  ZN_MAX_AGE: _posInt(process.env.PATTERN_ZN_MAX_AGE, 60), // zona ditampilkan bila terbentuk <= sekian candle lalu
+  ZN_WAIT: _posInt(process.env.PATTERN_ZN_WAIT, 40), // backtest: tunggu sentuhan pertama paling lama sekian candle
+  ZN_BASE_STRIDE: _posInt(process.env.PATTERN_ZN_BASE_STRIDE, 5), // backtest baseline zona: satu level acak tiap sekian candle
+  // --- Fase 4: backtest pola (patternBacktest.js, Bagian 10). NILAI AWAL USULAN, belum tervalidasi. ---
+  BT_WARMUP: _posInt(process.env.PATTERN_BT_WARMUP, 80), // candle awal yang dilewati (ATR + swing)
+  BT_WINDOW: _posInt(process.env.PATTERN_BT_WINDOW, 320), // jendela per candle, sama dengan FETCH_LIMIT produksi
+  BT_HORIZON: _posInt(process.env.PATTERN_BT_HORIZON, 24), // candle ke depan yang diamati
+  BT_CONTINUE_ATR: _num(process.env.PATTERN_BT_CONTINUE_ATR, 1), // "jalan" = gerak searah >= ini x ATR sebelum close melewati level batal
+  BT_TRAIN_FRAC: _num(process.env.PATTERN_BT_TRAIN_FRAC, 0.6), // 60% waktu awal = stel, 40% akhir = ukur (out-of-sample)
+  BT_BASE_LOOKBACK: _posInt(process.env.PATTERN_BT_BASE_LOOKBACK, 20), // baseline: tembus ekstrem sekian candle sebelumnya
+  BT_BASE_COOLDOWN: _posInt(process.env.PATTERN_BT_BASE_COOLDOWN, 6), // baseline: jeda antar sampel (kurangi tumpang tindih)
+  BT_MIN_EDGE_PCT: _num(process.env.PATTERN_BT_MIN_EDGE_PCT, 0), // pola harus unggul >= ini poin persen "jalan" atas baseline, dan tidak lebih sering gagal
   // --- statistik historis (Bagian 12) ---
   STATS_MIN_N: _posInt(process.env.PATTERN_STATS_MIN_N, 30), // statistik disembunyikan kalau sampel < ini
 });
