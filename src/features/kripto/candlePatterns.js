@@ -264,8 +264,9 @@ function detectPinBar(env, e) {
   const A = env.atr;
   const g = geo(cs[e]);
   if (!(g.range >= CFG.PIN_RANGE_ATR * A)) return null;
-  const lowerPin = g.lowerPct >= CFG.PIN_WICK_PCT && g.lower >= CFG.PIN_WICK_BODY_MULT * g.body && (g.bot - cs[e].l) / g.range >= 2 / 3;
-  const upperPin = g.upperPct >= CFG.PIN_WICK_PCT && g.upper >= CFG.PIN_WICK_BODY_MULT * g.body && (cs[e].h - g.top) / g.range >= 2 / 3;
+  if (g.bodyPct <= CFG.DOJI_BODY_PCT) return null; // body <= batas doji = dragonfly / gravestone (doji), bukan hammer / shooting star
+  const lowerPin = g.lowerPct >= CFG.PIN_WICK_PCT && g.lower >= CFG.PIN_WICK_BODY_MULT * g.body;
+  const upperPin = g.upperPct >= CFG.PIN_WICK_PCT && g.upper >= CFG.PIN_WICK_BODY_MULT * g.body;
   if (lowerPin === upperPin) return null; // bukan pin bar, atau kedua sumbu panjang (itu long-legged doji)
   const loc = locate(env, e, e);
   const side = pickSide(env, loc, e);
@@ -287,15 +288,18 @@ function detectDoji(env, e) {
   const cs = env.candles;
   const A = env.atr;
   const g = geo(cs[e]);
-  if (!(g.range >= CFG.DOJI_RANGE_ATR * A) || g.bodyPct > CFG.DOJI_BODY_PCT) return null;
+  // Spinning top boleh berbody sampai SPINNING_BODY_PCT (> batas doji); gerbang lama (<= DOJI_BODY_PCT) membuatnya mustahil muncul.
+  if (!(g.range >= CFG.DOJI_RANGE_ATR * A) || g.bodyPct > Math.max(CFG.DOJI_BODY_PCT, CFG.SPINNING_BODY_PCT)) return null;
+  const isDojiBody = g.bodyPct <= CFG.DOJI_BODY_PCT;
   const loc = locate(env, e, e);
   const side = pickSide(env, loc, e) || (loc.low ? "low" : loc.high ? "high" : null);
   if (!side) return null;
   let variant = null;
-  if (g.lowerPct >= CFG.DOJI_LONG_WICK_PCT && g.upperPct <= CFG.DOJI_SHORT_WICK_PCT) variant = "dragonfly";
-  else if (g.upperPct >= CFG.DOJI_LONG_WICK_PCT && g.lowerPct <= CFG.DOJI_SHORT_WICK_PCT) variant = "gravestone";
-  else if (g.upperPct >= CFG.LEGGED_WICK_PCT && g.lowerPct >= CFG.LEGGED_WICK_PCT && g.range >= CFG.LEGGED_RANGE_ATR * A) variant = "longLegged";
+  if (isDojiBody && g.lowerPct >= CFG.DOJI_LONG_WICK_PCT && g.upperPct <= CFG.DOJI_SHORT_WICK_PCT) variant = "dragonfly";
+  else if (isDojiBody && g.upperPct >= CFG.DOJI_LONG_WICK_PCT && g.lowerPct <= CFG.DOJI_SHORT_WICK_PCT) variant = "gravestone";
+  else if (isDojiBody && g.upperPct >= CFG.LEGGED_WICK_PCT && g.lowerPct >= CFG.LEGGED_WICK_PCT && g.range >= CFG.LEGGED_RANGE_ATR * A) variant = "longLegged";
   else if (g.bodyPct <= CFG.SPINNING_BODY_PCT && g.upperPct >= CFG.SPINNING_WICK_PCT && g.lowerPct >= CFG.SPINNING_WICK_PCT) variant = "spinningTop";
+  if (!isDojiBody && variant !== "spinningTop") return null; // body 10-30% range hanya sah sebagai spinning top
   return mk(env, { kind: "doji", dir: DIR.NEUTRAL, f: e, e, loc: loc[side], side, variant });
 }
 
