@@ -76,7 +76,7 @@ function runTrenStateBacktest(candles, htfCandles, opts) {
   let cnt = 0;
   for (let i = CFG.BT_WARMUP; i < n; i++) {
     const win = candles.slice(Math.max(0, i + 1 - CFG.BT_WINDOW), i + 1);
-    const r = assessRaw(win, htfCandles, { tf, cache });
+    const r = assessRaw(win, htfCandles, { tf, cache, trendline: false });
     if (!r) continue;
     const s = r.status;
     let changed = false;

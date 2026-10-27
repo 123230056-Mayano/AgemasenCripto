@@ -22,6 +22,8 @@
  *                    (status internal `correction`, bukan salah satu dari lima status; ditampilkan apa adanya).
  *   5. Histeresis  : status baru dianggap berubah setelah bertahan HYST_BARS candle closed berturut-turut. Diputar ulang
  *                    dari HYST_WINDOW candle terakhir (fungsi murni, tanpa state), jadi hasil sama untuk input sama.
+ *   6. Trendline   : alat bantu baca (trenStateTrendline.js), dihitung untuk semua status termasuk RANGE. TIDAK ikut skor /
+ *                    status, jadi statistik backtest tidak berubah. opts.trendline:false = lewati (backtest, replay histeresis).
  *
  * Aturan: hanya candle CLOSED, tanpa lookahead. Candle TF besar hanya yang sudah tutup saat candle terakhir closed
  * (htfClosedAt). Semua ambang di TRENSTATE_CONFIG (nilai awal usulan, belum tervalidasi backtest).
@@ -34,6 +36,7 @@ const { htfOf, htfClosedAt, alignOf, retraceDepth } = require("./hhllContext");
 const { TF_MS } = require("./divAlertCore");
 const { detectDivergence } = require("./divergence");
 const { wickReject, sweep } = require("./suddenMove");
+const { computeTrendlines } = require("./trenStateTrendline");
 
 const STATUS = Object.freeze({
   CONTINUE: "continue", // LANJUT
@@ -71,8 +74,9 @@ const priceAtDepth = (up, extreme, range, d) => (up ? extreme - d * range : extr
  * Penilaian MENTAH satu candle (tanpa histeresis).
  * @param {object[]} closed candle closed urut lama -> baru { t, o, h, l, c, v? }
  * @param {object[]|null} htfCandles candle TF besar (boleh belum difilter)
- * @param {{tf:string, cache?:Map}} opts
+ * @param {{tf:string, cache?:Map, trendline?:boolean}} opts trendline:false = tanpa trendline
  * @returns {null|{
+ *   trendline:null|object, // lihat trenStateTrendline.computeTrendlines
  *   status:string, grade:"strong"|"medium"|"weak"|null, trend:"up"|"down"|"range", dir:"up"|"down"|null,
  *   depth:number|null, atr:number, close:number, t:number, htfTf:string|null, htfTrend:string|null, align:string|null,
  *   evidence:{key:string, side:"continue"|"reversal", ok:boolean|null, weight:number, value:number|null}[],
@@ -92,6 +96,7 @@ function assessRaw(closed, htfCandles, opts = {}) {
   if (!st.trend || !st.lastHigh || !st.lastLow) return null;
 
   const base = {
+    trendline: null,
     status: null,
     grade: null,
     trend: st.trend,
@@ -113,6 +118,15 @@ function assessRaw(closed, htfCandles, opts = {}) {
   const { htfTf, htfTrend } = htfTrendOf(htfCandles, tf, X, opts.cache);
   base.htfTf = htfTf;
   base.htfTrend = htfTrend;
+
+  // ---------- trendline (informasi saja; gagal hitung tidak boleh mematikan penilaian) ----------
+  if (opts.trendline !== false && CFG.TL_ENABLED) {
+    try {
+      base.trendline = computeTrendlines(closed, st.swings, { atr: atrVal, dir: st.trend === "up" || st.trend === "down" ? st.trend : null });
+    } catch {
+      base.trendline = null;
+    }
+  }
 
   // ---------- 1. tren asal ----------
   if (st.trend === "range") {
@@ -300,6 +314,34 @@ function assessRaw(closed, htfCandles, opts = {}) {
 }
 
 /**
+ * Trendline SAJA, untuk saat struktur swing tidak bisa dinilai (assessTrenState = null: swing belum cukup, harga mengalir
+ * tanpa pivot, dsb.). Justru di kondisi "tidak ada pola yang jelas" inilah garis swing / jalur regresi paling berguna.
+ * Tidak ada status, grade, atau level: hanya { trendline, atr, close } supaya pemanggil menampilkannya sebagai informasi.
+ * @param {object[]} closed candle closed urut lama -> baru
+ * @returns {null|{trendline:object, status:string, dir:null, atr:number, close:number, t:number}} null = data < 20 candle / ATR tidak valid / trendline dimatikan
+ */
+function assessTrendlineOnly(closed) {
+  const n = closed ? closed.length : 0;
+  if (!CFG.TL_ENABLED || n < 20) return null;
+  const atrVal = lastNum(atrSeries(closed));
+  if (!isNum(atrVal) || !(atrVal > 0)) return null;
+  let swings = [];
+  try {
+    swings = computeStructure(closed).swings;
+  } catch {
+    swings = [];
+  }
+  let trendline = null;
+  try {
+    trendline = computeTrendlines(closed, swings, { atr: atrVal, dir: null });
+  } catch {
+    trendline = null;
+  }
+  const X = closed[n - 1];
+  return trendline ? { trendline, status: STATUS.RANGE, dir: null, atr: atrVal, close: X.c, t: X.t } : null;
+}
+
+/**
  * Histeresis murni: status baru dianggap berubah setelah bertahan `k` entri berturut-turut.
  * Entri null (data kurang) dilewati.
  * @param {(string|null)[]} seq status mentah, lama -> baru
@@ -358,7 +400,7 @@ function assessTrenState(closed, htfCandles, opts = {}) {
 
   const seq = [];
   for (let j = Math.max(CFG.MIN_CANDLES, n - CFG.HYST_WINDOW); j < n; j++) {
-    const r = assessRaw(closed.slice(0, j), htfCandles, { ...opts, cache });
+    const r = assessRaw(closed.slice(0, j), htfCandles, { ...opts, cache, trendline: false }); // replay hanya butuh status
     seq.push(r ? r.status : null);
   }
   seq.push(latest.status);
@@ -375,4 +417,4 @@ function assessTrenState(closed, htfCandles, opts = {}) {
   };
 }
 
-module.exports = { CFG, STATUS, assessRaw, assessTrenState, stabilize, htfTrendOf };
+module.exports = { CFG, STATUS, assessRaw, assessTrenState, assessTrendlineOnly, stabilize, htfTrendOf };

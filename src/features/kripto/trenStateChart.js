@@ -12,6 +12,9 @@
  * Ujung panah memakai level nyata dari trenState.js (target measured move, level batal, batas range). Kalau tidak ada
  * level target, panah hanya skematis sepanjang CHART_ARROW_ATR x ATR dan TIDAK diberi label harga.
  *
+ * Trendline (trenStateTrendline.js) digambar sebagai overlay informasi: garis swing ungu (solid = lewat swing sendiri, putus-putus =
+ * paralel turunan) diperpanjang ke zona skenario; kalau tidak ada garis swing, yang digambar jalur regresi (abu-abu). Tidak mengubah panah.
+ *
  * buildProjection() murni (bisa diuji tanpa canvas). renderTrenStateChart() butuh @napi-rs/canvas, gayanya sama
  * dengan renderHhllChart (chartKit.js). Semua teks datang dari pemanggil lewat `labels` (i18n).
  */
@@ -19,6 +22,10 @@
 const { createCanvas } = require("@napi-rs/canvas");
 const { TRENSTATE_CONFIG: CFG } = require("../../config/indicatorConfig");
 const { C, fontFamily, fmtPrice, niceStep, tickLabel, arrow, chip } = require("./chartKit");
+const { priceAt } = require("./trenStateTrendline");
+
+const TL_COLOR = "#c084fc"; // garis swing
+const TL_REG_COLOR = "#94a3b8"; // jalur regresi
 
 const isNum = (v) => typeof v === "number" && isFinite(v);
 const clamp = (v, a, b) => Math.min(Math.max(v, a), b);
@@ -38,6 +45,9 @@ const DEFAULT_LABELS = {
   tgt: "Tgt",
   high: "High",
   low: "Low",
+  tlSup: "Sup line",
+  tlRes: "Res line",
+  tlReg: "Regression",
 };
 
 /**
@@ -130,6 +140,20 @@ function renderTrenStateChart({ candles, coin, tf, res, labels = {} }) {
   for (const k of drawLines) {
     lo = Math.min(lo, k.price);
     hi = Math.max(hi, k.price);
+  }
+  // trendline: level di candle terakhir ikut sumbu bila dekat; bagian garis yang melenceng jauh dipotong oleh clip panel
+  const tl = res && res.trendline;
+  const tlLines = [];
+  if (tl && tl.mode === "swing") {
+    if (tl.resistance) tlLines.push({ line: tl.resistance, label: lb.tlRes });
+    if (tl.support) tlLines.push({ line: tl.support, label: lb.tlSup });
+  }
+  const tlReg = tl && tl.mode === "regression" ? tl.regression : null;
+  const tlNow = [...tlLines.map((d) => priceAt(d.line, n - 1)), ...(tlReg ? [tlReg.upperNow, tlReg.lowerNow] : [])];
+  for (const v of tlNow) {
+    if (!isNum(v) || !near(v)) continue;
+    lo = Math.min(lo, v);
+    hi = Math.max(hi, v);
   }
   const arrows = proj ? proj.arrows.map((a) => ({ ...a, toDraw: clamp(a.to, lo - span0 * 0.6, hi + span0 * 0.6) })) : [];
   for (const a of arrows) {
@@ -225,6 +249,71 @@ function renderTrenStateChart({ candles, coin, tf, res, labels = {} }) {
     g.restore();
   }
 
+  // trendline (di bawah candle supaya sumbu candle tetap terbaca). Indeks garis = indeks array candles; jendela gambar mulai di `from`.
+  const idxEnd = from + totalSlots - 0.5; // tepi kanan panel
+  const tlPath = (line, idxA, idxB, shift = 0) => {
+    g.beginPath();
+    g.moveTo(X(idxA - from), Yp(priceAt(line, idxA) + shift));
+    g.lineTo(X(idxB - from), Yp(priceAt(line, idxB) + shift));
+  };
+  g.save();
+  g.beginPath();
+  g.rect(P.x, P.y, P.w, P.h);
+  g.clip();
+  for (const d of tlLines) {
+    const ln = d.line;
+    const a = Math.max(ln.i0, from);
+    g.save();
+    g.strokeStyle = TL_COLOR;
+    g.lineWidth = ln.derived ? 2 : 2.6;
+    g.globalAlpha = ln.derived ? 0.8 : 0.95;
+    if (ln.derived) g.setLineDash([9, 7]);
+    tlPath(ln, a, idxEnd);
+    g.stroke();
+    g.restore();
+    for (const an of ln.anchors || []) {
+      if (an.i < from) continue;
+      g.save();
+      g.fillStyle = C.bg;
+      g.strokeStyle = TL_COLOR;
+      g.lineWidth = 2.2;
+      g.beginPath();
+      g.arc(X(an.i - from), Yp(an.price), 5, 0, Math.PI * 2);
+      g.fill();
+      g.stroke();
+      g.restore();
+    }
+  }
+  if (tlReg) {
+    const a = Math.max(tlReg.i0, from);
+    const band = (idx) => [priceAt(tlReg, idx) + tlReg.half, priceAt(tlReg, idx) - tlReg.half];
+    const [u1, l1] = band(a);
+    const [u2, l2] = band(idxEnd);
+    g.save();
+    g.fillStyle = "rgba(148,163,184,0.08)";
+    g.beginPath();
+    g.moveTo(X(a - from), Yp(u1));
+    g.lineTo(X(idxEnd - from), Yp(u2));
+    g.lineTo(X(idxEnd - from), Yp(l2));
+    g.lineTo(X(a - from), Yp(l1));
+    g.closePath();
+    g.fill();
+    g.strokeStyle = TL_REG_COLOR;
+    g.lineWidth = 1.8;
+    g.globalAlpha = 0.9;
+    g.setLineDash([3, 6]);
+    tlPath(tlReg, a, idxEnd, tlReg.half);
+    g.stroke();
+    tlPath(tlReg, a, idxEnd, -tlReg.half);
+    g.stroke();
+    g.setLineDash([10, 8]);
+    g.lineWidth = 2.2;
+    tlPath(tlReg, a, idxEnd);
+    g.stroke();
+    g.restore();
+  }
+  g.restore();
+
   // candle
   g.lineWidth = 1.4;
   bars.forEach((b, k) => {
@@ -281,6 +370,14 @@ function renderTrenStateChart({ candles, coin, tf, res, labels = {} }) {
     const base = { cont: lb.cont, rev: lb.rev, cancel: lb.cancel, brkUp: lb.brkUp, brkDown: lb.brkDown }[a.kind];
     const text = isNum(a.level) ? `${base} ${fmtPrice(a.level)}` : base;
     chip(g, family, text, xEnd - 70, Yp(a.toDraw) + (a.dir === "up" ? 30 : -30), P, color, placed);
+  }
+
+  // label trendline di awal zona skenario (nilai garis pada posisi label itu, jadi cocok dengan yang tergambar)
+  {
+    const idxLbl = from + nb + 2;
+    const cx = X(nb + 2) + 60;
+    for (const d of tlLines) chip(g, family, `${d.label} ${fmtPrice(priceAt(d.line, idxLbl))}`, cx, Yp(priceAt(d.line, idxLbl)), P, TL_COLOR, placed);
+    if (tlReg) chip(g, family, `${lb.tlReg} ${fmtPrice(priceAt(tlReg, idxLbl))}`, cx, Yp(priceAt(tlReg, idxLbl)), P, TL_REG_COLOR, placed);
   }
 
   // tag sumbu kanan

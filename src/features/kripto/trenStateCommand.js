@@ -6,6 +6,7 @@
  * !trenstate <koin> [15m|1H|4H|1D|semua]  (alias: !ts, !pullback)
  * Runner + pemformat teks untuk trenState.js (logika murni). Data langsung dari Binance (market.js).
  * Teks ada di i18n id.js / en.js (kunci "trenstate.*"). Hasil = label bersyarat + alasan + level batal, bukan ramalan.
+ * Blok "Trendline" (trenStateTrendline.js) = alat bantu baca arah, terutama saat RANGE / koreksi belum jelas.
  * Statistik historis dibaca dari data/trenstate-stats.json (hasil scripts/backtest-trenstate.js); disembunyikan kalau
  * berkasnya belum ada, versinya beda, atau N < TRENSTATE_CONFIG.MIN_N_SHOW.
  */
@@ -15,7 +16,7 @@ const path = require("path");
 const { t } = require("../../i18n");
 const { TF_LABEL, fetchCandles, fetchTicker, fmtUsd, fmtLevel, fmtPct } = require("./market");
 const { htfOf } = require("./hhllContext");
-const { assessTrenState, STATUS, CFG } = require("./trenState");
+const { assessTrenState, assessTrendlineOnly, STATUS, CFG } = require("./trenState");
 const { lookupTrenStats } = require("./trenStateBacktest");
 const { TF_LABEL: TF_NAMES } = require("./divAlertCore");
 const CAPTION_MAX = 1000; // batas aman caption gambar WhatsApp (1024)
@@ -42,7 +43,7 @@ function chartLabels(lang, res) {
   const k = (x) => t(lang, `trenstate.chart.${x}`);
   const status = t(lang, `trenstate.status.${res.status}`);
   const grade = res.grade ? ` (${t(lang, GRADE_KEY[res.grade])})` : "";
-  return { title: k("title"), status: status + grade, cont: k("cont"), rev: k("rev"), cancel: k("cancel"), brkUp: k("brkUp"), brkDown: k("brkDown"), zone: k("zone"), foot: k("foot"), inv: k("inv"), reclaim: k("reclaim"), high: k("high"), low: k("low") };
+  return { title: k("title"), status: status + grade, cont: k("cont"), rev: k("rev"), cancel: k("cancel"), brkUp: k("brkUp"), brkDown: k("brkDown"), zone: k("zone"), foot: k("foot"), inv: k("inv"), reclaim: k("reclaim"), high: k("high"), low: k("low"), tlSup: k("tlSup"), tlRes: k("tlRes"), tlReg: k("tlReg") };
 }
 
 const gradePart = (lang, grade) => (grade ? t(lang, "trenstate.grade.part", { grade: t(lang, GRADE_KEY[grade]) }) : "");
@@ -63,6 +64,50 @@ function evidenceLines(lang, res) {
     else off.push(`[-] ${line}`);
   }
   return [...on, ...off.slice(0, 3)];
+}
+
+/** Angka desimal kecil (ATR, R2) dengan koma di bahasa Indonesia. */
+const num = (lang, v, d = 1) => (lang === "id" ? v.toFixed(d).replace(".", ",") : v.toFixed(d));
+
+/**
+ * Blok trendline (kosong kalau tidak ada). Informasi saja, tidak ikut menentukan status.
+ * Mode swing: garis support/resistance + posisi close + condong. Mode regresi: arah, kecocokan, batas jalur.
+ * @returns {string[]}
+ */
+function trendlineLines(lang, res) {
+  const tl = res.trendline;
+  if (!tl) return [];
+  const out = [t(lang, "trenstate.tl.head")];
+  const slopeWord = (d) => t(lang, `trenstate.tl.slope.${d}`);
+  const lineTxt = (key, ln) => t(lang, key, { slope: slopeWord(ln.dir), level: fmtLevel(ln.levelNow), touches: ln.touches, derived: ln.derived ? t(lang, "trenstate.tl.derived") : "" });
+
+  if (tl.mode === "swing") {
+    if (tl.resistance) out.push(lineTxt("trenstate.tl.res", tl.resistance));
+    if (tl.support) out.push(lineTxt("trenstate.tl.sup", tl.support));
+    const level = tl.lean ? fmtLevel(tl.lean.level) : "-";
+    const dist = tl.pos === "aboveSupport" || tl.pos === "nearSupport" ? Math.abs(tl.dSup ?? 0) : Math.abs(tl.dRes ?? 0);
+    out.push(t(lang, `trenstate.tl.pos.${tl.pos}`, { level, dist: num(lang, dist) }));
+  } else {
+    const r = tl.regression;
+    out.push(t(lang, "trenstate.tl.reg", { bars: r.bars, slope: slopeWord(r.dir), fit: t(lang, `trenstate.tl.fit.${r.fit}`), r2: num(lang, r.r2, 2) }));
+    out.push(t(lang, `trenstate.tl.regpos.${tl.pos}`, { mid: fmtLevel(r.midNow), lo: fmtLevel(r.lowerNow), hi: fmtLevel(r.upperNow) }));
+  }
+
+  if (tl.breakAgainst) out.push(t(lang, `trenstate.tl.breakAgainst.${res.dir}`, { level: fmtLevel(tl.breakLevel) }));
+  if (tl.lean) {
+    const key = tl.lean.basis === "break" ? (tl.lean.dir === "up" ? "breakUp" : "breakDown") : tl.lean.basis === "edge" ? (tl.lean.dir === "up" ? "edgeUp" : "edgeDown") : tl.lean.dir === "up" ? "slopeUp" : "slopeDown";
+    out.push(t(lang, `trenstate.tl.lean.${key}`, { level: fmtLevel(tl.lean.level) }));
+  } else out.push(t(lang, "trenstate.tl.lean.none"));
+  return out;
+}
+
+/** Ekor satu baris !trenstate semua: condong garis, tampil hanya saat status belum jelas (range / koreksi) atau garis lawan tren patah. */
+function trendlineTail(lang, res) {
+  const tl = res.trendline;
+  if (!tl) return "";
+  if (tl.breakAgainst) return t(lang, "trenstate.all.tl.break");
+  if (res.status !== STATUS.RANGE && res.status !== STATUS.CORRECTION) return "";
+  return t(lang, tl.lean ? `trenstate.all.tl.${tl.lean.dir}` : "trenstate.all.tl.none");
 }
 
 /**
@@ -96,6 +141,10 @@ function formatOne(lang, { coin, tf, res, stats = null }) {
   if (ev.length) lines.push("", ...ev);
   if (res.unknown > 0) lines.push(t(lang, "trenstate.unknown", { n: res.unknown }));
 
+  // trendline (alat bantu, terutama saat RANGE / koreksi belum jelas)
+  const tlLines = trendlineLines(lang, res);
+  if (tlLines.length) lines.push("", ...tlLines, t(lang, "trenstate.tl.note"));
+
   // level bersyarat
   const lv = [];
   if (view === STATUS.RANGE) lv.push(t(lang, "trenstate.range.levels", { high: fmtLevel(L.rangeHigh), low: fmtLevel(L.rangeLow) }));
@@ -122,13 +171,15 @@ function formatOne(lang, { coin, tf, res, stats = null }) {
 }
 
 /** Ringkasan semua timeframe (res per TF boleh null = data belum cukup). */
-function formatAll(lang, { coin, results, price, change }) {
+function formatAll(lang, { coin, results, price, change, candlesByTf = null }) {
   const lines = [t(lang, "trenstate.all.title", { coin, price, change }), ""];
   for (const tf of ALL_TFS) {
     const res = results[tf];
     const label = TF_LABEL[tf];
     if (!res) {
-      lines.push(t(lang, "trenstate.all.na", { tf: label }));
+      // struktur tidak bisa dinilai: tetap beri condong dari trendline kalau ada (informasi saja)
+      const only = candlesByTf && candlesByTf[tf] ? assessTrendlineOnly(candlesByTf[tf]) : null;
+      lines.push(t(lang, "trenstate.all.na", { tf: label }) + (only ? trendlineTail(lang, only) : ""));
       continue;
     }
     const showDepth = res.stable && res.depth != null && res.status !== STATUS.CONTINUE && res.status !== STATUS.REVERSAL;
@@ -140,6 +191,7 @@ function formatAll(lang, { coin, results, price, change }) {
         grade: gradePart(lang, res.grade),
         trend: trendWord(lang, res.trend),
         depth: showDepth ? t(lang, "trenstate.all.depth", { depth: pct(res.depth) }) : "",
+        tl: trendlineTail(lang, res),
       }),
     );
   }
@@ -160,25 +212,32 @@ async function runTrenState(sock, msg, { jid, lang }, { coin, tf, all }) {
       const htf = htfOf(x);
       results[x] = by[x] ? assessTrenState(by[x], htf ? by[htf] : null, { tf: x }) : null;
     }
-    await sock.sendMessage(jid, { text: formatAll(lang, { coin, results, price: fmtUsd(tick.price), change: fmtPct(tick.changePct) }) }, { quoted: msg });
+    await sock.sendMessage(jid, { text: formatAll(lang, { coin, results, price: fmtUsd(tick.price), change: fmtPct(tick.changePct), candlesByTf: by }) }, { quoted: msg });
     return;
   }
 
   const htfTf = htfOf(tf);
   const [candles, tick, htf] = await Promise.all([fetchCandles(coin, tf), fetchTicker(coin), htfTf ? fetchCandles(coin, htfTf).catch(() => null) : null]);
   const res = assessTrenState(candles, htf, { tf });
-  if (!res) {
-    await sock.sendMessage(jid, { text: t(lang, "trenstate.none", { coin, tf: TF_LABEL[tf], min: CFG.MIN_CANDLES }) }, { quoted: msg });
+  // struktur tidak bisa dinilai: tetap tampilkan trendline / jalur regresi (saat "tidak ada pola" justru paling berguna)
+  const only = res ? null : assessTrendlineOnly(candles);
+  const none = t(lang, "trenstate.none", { coin, tf: TF_LABEL[tf], min: CFG.MIN_CANDLES });
+  if (!res && !only) {
+    await sock.sendMessage(jid, { text: none }, { quoted: msg });
     return;
   }
-  const head = t(lang, "trenstate.title", { coin, tf: TF_LABEL[tf], price: fmtUsd(tick.price), change: fmtPct(tick.changePct) });
-  const caption = head + "\n" + formatOne(lang, { coin, tf, res, stats });
+  const caption = res
+    ? t(lang, "trenstate.title", { coin, tf: TF_LABEL[tf], price: fmtUsd(tick.price), change: fmtPct(tick.changePct) }) + "\n" + formatOne(lang, { coin, tf, res, stats })
+    : [none, "", ...trendlineLines(lang, only), t(lang, "trenstate.tl.note"), "", t(lang, "trenstate.foot")].join("\n");
 
   // chart skenario (panah lanjut / reversal); kalau render gagal tetap kirim teks supaya fitur tidak mati
+  // (tanpa status penilaian: chart hanya memuat trendline, tanpa label status / panah)
   let png = null;
   try {
     const { renderTrenStateChart } = require("./trenStateChart");
-    png = renderTrenStateChart({ candles, coin, tf: TF_LABEL[tf], res, labels: chartLabels(lang, res) });
+    const chartRes = res || only;
+    const labels = res ? chartLabels(lang, res) : { ...chartLabels(lang, only), status: "" };
+    png = renderTrenStateChart({ candles, coin, tf: TF_LABEL[tf], res: chartRes, labels });
   } catch (err) {
     console.log("[kripto] !trenstate chart gagal, kirim teks saja:", err.message);
   }
@@ -190,4 +249,4 @@ async function runTrenState(sock, msg, { jid, lang }, { coin, tf, all }) {
   }
 }
 
-module.exports = { runTrenState, formatOne, formatAll, chartLabels, loadStats, ALL_TFS };
+module.exports = { runTrenState, formatOne, formatAll, chartLabels, loadStats, trendlineLines, ALL_TFS };

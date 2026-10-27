@@ -332,6 +332,22 @@ const TRENSTATE_CONFIG = Object.freeze({
   CHART_BARS: _posInt(process.env.TRENSTATE_CHART_BARS, 90), // candle yang digambar
   CHART_PROJ_BARS: _posInt(process.env.TRENSTATE_CHART_PROJ_BARS, 16), // lebar zona skenario di kanan (dalam slot candle)
   CHART_ARROW_ATR: _num(process.env.TRENSTATE_CHART_ARROW_ATR, 3), // panjang panah arah (x ATR) kalau tidak ada level target; skematis, bukan target harga
+  // --- trendline (trenStateTrendline.js): alat bantu baca arah, TIDAK mengubah skor / status / statistik backtest ---
+  TL_ENABLED: _posInt(process.env.TRENSTATE_TL_ENABLED, 1) === 1, // 0 = matikan trendline
+  TL_MAX_SWINGS: _posInt(process.env.TRENSTATE_TL_MAX_SWINGS, 6), // swing sejenis terakhir yang dicoba dirangkai jadi garis
+  TL_MIN_SPAN: _posInt(process.env.TRENSTATE_TL_MIN_SPAN, 8), // jarak minimal (candle) antara dua titik jangkar
+  TL_MIN_TOUCHES: _posInt(process.env.TRENSTATE_TL_MIN_TOUCHES, 2), // sentuhan swing minimal (termasuk dua jangkar); naikkan ke 3 kalau mau lebih ketat
+  TL_TOUCH_ATR: _num(process.env.TRENSTATE_TL_TOUCH_ATR, 0.35), // swing dianggap menyentuh garis kalau jaraknya <= ini x ATR
+  TL_VIOL_ATR: _num(process.env.TRENSTATE_TL_VIOL_ATR, 0.3), // garis gugur kalau ada CLOSE lama melewatinya lebih dari ini x ATR
+  TL_BREAK_MEMORY: _posInt(process.env.TRENSTATE_TL_BREAK_MEMORY, 3), // candle terakhir yang boleh sudah melewati garis (baru patah) tanpa membuat garis gugur
+  TL_BREAK_ATR: _num(process.env.TRENSTATE_TL_BREAK_ATR, 0.2), // close dianggap menembus garis kalau melewatinya >= ini x ATR
+  TL_NEAR_ATR: _num(process.env.TRENSTATE_TL_NEAR_ATR, 0.5), // "dekat garis" kalau jarak close ke garis <= ini x ATR
+  TL_MIN_WIDTH_ATR: _num(process.env.TRENSTATE_TL_MIN_WIDTH_ATR, 1), // garis paralel (channel turunan) hanya dibuat kalau lebar jalur >= ini x ATR
+  // jalur regresi (cadangan kalau tidak ada garis swing yang valid)
+  TL_REG_BARS: _posInt(process.env.TRENSTATE_TL_REG_BARS, 60), // candle terakhir yang diregresi (minimal 20)
+  TL_REG_K: _num(process.env.TRENSTATE_TL_REG_K, 2), // lebar jalur = k x simpangan baku residu
+  TL_REG_MIN_R2: _num(process.env.TRENSTATE_TL_REG_MIN_R2, 0.35), // R2 di bawah ini = kecocokan lemah, arah regresi tidak dipakai sebagai condong
+  TL_FLAT_SLOPE_ATR: _num(process.env.TRENSTATE_TL_FLAT_SLOPE_ATR, 0.025), // |kemiringan| <= ini x ATR per candle = datar
 });
 
 // Backtest HHLL (hhllBacktest.js, scripts/backtest-hhll.js).
