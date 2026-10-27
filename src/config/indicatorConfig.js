@@ -378,6 +378,21 @@ const STRENGTH_CONFIG = Object.freeze({
   Z_MIN: _num(process.env.STRENGTH_Z_MIN, 1.64), // selisih % lanjut KUAT vs LEMAH dianggap nyata kalau z >= ini (satu sisi, ~95%)
 });
 
+// Estimasi sebaran harga (Fitur 4, gaussian.js). Nilai AWAL USULAN; divalidasi lewat scripts/kalibrasi-gaussian.js. Naikkan VERSION kalau aturan diubah.
+// Ini ringkasan sebaran data lama (log return), BUKAN prediksi psikologi pasar.
+const GAUSSIAN_CONFIG = Object.freeze({
+  VERSION: 1,
+  WINDOW: _posInt(process.env.GAUSS_WINDOW, 800), // candle closed terakhir yang dipakai (jendela tetap)
+  HORIZON: _posInt(process.env.GAUSS_HORIZON, 6), // candle ke depan (return h candle)
+  MIN_N: _posInt(process.env.GAUSS_MIN_N, 100), // return minimal; kurang -> "data belum cukup", tanpa angka
+  COND_MIN_N: _posInt(process.env.GAUSS_COND_MIN_N, 30), // kejadian mirip minimal (sama dengan STATS_MIN_N backtest)
+  Z1: _num(process.env.GAUSS_Z1, 1), // rentang dalam: mu +- Z1 x sigma (~68%)
+  Z2: _num(process.env.GAUSS_Z2, 2), // rentang luar: mu +- Z2 x sigma (~95%)
+  KURT_WARN: _num(process.env.GAUSS_KURT_WARN, 1), // kurtosis berlebih >= ini = ekor tebal, sebaran empiris ikut ditampilkan
+  CAL_STEP: _posInt(process.env.GAUSS_CAL_STEP, 0), // langkah uji kalibrasi (0 = sama dengan horizon, supaya hasil uji tidak tumpang tindih)
+  CAL_TOL: _num(process.env.GAUSS_CAL_TOL, 5), // toleransi (poin %) cakupan terhadap target sebelum dianggap tidak terkalibrasi
+});
+
 // Backtest HHLL (hhllBacktest.js, scripts/backtest-hhll.js).
 const HHLL_BACKTEST_CONFIG = Object.freeze({
   WARMUP: 60, // candle awal yang dilewati
@@ -606,4 +621,4 @@ const PATTERN_CONFIG = Object.freeze({
   STATS_MIN_N: _posInt(process.env.PATTERN_STATS_MIN_N, 30), // statistik disembunyikan kalau sampel < ini
 });
 
-module.exports = { INDICATOR_CONFIG, BIAS_CONFIG, SIGNAL_CONFIG, PROB_CONFIG, SUDDEN_CONFIG, POSITION_CONFIG, ADV_ALERT_CONFIG, SNR_ALERT_CONFIG, SIGNAL_ALERT_CONFIG, HHLL_CONFIG, HHLL_CONTEXT_CONFIG, HHLL_BACKTEST_CONFIG, HHLL_ALERT_CONFIG, TRENSTATE_CONFIG, STRENGTH_CONFIG, PATTERN_CONFIG, AMD_CONFIG, AMD_ALERT_CONFIG, DUSDT_ALERT_CONFIG };
+module.exports = { INDICATOR_CONFIG, BIAS_CONFIG, SIGNAL_CONFIG, PROB_CONFIG, SUDDEN_CONFIG, POSITION_CONFIG, ADV_ALERT_CONFIG, SNR_ALERT_CONFIG, SIGNAL_ALERT_CONFIG, HHLL_CONFIG, HHLL_CONTEXT_CONFIG, HHLL_BACKTEST_CONFIG, HHLL_ALERT_CONFIG, TRENSTATE_CONFIG, STRENGTH_CONFIG, GAUSSIAN_CONFIG, PATTERN_CONFIG, AMD_CONFIG, AMD_ALERT_CONFIG, DUSDT_ALERT_CONFIG };

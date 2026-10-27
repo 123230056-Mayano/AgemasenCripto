@@ -12,7 +12,7 @@
  */
 
 const { t } = require("../../i18n");
-const { PATTERN_CONFIG: CFG, HHLL_CONFIG } = require("../../config/indicatorConfig");
+const { PATTERN_CONFIG: CFG, HHLL_CONFIG, GAUSSIAN_CONFIG: GCFG } = require("../../config/indicatorConfig");
 const { computeStructure } = require("./hhllCore");
 const { scanCandlePatterns } = require("./candlePatterns");
 const { scanSwingPatterns, capChoch } = require("./swingPatterns");
@@ -20,6 +20,7 @@ const core = require("./patternCore");
 const { buildTrendline, trendlineStatus } = require("./patternTrendline");
 const { htfSummary, labelPatterns } = require("./htfPriority");
 const { trendStrength } = require("./trendStrength");
+const { estimateGaussian } = require("./gaussian");
 const { STATUS, DIR } = core;
 
 const ALL_TFS = ["15M", "1H", "4H", "1D"];
@@ -195,6 +196,38 @@ function trendlineBlock(lang, res) {
   return out;
 }
 
+/** Lama horizon dalam teks ("24 jam", "6 hari"), dari jumlah candle x lama satu TF. */
+const TF_MIN = { "15M": 15, "1H": 60, "4H": 240, "1D": 1440 };
+function spanText(lang, tf, h) {
+  const mins = (TF_MIN[tf] || 0) * h;
+  if (!mins) return String(h);
+  if (mins < 60) return t(lang, "pola.gs.span.m", { n: mins });
+  const hours = mins / 60;
+  if (hours >= 48) return t(lang, "pola.gs.span.d", { n: Math.round(hours / 24) });
+  return t(lang, "pola.gs.span.h", { n: Math.round(hours) });
+}
+
+/**
+ * Blok "Estimasi sebaran harga" (Fitur 4) untuk satu TF. Informasi saja: tidak mengubah grade / status pola.
+ * Data kurang -> tulis "data belum cukup", TANPA angka. Ekor tebal -> rentang dari sebaran riil ikut ditampilkan.
+ * @returns {string[]}
+ */
+function gaussianBlock(lang, tf, g) {
+  if (!g) return [];
+  if (!g.ok) return [t(lang, "pola.gs.nodata", { n: g.n ?? 0, min: g.minN ?? GCFG.MIN_N }), t(lang, "pola.gs.note")];
+  const up = Math.round(g.pUp * 100);
+  const out = [
+    t(lang, "pola.gs.head", { h: g.h, span: spanText(lang, tf, g.h) }),
+    t(lang, "pola.gs.data", { candles: g.window, n: g.n }),
+    t(lang, "pola.gs.dir", { up, down: 100 - up }),
+    t(lang, "pola.gs.r68", { lo: fmtLevel(g.range1.lo), hi: fmtLevel(g.range1.hi) }),
+    t(lang, "pola.gs.r95", { lo: fmtLevel(g.range2.lo), hi: fmtLevel(g.range2.hi) }),
+  ];
+  if (g.fatTail) out.push(t(lang, "pola.gs.fat", { lo68: fmtLevel(g.emp1.lo), hi68: fmtLevel(g.emp1.hi), lo95: fmtLevel(g.emp2.lo), hi95: fmtLevel(g.emp2.hi) }));
+  out.push(t(lang, "pola.gs.note"));
+  return out;
+}
+
 /**
  * Pesan untuk satu timeframe (tanpa baris harga; ditambah pemanggil). Murni: tidak ada jaringan.
  * @param {{coin:string, tf:string, res:object}} a res = hasil scanCandlePatterns (ok:true)
@@ -231,6 +264,8 @@ function formatOne(lang, { tf, res }) {
   if (strLines.length) lines.push(...strLines, "");
   const tlLines = trendlineBlock(lang, res);
   if (tlLines.length) lines.push(...tlLines, "");
+  const gsLines = gaussianBlock(lang, tf, res.gauss);
+  if (gsLines.length) lines.push(...gsLines, "");
   lines.push(t(lang, "pola.heuristic"), t(lang, "pola.foot"));
   return lines.join("\n");
 }
@@ -358,8 +393,22 @@ async function runPola(sock, msg, { jid, lang }, { coin, tf, all }) {
   }
 
   const htfTf = htfOf(tf);
-  const [candles, tick, htf] = await Promise.all([fetchCandles(coin, tf), fetchTicker(coin), htfTf ? fetchCandles(coin, htfTf).catch(() => null) : null]);
+  const { fetchCandlesHistory } = require("./market");
+  const [candles, tick, htf, hist] = await Promise.all([
+    fetchCandles(coin, tf),
+    fetchTicker(coin),
+    htfTf ? fetchCandles(coin, htfTf).catch(() => null) : null,
+    fetchCandlesHistory(coin, tf, { bars: GCFG.WINDOW + GCFG.HORIZON }).catch(() => null), // Fitur 4: jendela lebih panjang dari 320; gagal = pakai candle biasa
+  ]);
   const res = scanTf(tf, candles, htf);
+  // Fitur 4: estimasi sebaran (informasi saja); gagal hitung -> null, !pola tetap jalan
+  if (res.ok) {
+    try {
+      res.gauss = estimateGaussian(hist && hist.length > candles.length ? hist : candles);
+    } catch {
+      res.gauss = null;
+    }
+  }
   if (!res.ok) {
     await sock.sendMessage(jid, { text: t(lang, "pola.nodata", { coin, tf: TF_LABEL[tf], min: CFG.MIN_CANDLES }) }, { quoted: msg });
     return;
@@ -387,4 +436,4 @@ async function runPola(sock, msg, { jid, lang }, { coin, tf, all }) {
   }
 }
 
-module.exports = { runPola, strengthBlock, trendlineBlock, formatOne, formatAll, scanTf, mergeScans, makeHtfTrendFn, ALL_TFS };
+module.exports = { runPola, strengthBlock, trendlineBlock, gaussianBlock, formatOne, formatAll, scanTf, mergeScans, makeHtfTrendFn, ALL_TFS };
