@@ -127,4 +127,4 @@ async function handleLanguageCommand(sock, msg, { jid, text, lang }) {
   return true;
 }
 
-module.exports = { handleLanguageCommand };
+module.exports = { handleLanguageCommand, isGroupAdmin };

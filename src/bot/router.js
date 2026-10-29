@@ -5,6 +5,7 @@ const axios = require("axios");
 const { runArtikelCommand } = require("../commands/artikel");
 const { handleAnalisisCommand } = require("../features/analisis/analisisCommand");
 const { handleKriptoCommand } = require("../features/kripto/kriptoCommand");
+const { handleForexNewsCommand } = require("../features/forex/forexNewsCommand");
 const { handleKriptoNext } = require("../features/kripto/pasar");
 const { normalizeCommandAlias } = require("./commandAliases");
 const {
@@ -642,6 +643,12 @@ async function handleSingleMessage(sock, msg) {
     // !chart / !harga / !level <koin> [tf] -> analisis dasar kripto (data
     // langsung dari Binance, tidak butuh ANALYST_URL). Lihat src/features/kripto/.
     if (await handleKriptoCommand(sock, msg, { jid, text, lang })) return;
+
+    // =====================
+    // !fxnews / !fxcal -- berita forex (beberapa sumber saling backup) & kalender
+    // ekonomi, plus alert otomatis (!fxnews on). Lihat src/features/forex/forexNews*.js.
+    // =====================
+    if (await handleForexNewsCommand(sock, msg, { jid, text, lang })) return;
 
     // =====================
     // !ringkas [instruksi tambahan] -> baca teks dari dokumen PDF (langsung

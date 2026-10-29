@@ -12,6 +12,7 @@ const { handleMessagesUpsert } = require("./router");
 const { installHumanizer } = require("../utils/humanize");
 const { setSocket, startStatsServer } = require("../features/stats/stats");
 const { setAlertSocket } = require("../features/kripto/alertMonitor");
+const { setNewsSocket } = require("../features/forex/forexNewsMonitor");
 const { initSubscriptions } = require("../state/subscriptionStore");
 const { initLanguageStore } = require("../state/languageStore");
 const { initCryptoStore } = require("../state/cryptoStore");
@@ -106,6 +107,7 @@ async function startBot() {
   setSocket(sock);
   initCryptoStore(); // muat alert dari Supabase (harus sebelum monitor alert jalan)
   setAlertSocket(sock); // alert harga/level & ringkasan harian (kripto Bagian 5)
+  setNewsSocket(sock); // alert berita forex + pengingat kalender ekonomi (features/forex/forexNewsMonitor.js)
   initSubscriptions();
   initLanguageStore();
   startChatRegistry(sock);

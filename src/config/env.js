@@ -145,6 +145,32 @@ const ANALYST_URL = (process.env.ANALYST_URL || "").trim().replace(/\/+$/, "");
 //   lewat command: !lang en / !lang id (grup: khusus admin grup/owner).
 // =====================================================
 
+// =====================================================
+// Fitur berita forex "!fxnews" / "!fxcal" (src/features/forex/forexNews*.js)
+//
+// Semua env di bawah OPSIONAL; tanpa satu pun, fitur tetap jalan memakai sumber gratis tanpa key
+// (investingLive/ForexLive RSS, FXStreet RSS, kalender Forex Factory).
+//
+// - FINNHUB_KEY        : API key gratis finnhub.io. Mengaktifkan Finnhub sebagai cadangan resmi untuk
+//                        headline (/news?category=forex) dan kalender (/calendar/economic; endpoint
+//                        kalender bisa butuh tier berbayar -> kalau ditolak otomatis dilewati).
+// - FXNEWS_SOURCES     : batasi sumber headline, pisahkan koma. Id: investinglive, investinglive-cb,
+//                        fxstreet, finnhub. Default semua.
+// - FXNEWS_EXTRA_RSS   : URL RSS tambahan (koma) sebagai sumber cadangan ekstra.
+// - FXNEWS_POLL_MS     : jeda polling alert (default 45000, minimum 15000).
+// - FXNEWS_MAX_AGE_MIN : berita lebih tua dari ini tidak dikirim sebagai alert (default 45).
+// - FXNEWS_MAX_PER_TICK: maks headline per chat per siklus (default 5).
+// - FXNEWS_REMINDER_MIN: pengingat kalender N menit sebelum rilis (default 15).
+// - FXNEWS_TZ / FXNEWS_TZ_LABEL : zona waktu tampilan (default Asia/Jakarta / WIB).
+// - FXNEWS_OWNER_NOTICE=0 : jangan DM owner saat semua sumber gagal > 10 menit.
+// - FXNEWS_DISABLED=1  : matikan monitor alert (command !fxnews / !fxcal tetap jalan).
+// - FXNEWS_STATE_FILE / FXCAL_SNAPSHOT_FILE : lokasi state (default data/forex_news.json dan
+//                        data/forex_calendar.json). Arahkan DATA_DIR ke Volume Railway supaya
+//                        langganan alert selamat dari redeploy.
+// - FXCAL_CACHE_MS     : cache kalender (default 300000 = 5 menit; rate limit Forex Factory ketat).
+// Semua dibaca langsung dari process.env di modul masing-masing.
+const FINNHUB_KEY = process.env.FINNHUB_KEY || "";
+
 module.exports = {
   BOT_ID,
   BOT_LABEL,
@@ -158,6 +184,7 @@ module.exports = {
   OPENALEX_API_KEY,
   OPEN_ACCESS_CONTACT_EMAIL,
   ANALYST_URL,
+  FINNHUB_KEY,
   SUPABASE_URL,
   SUPABASE_SERVICE_KEY,
   SUBSCRIPTION_REQUIRED,
