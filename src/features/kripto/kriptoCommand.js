@@ -5,6 +5,7 @@
  * ------------------------------------------------------------------
  * Command analisis dasar yang melengkapi !analisis:
  *   !listkripto [kata kunci] -> daftar koin yang tersedia (lihat kriptoList.js)
+ *   !listforex [kata kunci]  -> daftar pair forex yang didukung per kategori (forex/forexList.js). Alias: !listfx. Tanpa jaringan, tanpa cooldown
  *   !chart <koin> [tf]   -> gambar candlestick + EMA 20/50/200 + garis S/R + level Fibonacci + insight (chartInsight.js)
  *   !harga <koin>        -> harga live USDT + Rupiah + % perubahan 24 jam
  *   !level <koin> [tf]   -> R1/R2/S1/S2 + jarak % dari harga sekarang
@@ -52,6 +53,7 @@ const { renderChart } = require("../analisis/analisisChart");
 const { getDominance } = require("./dominance");
 const { getDefaultTf } = require("./defaultTf");
 const { getAvailableCoins, filterCoins, buildMessages } = require("./kriptoList");
+const { runListForex } = require("../forex/forexList");
 const { runSnr } = require("./snr");
 const { runFib, computeFib } = require("./fib");
 const { buildChartInsight } = require("./chartInsight");
@@ -403,6 +405,12 @@ async function runList(sock, msg, { jid, lang }, keyword) {
  * @returns {Promise<boolean>} true kalau pesan ini salah satu command kripto dasar.
  */
 async function handleKriptoCommand(sock, msg, { jid, text, lang }) {
+  // !listforex murni lokal (daftar dari forexPairs.js, tanpa request jaringan) -> tidak kena cooldown / inFlight.
+  const fxListMatch = text.match(/^!(?:listforex|listfx)(?:\s+([\s\S]*))?$/i);
+  if (fxListMatch) {
+    await runListForex(sock, msg, { jid, lang }, fxListMatch[1] || "");
+    return true;
+  }
   const listMatch = text.match(/^!(?:listkripto|listcrypto)(?:\s+([\s\S]*))?$/i);
   let name = null;
   let match = null;
