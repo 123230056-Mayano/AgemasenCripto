@@ -17,6 +17,7 @@ const { computeStructure } = require("./hhllCore");
 const { scanCandlePatterns } = require("./candlePatterns");
 const { scanSwingPatterns, capChoch } = require("./swingPatterns");
 const core = require("./patternCore");
+const { fmtPrice, fmtExact, fmtNum, coinDecimals } = require("../../utils/priceFormat");
 const { buildTrendline, trendlineStatus } = require("./patternTrendline");
 const { htfSummary, labelPatterns } = require("./htfPriority");
 const { trendStrength } = require("./trendStrength");
@@ -30,12 +31,8 @@ const GRADE_KEY = { kuat: "hhllalert.grade.strong", sedang: "hhllalert.grade.med
 const CAPTION_MAX = 1000; // batas aman caption gambar WhatsApp (1024)
 const NEEDS_NEXT_CLOSE = new Set(["hangingMan", "invertedHammer"]); // konfirmasi = candle berikutnya close searah
 
-/** Sama dengan market.fmtLevel; ditulis ulang supaya modul ini bisa diuji tanpa memuat canvas/axios. */
-const fmtLevel = (p) => {
-  if (typeof p !== "number" || !isFinite(p)) return "-";
-  const d = p >= 100 ? 2 : p >= 1 ? 3 : p >= 0.01 ? 5 : 8;
-  return p.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
-};
+/** Formatter bersama (utils/priceFormat.js, murni: modul ini tetap bisa diuji tanpa memuat canvas/axios). dp = presisi koin (res.dp). */
+const fmtLevel = (p, dp) => fmtPrice(p, dp);
 
 const labelOf = (lang, p) => t(lang, `pola.kind.${p.variant || p.kind}`);
 const dirKey = (p) => (p.dir === DIR.BULL ? "bullish" : p.dir === DIR.BEAR ? "bearish" : "netral");
@@ -46,12 +43,15 @@ function whenText(lang, lastI, p) {
 }
 
 /** Baris bukti: [+] / [-] dengan teks terjemahan. */
-function evidenceLines(lang, p) {
+function evidenceLines(lang, p, dp) {
   const out = [];
   for (const e of p.evidence) {
     if (e.sign !== "+" && e.sign !== "-") continue;
     const params = { ...(e.params || {}) };
-    if (typeof params.level === "number") params.level = fmtLevel(params.level);
+    if (typeof params.level === "number") params.level = fmtLevel(params.level, dp);
+    // nilai indikator (RSI, histogram MACD): desimal penuh dari hasil hitung, tanpa pembulatan
+    if (typeof params.rsi === "number") params.rsi = fmtExact(params.rsi);
+    if (typeof params.hist === "number") params.hist = fmtExact(params.hist);
     if (params.htf) params.htf = TF_LABEL[params.htf] || params.htf;
     out.push(`[${e.sign}] ${t(lang, `pola.ev.${e.key || e.text}`, params)}`);
   }
@@ -68,15 +68,15 @@ function absorbedLine(lang, p) {
   return kinds.length ? t(lang, "pola.absorbed", { kinds: kinds.join(", ") }) : null;
 }
 
-function levelLine(lang, p) {
-  const confirm = fmtLevel(p.confirmLevel);
-  const invalid = fmtLevel(p.invalidLevel);
+function levelLine(lang, p, dp) {
+  const confirm = fmtLevel(p.confirmLevel, dp);
+  const invalid = fmtLevel(p.invalidLevel, dp);
   if (p.dir === DIR.NEUTRAL) {
     // netral: confirmLevel = batas atas, invalidLevel = batas bawah (tidak dipakai sebagai konfirmasi/batal)
     return t(lang, "pola.lv.neutral", { high: confirm, low: invalid });
   }
   const side = p.dir === DIR.BULL ? "bull" : "bear";
-  if (p.status === STATUS.CONFIRMED) return t(lang, `pola.lv.${side}.confirmed`, { price: fmtLevel(p.confirmPrice), invalid });
+  if (p.status === STATUS.CONFIRMED) return t(lang, `pola.lv.${side}.confirmed`, { price: fmtLevel(p.confirmPrice, dp), invalid });
   return t(lang, `pola.lv.${side}`, { confirm, invalid });
 }
 
@@ -92,8 +92,8 @@ function priorityLine(lang, p, htf) {
   return t(lang, `pola.prio.${p.priority}`, { htf: TF_LABEL[htf.tf] || htf.tf });
 }
 
-/** Angka desimal kecil dengan koma di bahasa Indonesia. */
-const numTxt = (lang, v, d = 1) => (lang === "id" ? v.toFixed(d).replace(".", ",") : v.toFixed(d));
+/** Angka kecil (rasio, R2, jarak ATR): 2 desimal, pemisah desimal SELALU titik (sama dengan exchange dan chart; lang tidak dipakai lagi). */
+const numTxt = (lang, v, d = 2) => fmtNum(v, d);
 
 /** Kata tingkat kekuatan (kunci i18n) dan arah. */
 const STR_LEVEL_KEY = { strong: "pola.str.level.strong", medium: "pola.str.level.medium", weak: "pola.str.level.weak" };
@@ -127,12 +127,12 @@ function strengthReason(lang, it, st) {
       if (it.value == null) key = "pola.str.ev.broken";
       else {
         key = `pola.str.ev.retrace.${yn}`;
-        params = { pct: Math.round(it.value * 100) };
+        params = { pct: fmtNum(it.value * 100, 2) }; // retrace tidak lagi dibulatkan ke bilangan bulat
       }
       break;
     case "volume":
       key = `pola.str.ev.volume.${yn}`;
-      params = { x: numTxt(lang, it.value ?? 0, 1) };
+      params = { x: numTxt(lang, it.value ?? 0, 2) };
       break;
     case "htf":
       key = `pola.str.ev.htf.${yn}`;
@@ -177,12 +177,13 @@ function strengthLine(lang, st) {
  * @returns {string[]}
  */
 function trendlineBlock(lang, res) {
+  const dp = res && res.dp;
   const tl = res && res.trendline;
   const st = trendlineStatus(tl);
   if (!st) return [];
   const out = [t(lang, "pola.tl.head")];
   const slopeWord = (d) => t(lang, `trenstate.tl.slope.${d}`);
-  const lineTxt = (key, ln) => t(lang, key, { slope: slopeWord(ln.dir), level: fmtLevel(ln.levelNow), touches: ln.touches, derived: ln.derived ? t(lang, "trenstate.tl.derived") : "" });
+  const lineTxt = (key, ln) => t(lang, key, { slope: slopeWord(ln.dir), level: fmtLevel(ln.levelNow, dp), touches: ln.touches, derived: ln.derived ? t(lang, "trenstate.tl.derived") : "" });
   if (st.kind === "regression") {
     const r = tl.regression;
     out.push(t(lang, "pola.tl.reg", { bars: r.bars, slope: slopeWord(r.dir), fit: t(lang, `trenstate.tl.fit.${r.fit}`), r2: numTxt(lang, r.r2, 2) }));
@@ -190,7 +191,7 @@ function trendlineBlock(lang, res) {
     if (tl.resistance) out.push(lineTxt("pola.tl.res", tl.resistance));
     if (tl.support) out.push(lineTxt("pola.tl.sup", tl.support));
     const key = st.kind === "intact" ? "pola.tl.st.intact" : st.kind === "near" ? `pola.tl.st.near.${st.side}` : `pola.tl.st.broke.${st.side}`;
-    out.push(t(lang, key, { dist: numTxt(lang, st.dist ?? 0), level: fmtLevel(st.level) }));
+    out.push(t(lang, key, { dist: numTxt(lang, st.dist ?? 0), level: fmtLevel(st.level, dp) }));
   }
   out.push(t(lang, "pola.tl.note"));
   return out;
@@ -214,7 +215,7 @@ function spanText(lang, tf, h) {
  */
 function gaussianConclusion(lang, tf, g, up) {
   const pct = ((g.range1.hi - g.range1.lo) / 2 / g.last) * 100;
-  const move = pct >= 10 ? pct.toFixed(0) : pct >= 1 ? pct.toFixed(1) : pct.toFixed(2);
+  const move = fmtNum(pct, 2);
   const lean = up >= 65 ? "up2" : up >= 55 ? "up1" : up <= 35 ? "down2" : up <= 45 ? "down1" : "flat";
   const key = g.fatTail ? "pola.gs.sum.fat" : "pola.gs.sum";
   return t(lang, key, { span: spanText(lang, tf, g.h), move, lean: t(lang, `pola.gs.lean.${lean}`) });
@@ -225,19 +226,20 @@ function gaussianConclusion(lang, tf, g, up) {
  * Data kurang -> tulis "data belum cukup", TANPA angka. Ekor tebal -> rentang dari sebaran riil ikut ditampilkan.
  * @returns {string[]}
  */
-function gaussianBlock(lang, tf, g) {
+function gaussianBlock(lang, tf, g, dp) {
   if (!g) return [];
   if (!g.ok) return [t(lang, "pola.gs.nodata", { n: g.n ?? 0, min: g.minN ?? GCFG.MIN_N }), t(lang, "pola.gs.note")];
-  const up = Math.round(g.pUp * 100);
+  const up = Number((g.pUp * 100).toFixed(2)); // persen 2 desimal, tidak lagi dibulatkan ke bilangan bulat
+  const down = Number((100 - up).toFixed(2));
   const out = [
     t(lang, "pola.gs.head", { h: g.h, span: spanText(lang, tf, g.h) }),
     t(lang, "pola.gs.data", { candles: g.window, n: g.n }),
-    t(lang, "pola.gs.dir", { up, down: 100 - up }),
-    t(lang, "pola.gs.r68", { lo: fmtLevel(g.range1.lo), hi: fmtLevel(g.range1.hi) }),
-    t(lang, "pola.gs.r95", { lo: fmtLevel(g.range2.lo), hi: fmtLevel(g.range2.hi) }),
+    t(lang, "pola.gs.dir", { up, down }),
+    t(lang, "pola.gs.r68", { lo: fmtLevel(g.range1.lo, dp), hi: fmtLevel(g.range1.hi, dp) }),
+    t(lang, "pola.gs.r95", { lo: fmtLevel(g.range2.lo, dp), hi: fmtLevel(g.range2.hi, dp) }),
   ];
   out.push(gaussianConclusion(lang, tf, g, up));
-  if (g.fatTail) out.push(t(lang, "pola.gs.fat", { lo68: fmtLevel(g.emp1.lo), hi68: fmtLevel(g.emp1.hi), lo95: fmtLevel(g.emp2.lo), hi95: fmtLevel(g.emp2.hi) }));
+  if (g.fatTail) out.push(t(lang, "pola.gs.fat", { lo68: fmtLevel(g.emp1.lo, dp), hi68: fmtLevel(g.emp1.hi, dp), lo95: fmtLevel(g.emp2.lo, dp), hi95: fmtLevel(g.emp2.hi, dp) }));
   out.push(t(lang, "pola.gs.note"));
   return out;
 }
@@ -248,6 +250,7 @@ function gaussianBlock(lang, tf, g) {
  */
 function formatOne(lang, { tf, res }) {
   const lines = [];
+  const dp = res.dp; // presisi koin (desimal terbanyak di data candle)
   const shown = res.patterns.slice(0, CFG.MAX_SHOW);
   const htfLine = htfHeadLine(lang, res.htf);
   if (htfLine) lines.push(htfLine, "");
@@ -265,10 +268,10 @@ function formatOne(lang, { tf, res }) {
     lines.push(whenText(lang, res.lastI, p));
     const pl = priorityLine(lang, p, res.htf);
     if (pl) lines.push(pl);
-    lines.push(...evidenceLines(lang, p));
+    lines.push(...evidenceLines(lang, p, dp));
     const ab = absorbedLine(lang, p);
     if (ab) lines.push(ab);
-    lines.push(levelLine(lang, p));
+    lines.push(levelLine(lang, p, dp));
     if (NEEDS_NEXT_CLOSE.has(p.variant) && p.status === STATUS.CANDIDATE) lines.push(t(lang, "pola.needConfirm"));
     lines.push("");
   }
@@ -278,7 +281,7 @@ function formatOne(lang, { tf, res }) {
   if (strLines.length) lines.push(...strLines, "");
   const tlLines = trendlineBlock(lang, res);
   if (tlLines.length) lines.push(...tlLines, "");
-  const gsLines = gaussianBlock(lang, tf, res.gauss);
+  const gsLines = gaussianBlock(lang, tf, res.gauss, dp);
   if (gsLines.length) lines.push(...gsLines, "");
   lines.push(t(lang, "pola.heuristic"), t(lang, "pola.foot"));
   return lines.join("\n");
@@ -369,6 +372,7 @@ function scanTf(tf, candles, htfCandles) {
     htfTf,
   });
   const res = mergeScans(candle, swing);
+  if (res.ok && res.dp == null) res.dp = coinDecimals(candles);
   if (res.ok) {
     // Fitur 2: label prioritas dari tren TF besar yang sudah closed (tanpa lookahead). Tidak mengubah grade / status.
     const htfTrend = htfTrendFn ? htfTrendFn(candles[candles.length - 1]) : null;
@@ -402,7 +406,8 @@ async function runPola(sock, msg, { jid, lang }, { coin, tf, all }) {
       const htf = htfOf(x);
       results[x] = by[x] ? scanTf(x, by[x], htf ? by[htf] : null) : null;
     }
-    await sock.sendMessage(jid, { text: formatAll(lang, { coin, results, price: fmtUsd(tick.price), change: fmtPct(tick.changePct) }) }, { quoted: msg });
+    const dpAll = Math.max(0, ...ALL_TFS.map((x) => (by[x] ? coinDecimals(by[x]) : 0)));
+    await sock.sendMessage(jid, { text: formatAll(lang, { coin, results, price: fmtUsd(tick.price, dpAll), change: fmtPct(tick.changePct) }) }, { quoted: msg });
     return;
   }
 
@@ -427,7 +432,7 @@ async function runPola(sock, msg, { jid, lang }, { coin, tf, all }) {
     await sock.sendMessage(jid, { text: t(lang, "pola.nodata", { coin, tf: TF_LABEL[tf], min: CFG.MIN_CANDLES }) }, { quoted: msg });
     return;
   }
-  const head = t(lang, "pola.title", { coin, tf: TF_LABEL[tf], price: fmtUsd(tick.price), change: fmtPct(tick.changePct) });
+  const head = t(lang, "pola.title", { coin, tf: TF_LABEL[tf], price: fmtUsd(tick.price, res.dp), change: fmtPct(tick.changePct) });
   const caption = head + "\n\n" + formatOne(lang, { coin, tf, res });
 
   // Chart bukti. Kalau render gagal (font/canvas bermasalah) tetap kirim teks supaya fitur tidak mati total.

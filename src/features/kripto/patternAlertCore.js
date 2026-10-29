@@ -20,6 +20,7 @@
  */
 
 const { t } = require("../../i18n");
+const { fmtPrice } = require("../../utils/priceFormat");
 const { PATTERN_ALERT_CONFIG: PA } = require("../../config/indicatorConfig");
 const { TF_MS, TF_LABEL, COIN_WATCHLIST, DAILY_TZ_LABEL, fmtCandleTime } = require("./divAlertCore");
 
@@ -34,12 +35,8 @@ const ICON = { up: "🟢", down: "🔴", neutral: "⚪" };
 
 const isNum = (v) => typeof v === "number" && isFinite(v);
 
-/** Sama dengan market.fmtLevel; ditulis ulang supaya modul ini bisa diuji tanpa memuat canvas/axios. */
-function fmtLevel(p) {
-  if (!isNum(p)) return "-";
-  const d = p >= 100 ? 2 : p >= 1 ? 3 : p >= 0.01 ? 5 : 8;
-  return p.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
-}
+/** Formatter bersama (utils/priceFormat.js, murni: tetap bisa diuji tanpa memuat canvas/axios). dp = presisi koin dari hasil pindai. */
+const fmtLevel = (p, dp) => fmtPrice(p, dp);
 
 // =====================================================================
 // 1. Deteksi kejadian
@@ -80,6 +77,7 @@ function detectEvents(prevPatterns, nowPatterns) {
       status: p.status,
       level: p.confirmLevel,
       invalid: p.invalidLevel,
+      momentumAgainst: !!p.momentumAgainst, // tweezer yang MACD dan RSI-nya melawan (grade sudah dibatasi lemah)
       id: patternId(p),
       endI: p.endI, // index candle penutup di array yang dipindai; engine memakainya untuk kunci dedupe berbasis waktu
     });
@@ -227,8 +225,8 @@ const EXTRA_LINE_BUILDERS = []; // paket berikutnya: prioritas TF besar, kekuata
 
 /** Baris level: konfirmasi tercapai (tahap konfirmasi) atau syarat konfirmasi (tahap dini), plus level batal. */
 function levelLine(lang, ev) {
-  const lv = fmtLevel(ev.level);
-  const inv = fmtLevel(ev.invalid);
+  const lv = fmtLevel(ev.level, ev.dp);
+  const inv = fmtLevel(ev.invalid, ev.dp);
   const cancel = ev.dir === "neutral" ? t(lang, "patalert.cancel.neutral", { level: inv }) : t(lang, `patalert.cancel.${ev.dir}`, { level: inv });
   if (ev.stage === "confirm") return `${t(lang, "patalert.level.done", { level: lv })} | ${cancel}`;
   const need = ev.dir === "neutral" ? t(lang, "patalert.need.neutral", { level: lv }) : t(lang, `patalert.need.${ev.dir}`, { level: lv });
@@ -242,6 +240,7 @@ function buildLine(lang, ev) {
   const grade = GRADE_KEY[ev.grade] ? t(lang, GRADE_KEY[ev.grade]).toLowerCase() : ev.grade;
   const head = `${ICON[ev.dir] || ICON.neutral} *${ev.coin}* ${TF_LABEL[ev.tf] || ev.tf} ${label} - ${status} - ${grade}`;
   const lines = [head, levelLine(lang, ev)];
+  if (ev.momentumAgainst) lines.push(t(lang, "patalert.momAgainst"));
   for (const fn of EXTRA_LINE_BUILDERS) {
     const extra = fn(lang, ev);
     if (extra) lines.push(extra);

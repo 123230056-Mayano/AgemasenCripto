@@ -11,6 +11,7 @@
 const fs = require("fs");
 const path = require("path");
 const { GlobalFonts } = require("@napi-rs/canvas");
+const { fmtTiered, fmtPrice: fmtPriceExact } = require("../../utils/priceFormat");
 
 const FONT_FILE = path.join(__dirname, "../../../assets/fonts/ArchivoNarrow-Variable.ttf");
 let fontReady = false;
@@ -48,11 +49,9 @@ const C = {
   ema: { 20: "#facc15", 50: "#3b82f6", 200: "#a78bfa" },
 };
 
-const fmtPrice = (p) => {
-  if (typeof p !== "number" || !isFinite(p)) return "-";
-  const d = p >= 100 ? 2 : p >= 1 ? 3 : p >= 0.01 ? 5 : 8;
-  return p.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
-};
+// dp = presisi koin (coinDecimals; dipakai chart !pola): label tampil dengan dp desimal, tanpa pembulatan ke tingkat tetap.
+// Tanpa dp (!chart / !analisis / !scandivergent) tingkat desimal lama dipertahankan.
+const fmtPrice = (p, dp) => (dp == null ? fmtTiered(p) : fmtPriceExact(p, dp));
 
 function niceStep(range, target) {
   const raw = range / target;

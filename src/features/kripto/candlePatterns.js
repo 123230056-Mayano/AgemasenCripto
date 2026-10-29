@@ -20,14 +20,19 @@
  *     di tren yang sedang berjalan, close di low/high baru bukan keluar range (kalau tidak, tiap tiga candle merah di tren turun jadi "three black crows").
  *   - Pola = bukti bersyarat: level konfirmasi (close menembus ujung pola) dan level batal (close melewati ujung sebaliknya).
  *   - Dua tahap: CALON (baru terbentuk) -> TERKONFIRMASI (close menembus) atau BATAL. Hanya hasil, bukan sinyal beli/jual.
+ *   - Momentum (versi 4): RSI dan MACD jadi bukti (+/-) untuk SEMUA pola berarah lewat buildEvidence (satu tempat). Tweezer yang MACD dan
+ *     RSI-nya sama-sama melawan arah pola tidak ditampilkan sebagai sinyal penuh (lihat applyTweezerGate). Nilai di candle e hanya memakai
+ *     data sampai e (RSI Wilder dan EMA bersifat kausal), jadi tanpa lookahead.
  */
 
 const { PATTERN_CONFIG: CFG } = require("../../config/indicatorConfig");
 const { computeStructure } = require("./hhllCore");
 const { wickReject } = require("./suddenMove");
 const core = require("./patternCore");
+const { rsi: rsiSeries, macd: macdSeries } = require("./indicators");
+const { coinDecimals } = require("../../utils/priceFormat");
 
-const { STATUS, DIR, FAMILY } = core;
+const { STATUS, DIR, FAMILY, GRADE } = core;
 const isNum = (v) => typeof v === "number" && isFinite(v);
 
 // ------------------------------------------------------------------
@@ -74,6 +79,93 @@ function volRatio(cs, e) {
 }
 
 // ------------------------------------------------------------------
+// Momentum RSI / MACD (versi 4)
+// ------------------------------------------------------------------
+
+/** Seri RSI + MACD atas close, dihitung SEKALI per array candle (cache); indeks e hanya bergantung pada candle 0..e. */
+const momCache = new WeakMap();
+function momentumSeries(candles) {
+  const n = candles.length;
+  const lastC = candles[n - 1]?.c;
+  const hit = momCache.get(candles);
+  if (hit && hit.n === n && hit.lastC === lastC) return hit;
+  const closes = candles.map((c) => c.c);
+  const m = macdSeries(closes);
+  const out = { n, lastC, rsi: rsiSeries(closes), macd: m.macd, signal: m.signal, hist: m.hist };
+  momCache.set(candles, out);
+  return out;
+}
+
+/** Konfigurasi momentum; opts.momentum menimpa PATTERN_CONFIG (dipakai backtest untuk membandingkan sebelum/sesudah tanpa restart). */
+function momentumConfig(o = {}) {
+  return {
+    evidence: o.evidence ?? CFG.MOM_EVIDENCE,
+    gate: o.gate ?? CFG.TWEEZER_MOMENTUM_GATE,
+    mode: o.mode ?? CFG.TWEEZER_GATE_MODE,
+    rsiOS: o.rsiOversold ?? CFG.MOM_RSI_OVERSOLD,
+    rsiOB: o.rsiOverbought ?? CFG.MOM_RSI_OVERBOUGHT,
+    lookback: o.lookback ?? CFG.MOM_LOOKBACK,
+  };
+}
+
+/**
+ * Bukti momentum untuk pola berarah di candle e. Bullish: [+] RSI oversold / baru naik kembali melewati batas oversold dalam
+ * lookback candle; [+] MACD memotong signal ke atas dalam lookback, atau histogram naik; [-] MACD di bawah signal dan histogram
+ * masih turun; [-] RSI masih turun dan belum oversold. Bearish: cermin. Nilai yang dipakai disimpan mentah di params (tanpa pembulatan).
+ *
+ * "Naik" / "turun" = dibanding `lookback` candle SEBELUM POLA DIMULAI (indeks f - lookback), BUKAN dibanding satu candle sebelumnya:
+ * candle penutup pola pembalikan (tweezer bottom, engulfing, ...) hampir selalu candle pantulan, sehingga perbandingan satu candle
+ * membuat RSI dan histogram tampak "naik" di setiap pola dan momentum yang masih melawan tidak pernah terdeteksi. Pertanyaannya:
+ * setelah seluruh candle pola, apakah momentum masih lebih rendah (bullish) / lebih tinggi (bearish) daripada sebelum pola?
+ * @returns {{sign:"+"|"-", key:string, params:object}[]}  kosong bila momentum nonaktif / belum terisi (warmup)
+ */
+function momentumEvidence(env, dir, e, f = e) {
+  const m = env.mom;
+  const c = env.momCfg;
+  if (!m || !c || (dir !== DIR.BULL && dir !== DIR.BEAR)) return [];
+  const bull = dir === DIR.BULL;
+  const N = c.lookback;
+  const out = [];
+
+  const rs = m.rsi;
+  const r = rs[e];
+  const r0 = rs[f - N];
+  if (isNum(r)) {
+    const limit = bull ? c.rsiOS : c.rsiOB;
+    const extreme = (v) => (bull ? v <= limit : v >= limit);
+    let recent = false;
+    for (let k = Math.max(0, e - N); k < e; k++) if (isNum(rs[k]) && extreme(rs[k])) recent = true;
+    if (extreme(r)) out.push({ sign: "+", key: bull ? "momRsiOversold" : "momRsiOverbought", params: { rsi: r, limit } });
+    else if (recent) out.push({ sign: "+", key: bull ? "momRsiRecoverUp" : "momRsiRecoverDown", params: { rsi: r, limit } });
+    else if (isNum(r0) && (bull ? r < r0 : r > r0)) out.push({ sign: "-", key: bull ? "momRsiFalling" : "momRsiRising", params: { rsi: r } });
+  }
+
+  const { macd: ml, signal: sg, hist: h } = m;
+  if (isNum(ml[e]) && isNum(sg[e]) && isNum(h[e])) {
+    let cross = false;
+    for (let k = Math.max(1, e - N + 1); k <= e; k++) {
+      if (![ml[k - 1], sg[k - 1], ml[k], sg[k]].every(isNum)) continue;
+      if (bull ? ml[k - 1] <= sg[k - 1] && ml[k] > sg[k] : ml[k - 1] >= sg[k - 1] && ml[k] < sg[k]) cross = true;
+    }
+    const stillSide = bull ? ml[e] > sg[e] : ml[e] < sg[e]; // potongan hanya dihitung bila MACD masih di sisi baru
+    const h0 = h[f - N];
+    const histFavor = isNum(h0) && (bull ? h[e] > h0 : h[e] < h0);
+    const histAgainst = isNum(h0) && (bull ? h[e] < h0 : h[e] > h0);
+    const sideAgainst = bull ? ml[e] < sg[e] : ml[e] > sg[e];
+    if (cross && stillSide) out.push({ sign: "+", key: bull ? "momMacdCrossUp" : "momMacdCrossDown", params: { hist: h[e] } });
+    else if (histFavor) out.push({ sign: "+", key: bull ? "momMacdHistUp" : "momMacdHistDown", params: { hist: h[e] } });
+    else if (sideAgainst && histAgainst) out.push({ sign: "-", key: bull ? "momMacdAgainstBull" : "momMacdAgainstBear", params: { hist: h[e] } });
+  }
+  return out;
+}
+
+/** True bila bukti memuat RSI (-) DAN MACD (-): momentum melawan arah pola di kedua indikator. */
+function momentumAgainst(evidence) {
+  const neg = evidence.filter((x) => x.sign === "-");
+  return neg.some((x) => String(x.key).startsWith("momRsi")) && neg.some((x) => String(x.key).startsWith("momMacd"));
+}
+
+// ------------------------------------------------------------------
 // Lingkungan per candle e (semua dipotong sampai e: tanpa lookahead)
 // ------------------------------------------------------------------
 
@@ -81,7 +173,7 @@ function volRatio(cs, e) {
  * @param {object[]} candles candle closed, lama -> baru
  * @param {(number|null)[]} atr seri ATR sejajar candles
  * @param {number} e index candle penutup pola
- * @param {{levelsFn?:Function, levels?:object, htfTrendFn?:Function, htfTf?:string}} opts
+ * @param {{levelsFn?:Function, levels?:object, htfTrendFn?:Function, htfTf?:string, momentum?:{evidence?:boolean, gate?:boolean, mode?:"weaken"|"drop", rsiOversold?:number, rsiOverbought?:number, lookback?:number}}} opts
  *   levelsFn(sliceCandles, price) -> {resistance:number[], support:number[]} (mis. computeLevels dari market.js; boleh tidak ada = SNR tidak dipakai)
  *   htfTrendFn(candleX) -> "up"|"down"|"range"|null : tren TF besar yang SUDAH closed saat candle X closed
  */
@@ -93,6 +185,7 @@ function buildEnv(candles, atr, e, opts = {}) {
   const levels = levelsFn ? levelsFn(slice, price) : opts.levels || null;
   const levelsPrev = levelsFn && e >= 1 ? levelsFn(candles.slice(0, e), candles[e - 1].c) : opts.levels || null; // level relatif harga sebelum candle e (untuk deteksi tembus)
   const memo = new Map();
+  const mc = momentumConfig(opts.momentum);
   return {
     candles,
     e,
@@ -103,6 +196,8 @@ function buildEnv(candles, atr, e, opts = {}) {
     levelsPrev,
     htfTrend: typeof opts.htfTrendFn === "function" ? opts.htfTrendFn(candles[e]) : null,
     htfTf: opts.htfTf || null,
+    momCfg: mc,
+    mom: mc.evidence ? momentumSeries(candles) : null,
     /** tren struktur tepat sebelum candle f (hanya memakai candle < f) */
     trendBefore(f) {
       if (f < 10) return null;
@@ -170,20 +265,21 @@ function locate(env, f, e) {
 // Pembangun pola
 // ------------------------------------------------------------------
 
-function buildEvidence(env, { dir, loc, bodyAtr, e }) {
+function buildEvidence(env, { dir, loc, bodyAtr, e, f = e }) {
   const ev = [];
   const add = (sign, key, params = {}) => ev.push({ sign, text: key, key, params });
   if (loc) add("+", `loc.${loc.kind}`, { level: loc.level ?? null });
   if (isNum(bodyAtr) && bodyAtr >= CFG.EV_BIG_BODY_ATR) add("+", "bigBody");
   const vr = volRatio(env.candles, e);
   if (vr != null) {
-    if (vr >= CFG.EV_VOL_HIGH) add("+", "volHigh", { x: Number(vr.toFixed(1)) });
-    else if (vr <= CFG.EV_VOL_LOW) add("-", "volLow", { x: Number(vr.toFixed(1)) });
+    if (vr >= CFG.EV_VOL_HIGH) add("+", "volHigh", { x: Number(vr.toFixed(2)) });
+    else if (vr <= CFG.EV_VOL_LOW) add("-", "volLow", { x: Number(vr.toFixed(2)) });
   }
   if ((dir === DIR.BULL || dir === DIR.BEAR) && (env.htfTrend === "up" || env.htfTrend === "down")) {
     const with_ = (env.htfTrend === "up") === (dir === DIR.BULL);
     add(with_ ? "+" : "-", with_ ? "htfWith" : "htfAgainst", { htf: env.htfTf });
   }
+  for (const x of momentumEvidence(env, dir, e, f)) add(x.sign, x.key, x.params);
   return ev;
 }
 
@@ -214,7 +310,7 @@ function mk(env, o) {
     confirmLevel,
     invalidLevel,
     confirmPrice: o.confirmPrice,
-    evidence: buildEvidence(env, { dir: o.dir, loc: o.loc, bodyAtr: o.bodyAtr, e: o.e }),
+    evidence: buildEvidence(env, { dir: o.dir, loc: o.loc, bodyAtr: o.bodyAtr, e: o.e, f: o.f }),
   });
   p.variant = o.variant || null; // sub-jenis / nama konteks (hammer, hangingMan, dragonfly, beltHold, ...)
   p.loc = o.loc || null;
@@ -347,6 +443,22 @@ function detectInsideBar(env, e) {
   return out;
 }
 
+/**
+ * Gerbang tweezer: pola dua candle yang lemah ini tidak boleh tampil sebagai sinyal penuh bila MACD dan RSI sama-sama melawan arahnya.
+ * "weaken" (default): tetap tampil dengan grade lemah dan keterangan "momentum belum mendukung" (tidak dibuang diam-diam).
+ * "drop": dibuang total. Saklar: PATTERN_TWEEZER_MOMENTUM_GATE=0 mematikan gerbang.
+ */
+function applyTweezerGate(env, p) {
+  const c = env.momCfg;
+  if (!p || !c || !c.evidence || !c.gate) return p;
+  if (!momentumAgainst(p.evidence)) return p;
+  if (c.mode === "drop") return null;
+  p.momentumAgainst = true;
+  p.gradeCap = GRADE.WEAK; // dibaca gradeOf (patternCore)
+  p.evidence.push({ sign: "-", text: "momAgainst", key: "momAgainst", params: {} });
+  return p;
+}
+
 function detectTweezer(env, e) {
   if (e < 1) return null;
   const cs = env.candles;
@@ -356,10 +468,10 @@ function detectTweezer(env, e) {
   const f = e - 1;
   const loc = locate(env, f, e);
   if (a.up && b.down && Math.abs(cs[e - 1].h - cs[e].h) <= CFG.TWEEZER_TOL_ATR * A && loc.high && priorMove(cs, f, "up")) {
-    return mk(env, { kind: "tweezerTop", dir: DIR.BEAR, f, e, loc: loc.high, bodyAtr: b.body / A, keyIdx: [e - 1, e] });
+    return applyTweezerGate(env, mk(env, { kind: "tweezerTop", dir: DIR.BEAR, f, e, loc: loc.high, bodyAtr: b.body / A, keyIdx: [e - 1, e] }));
   }
   if (a.down && b.up && Math.abs(cs[e - 1].l - cs[e].l) <= CFG.TWEEZER_TOL_ATR * A && loc.low && priorMove(cs, f, "down")) {
-    return mk(env, { kind: "tweezerBottom", dir: DIR.BULL, f, e, loc: loc.low, bodyAtr: b.body / A, keyIdx: [e - 1, e] });
+    return applyTweezerGate(env, mk(env, { kind: "tweezerBottom", dir: DIR.BULL, f, e, loc: loc.low, bodyAtr: b.body / A, keyIdx: [e - 1, e] }));
   }
   return null;
 }
@@ -531,7 +643,8 @@ function settle(p, candles, lastI) {
  * @param {object[]} candles candle closed, lama -> baru
  * @param {object} [opts] lihat buildEnv (levelsFn, htfTrendFn, htfTf). opts.bars = jumlah candle terakhir yang dipindai.
  * @returns {{ok:false, reason:string, have:number, need:number} |
- *           {ok:true, patterns:object[], absorbed:object[], dropped:object[], invalidated:number, atrLast:number, lastI:number, lastT:number, trend:string|null}}
+ *           {ok:true, patterns:object[], absorbed:object[], dropped:object[], invalidated:number, atrLast:number, lastI:number, lastT:number, trend:string|null, dp:number}}
+ *           dp = presisi koin (desimal terbanyak di data candle), dipakai pemformat angka.
  */
 function scanCandlePatterns(candles, opts = {}) {
   const prep = core.prepare(candles, { minSwings: 0 });
@@ -563,7 +676,7 @@ function scanCandlePatterns(candles, opts = {}) {
   const patterns = res.kept
     .filter((p) => p.status !== STATUS.INVALIDATED)
     .sort((a, b) => b.endI - a.endI || rank[b.grade] - rank[a.grade]);
-  return { ok: true, patterns, absorbed: res.absorbed, dropped: res.dropped, invalidated, atrLast: prep.atrLast, lastI, lastT: candles[lastI].t, trend: computeStructure(candles).trend };
+  return { ok: true, patterns, absorbed: res.absorbed, dropped: res.dropped, invalidated, atrLast: prep.atrLast, lastI, lastT: candles[lastI].t, trend: computeStructure(candles).trend, dp: coinDecimals(candles) };
 }
 
 module.exports = {
@@ -575,6 +688,11 @@ module.exports = {
   priorMove,
   locate,
   buildEnv,
+  momentumSeries,
+  momentumConfig,
+  momentumEvidence,
+  momentumAgainst,
+  applyTweezerGate,
   settle,
   scanCandlePatterns,
   detectEngulfing,

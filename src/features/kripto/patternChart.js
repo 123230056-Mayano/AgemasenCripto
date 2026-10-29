@@ -18,6 +18,7 @@ const { PATTERN_CONFIG: CFG } = require("../../config/indicatorConfig");
 const { t } = require("../../i18n");
 const { C, fontFamily, fmtPrice, niceStep, tickLabel, chip } = require("./chartKit");
 const { STATUS, DIR } = require("./patternCore");
+const { coinDecimals } = require("../../utils/priceFormat");
 const { priceAt } = require("./trenStateTrendline");
 
 const CONFIRM_COLOR = "#38bdf8";
@@ -48,6 +49,9 @@ function renderPatternChart({ lang, candles, coin, tf, res, title: titleOverride
   if (!res || !res.ok) throw new Error("NO_PATTERN_RESULT");
   if (!candles || candles.length < 10) throw new Error("CANDLES_TOO_FEW");
   const family = fontFamily();
+  // presisi koin: label harga tampil lengkap (tanpa pembulatan ke tingkat tetap); tanpa res.dp dihitung dari candle
+  const dp = res.dp ?? coinDecimals(candles);
+  const fp = (v) => fmtPrice(v, dp);
   const n = candles.length;
   const last = candles[n - 1];
   const shown = res.patterns.slice(0, maxShow);
@@ -112,7 +116,17 @@ function renderPatternChart({ lang, candles, coin, tf, res, title: titleOverride
 
   const W = 1600;
   const Lm = 20;
-  const Rm = 215;
+  // margin kanan: minimal 215px, melebar bila label harga lengkap (mis. koin 8 desimal) tidak muat sebagai tag
+  let Rm = 215;
+  try {
+    const mg = createCanvasFn(10, 10).getContext("2d");
+    mg.font = `bold 19px ${family}`;
+    const texts = [...drawn.map((k) => `${k.label} ${fp(k.price)}`), fp(last.c), fp(lo), fp(hi)];
+    const widest = Math.max(...texts.map((x) => mg.measureText(x).width));
+    if (isFinite(widest)) Rm = Math.max(Rm, Math.ceil(widest) + 26);
+  } catch {
+    /* canvas suntikan (uji) tanpa measureText: pakai lebar bawaan */
+  }
   const T = 96;
   const hP = 760;
   const B = 52;
@@ -147,7 +161,7 @@ function renderPatternChart({ lang, candles, coin, tf, res, title: titleOverride
     g.stroke();
     if (tagYs.some((ty) => Math.abs(ty - yy) < 18)) continue;
     g.fillStyle = C.axis;
-    g.fillText(fmtPrice(p), pp.x + pp.w + 10, yy);
+    g.fillText(fp(p), pp.x + pp.w + 10, yy);
   }
 
   // grid vertikal + label waktu
@@ -462,7 +476,7 @@ function renderPatternChart({ lang, candles, coin, tf, res, title: titleOverride
       g.restore();
     };
     const lastColor = last.c >= last.o ? C.up : C.down;
-    const tags = [...drawn.map((k) => ({ txt: `${k.label} ${fmtPrice(k.price)}`, y: Yp(k.price), color: k.color })), { txt: fmtPrice(last.c), y: Yp(last.c), color: lastColor }].sort((a, b) => a.y - b.y);
+    const tags = [...drawn.map((k) => ({ txt: `${k.label} ${fp(k.price)}`, y: Yp(k.price), color: k.color })), { txt: fp(last.c), y: Yp(last.c), color: lastColor }].sort((a, b) => a.y - b.y);
     const gapY = 28;
     for (let i = 1; i < tags.length; i++) tags[i].ty = Math.max(tags[i].y, (tags[i - 1].ty ?? tags[i - 1].y) + gapY);
     if (tags.length) tags[0].ty = tags[0].y;
@@ -481,7 +495,7 @@ function renderPatternChart({ lang, candles, coin, tf, res, title: titleOverride
   const chg = ((last.c - prev.c) / prev.c) * 100;
   g.font = `22px ${family}`;
   g.fillStyle = last.c >= prev.c ? C.up : C.down;
-  g.fillText(`${fmtPrice(last.c)}  (${chg >= 0 ? "+" : ""}${chg.toFixed(2)}%)`, Lm + titleW + 20, 27);
+  g.fillText(`${fp(last.c)}  (${chg >= 0 ? "+" : ""}${chg.toFixed(2)}%)`, Lm + titleW + 20, 27);
   g.font = `19px ${family}`;
   g.fillStyle = C.axis;
   const sub = primary

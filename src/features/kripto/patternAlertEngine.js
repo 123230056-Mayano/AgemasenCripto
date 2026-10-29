@@ -31,6 +31,7 @@ const { PATTERN_ALERT_CONFIG: PA } = require("../../config/indicatorConfig");
 const { TF_MS, COIN_WATCHLIST, ChatRateLimiter } = require("./divAlertCore");
 const { selectLivePairs } = require("./advAlertCore");
 const { runPool } = require("./advAlertEngine");
+const { coinDecimals } = require("../../utils/priceFormat");
 const { detectEvents, matchSub, isAfterCreation, patKey, chunk, sortEvents, buildPatternText, capCoins } = require("./patternAlertCore");
 
 const defaultSleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -112,13 +113,14 @@ function createPatternEngine(deps) {
 
     const pair = scanPair(coin, tf, closed);
     if (!pair) return out;
+    const dp = coinDecimals(closed); // presisi koin: level di pesan tampil tanpa pembulatan
 
     for (const raw of detectEvents(pair.prev, pair.now)) {
       if (!matchSub(raw, sub)) continue;
       // id berbasis waktu candle penutup pola (tahan terhadap pergeseran jendela candle)
       const endT = closed[raw.endI]?.t ?? raw.endI;
       const id = [raw.variant || raw.kind, raw.dir, endT].join(":");
-      const ev = { ...raw, id, chat: sub.chat, userJid, coin, tf, subId: sub.id, candleT: X.t, now: X.c };
+      const ev = { ...raw, id, chat: sub.chat, userJid, coin, tf, subId: sub.id, candleT: X.t, now: X.c, dp };
       const key = patKey(sub.chat, userJid, coin, tf, ev.stage, ev, X.t);
       if (store.wasSent(key)) continue;
       out.events.push({ ...ev, key });

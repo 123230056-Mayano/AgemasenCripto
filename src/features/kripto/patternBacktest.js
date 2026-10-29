@@ -86,7 +86,7 @@ function targetHit(up, target, future) {
 /**
  * Backtest pola satu koin + satu timeframe.
  * @param {object[]} candles candle closed, lama -> baru
- * @param {{coin?:string, tf:string, horizon?:number, warmup?:number, window?:number, families?:string[], htfTrend?:string|null}} opts
+ * @param {{coin?:string, tf:string, horizon?:number, warmup?:number, window?:number, families?:string[], htfTrend?:string|null, candleOpts?:object}} opts
  * @returns {{patterns:object[], baseline:object[]}}
  */
 function runPatternBacktest(candles, opts = {}) {
@@ -107,7 +107,7 @@ function runPatternBacktest(candles, opts = {}) {
     const win = candles.slice(off, i + 1);
     const lastI = win.length - 1;
     const scans = [];
-    if (hasFam("candle")) scans.push(scanCandlePatterns(win));
+    if (hasFam("candle")) scans.push(scanCandlePatterns(win, opts.candleOpts)); // candleOpts mis. { momentum: { gate: false } } untuk membandingkan sebelum/sesudah
     if (hasFam("swing")) scans.push(scanSwingPatterns(win, { htfTrend: opts.htfTrend ?? null }));
     if (hasFam("line")) scans.push(scanLinePatterns(win));
     for (const sc of scans) {
@@ -127,6 +127,7 @@ function runPatternBacktest(candles, opts = {}) {
         patterns.push({
           coin, tf, i, t: candles[i].t, kind: p.kind, family: p.family, dir: p.dir, grade: p.grade,
           riskAtr: Math.abs(base - p.invalidLevel) / atr,
+          momAgainst: !!p.momentumAgainst, // tweezer yang MACD dan RSI-nya melawan (versi 4)
           outcome: res.outcome, mfe: res.mfe, mae: res.mae, bars: res.bars,
           targetHit: targetHit(up, p.target, future),
         });

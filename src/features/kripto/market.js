@@ -15,6 +15,7 @@
 
 const axios = require("axios");
 const { binanceSymbol } = require("../analisis/analisisChart");
+const { fmtPrice, fmtUsdExact, fmtTiered, fmtPercent } = require("../../utils/priceFormat");
 
 const BINANCE = (process.env.BINANCE_BASE || "https://data-api.binance.vision").replace(/\/+$/, "");
 
@@ -167,23 +168,17 @@ function computeLevels(candles, price, { lookback = 150, win = 3, count = 2 } = 
 }
 
 // ---------- format ----------
-const fmtUsd = (v) => {
-  if (typeof v !== "number" || !isFinite(v)) return "-";
-  const o = v >= 1 ? { minimumFractionDigits: 2, maximumFractionDigits: v >= 1000 ? 2 : 4 } : { maximumSignificantDigits: 4 };
-  return "$" + v.toLocaleString("en-US", o);
-};
+// Harga header (ticker mentah dari exchange): tampil penuh tanpa pembulatan (utils/priceFormat.js). dp (opsional) = presisi koin dari data candle.
+const fmtUsd = (v, dp) => fmtUsdExact(v, dp);
 const fmtIdr = (v) => {
   if (typeof v !== "number" || !isFinite(v)) return "-";
   const o = v >= 100 ? { maximumFractionDigits: 0 } : v >= 1 ? { maximumFractionDigits: 2 } : { maximumSignificantDigits: 4 };
   return "Rp" + v.toLocaleString("id-ID", o);
 };
-// Sama dengan label harga di gambar chart supaya angkanya identik.
-const fmtLevel = (p) => {
-  if (typeof p !== "number" || !isFinite(p)) return "-";
-  const d = p >= 100 ? 2 : p >= 1 ? 3 : p >= 0.01 ? 5 : 8;
-  return p.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
-};
-const fmtPct = (v) => (typeof v === "number" && isFinite(v) ? `${v >= 0 ? "+" : ""}${v.toFixed(2)}%` : "-");
+// Sama dengan label harga di gambar chart supaya angkanya identik. dp = presisi koin (coinDecimals): angka tampil dengan dp desimal.
+// Tanpa dp (pemanggil lama: !ema, !statistik, !signal) tingkat desimal lama dipertahankan.
+const fmtLevel = (p, dp) => (dp == null ? fmtTiered(p) : fmtPrice(p, dp));
+const fmtPct = (v) => fmtPercent(v);
 const pctFrom = (price, level) => ((level - price) / price) * 100;
 
 module.exports = {

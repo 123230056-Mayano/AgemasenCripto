@@ -22,6 +22,7 @@
 const { PATTERN_CONFIG: CFG, INDICATOR_CONFIG } = require("../../config/indicatorConfig");
 const { atr: atrSeries } = require("./indicators");
 const { computeStructure } = require("./hhllCore");
+const { fmtPrice: fmtPriceExact } = require("../../utils/priceFormat");
 
 const NO_DATA = "data belum cukup";
 
@@ -114,11 +115,13 @@ function makePattern(p) {
 
 /**
  * Grade tiga tingkat dari bukti. Bukti tanpa tanda "+"/"-" (netral) tidak dihitung.
+ * p.gradeCap = "lemah" (opsional, diisi detektor) memaksa lemah, apa pun buktinya.
  * Kuat butuh status terkonfirmasi, net >= GRADE_STRONG_NET, dan (bila diberikan) close melewati level >= CONFIRM_BEYOND_ATR x ATR.
  * Calon tidak pernah di atas sedang. Bukti yang bisa dinilai < MIN_EVIDENCE = lemah.
  */
 function gradeOf(p, atrLast = null) {
   if (p.status === STATUS.INVALIDATED) return GRADE.WEAK;
+  if (p.gradeCap === GRADE.WEAK) return GRADE.WEAK; // batas atas dari detektor (mis. tweezer yang momentumnya melawan)
   const ev = p.evidence.filter((e) => e.sign === "+" || e.sign === "-");
   if (ev.length < CFG.MIN_EVIDENCE) return GRADE.WEAK;
   const net = ev.filter((e) => e.sign === "+").length - ev.filter((e) => e.sign === "-").length;
@@ -329,25 +332,26 @@ function filterNew(patterns, seen, symbol, tf, candles) {
 const DISCLAIMER = "Skenario bersyarat, bukan ramalan. Edukasi, bukan saran investasi.";
 const HEURISTIC_NOTE = "Ambang dan bobot masih heuristik, belum tervalidasi backtest.";
 
-const fmtPrice = (v) => (isNum(v) ? (Math.abs(v) >= 100 ? Math.round(v) : Number(v.toPrecision(4))).toLocaleString("id-ID") : "-");
+const fmtPrice = (v, dp) => fmtPriceExact(v, dp); // tanpa pembulatan; pemisah desimal titik (lihat utils/priceFormat.js)
 
 /**
  * Teks keluaran satu pola. Statistik historis (kalau ada) hanya tampil bila N >= STATS_MIN_N, dan selalu menyertakan N + periode.
  * @param {object} p pola dari makePattern/resolvePatterns
- * @param {{title?:string, label?:string, stats?:{n:number, periode:string, text:string}, heuristic?:boolean}} [opts]
+ * @param {{title?:string, label?:string, stats?:{n:number, periode:string, text:string}, heuristic?:boolean, dp?:number}} [opts] dp = presisi koin (coinDecimals)
  */
 function formatPattern(p, opts = {}) {
+  const fmtP = (v) => fmtPrice(v, opts.dp);
   const lines = [];
   if (opts.title) lines.push(opts.title);
   lines.push(`${opts.label || p.kind} (grade: ${p.grade || gradeOf(p)}) - ${STATUS_LABEL[p.status]}${p.stage ? ` (${p.stage})` : ""}`);
-  lines.push(`Konfirmasi: ${fmtPrice(p.confirmLevel)} | Batal: ${fmtPrice(p.invalidLevel)}`);
+  lines.push(`Konfirmasi: ${fmtP(p.confirmLevel)} | Batal: ${fmtP(p.invalidLevel)}`);
   for (const e of p.evidence) if (e.sign === "+" || e.sign === "-") lines.push(`[${e.sign}] ${e.text}`);
   for (const n of p.notes) lines.push(`(+ ${n})`);
   lines.push("");
   const dirWord = p.dir === DIR.BEAR ? "di atas" : p.dir === DIR.BULL ? "di bawah" : "melewati";
-  lines.push(`> Batal jika close kembali ${dirWord} ${fmtPrice(p.invalidLevel)}`);
+  lines.push(`> Batal jika close kembali ${dirWord} ${fmtP(p.invalidLevel)}`);
   if (isNum(p.target)) {
-    lines.push(`> Target ukuran pola: ${fmtPrice(p.target)}`);
+    lines.push(`> Target ukuran pola: ${fmtP(p.target)}`);
     lines.push("> Catatan: konfirmasi datang setelah sebagian gerakan terjadi; hitung target dan risk/reward dari titik konfirmasi, bukan dari puncaknya.");
   }
   if (opts.stats) {

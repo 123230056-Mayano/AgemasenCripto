@@ -508,7 +508,7 @@ const DUSDT_ALERT_CONFIG = Object.freeze({
 // SEMUA angka di bawah NILAI AWAL USULAN, belum divalidasi backtest (tampilkan sebagai heuristik). Naikkan VERSION kalau aturan diubah.
 // Pola = bukti bersyarat (level konfirmasi + level batal), bukan sinyal. Toleransi dalam ATR, bukan persen tetap.
 const PATTERN_CONFIG = Object.freeze({
-  VERSION: 3, // 2 = Fase 1 candlestick; 3 = Fase 2 pola swing (swingPatterns.js)
+  VERSION: 4, // 2 = Fase 1 candlestick; 3 = Fase 2 pola swing (swingPatterns.js); 4 = bukti momentum RSI/MACD + gerbang tweezer (statistik lama di data/pola-stats.json jadi tidak berlaku, jalankan ulang scripts/backtest-pola.js)
   MIN_CANDLES: _posInt(process.env.PATTERN_MIN_CANDLES, 60), // candle closed minimal (ATR + swing); kurang -> null "data belum cukup"
   MIN_SWINGS: _posInt(process.env.PATTERN_MIN_SWINGS, 4), // swing berlabel minimal untuk pola swing/garis
   // --- ukuran umum (satuan ATR) ---
@@ -555,6 +555,13 @@ const PATTERN_CONFIG = Object.freeze({
   SOLDIER_WICK_PCT: _num(process.env.PATTERN_SOLDIER_WICK_PCT, 0.3), // three soldiers / crows: sumbu lawan <= 30% range
   THREE_METHODS_SMALL_RATIO: _num(process.env.PATTERN_THREE_METHODS_SMALL_RATIO, 0.5), // three methods: body tiap candle koreksi <= ini x body candle besar pertama
   PRIOR_MOVE_BARS: _posInt(process.env.PATTERN_PRIOR_MOVE_BARS, 2), // engulfing / tweezer: gerak searah >= sekian candle (close menurun/menaik beruntun) sebelum pola
+  // --- Versi 4: bukti momentum RSI / MACD untuk semua pola berarah + gerbang tweezer. NILAI AWAL USULAN, belum tervalidasi backtest. ---
+  MOM_EVIDENCE: !["0", "false", "off"].includes(String(process.env.PATTERN_MOMENTUM_EVIDENCE ?? "1").toLowerCase()), // saklar bukti momentum (0 = perilaku versi 3)
+  MOM_RSI_OVERSOLD: _num(process.env.PATTERN_MOM_RSI_OVERSOLD, 30), // RSI <= ini = oversold (bukti + untuk pola bullish)
+  MOM_RSI_OVERBOUGHT: _num(process.env.PATTERN_MOM_RSI_OVERBOUGHT, 70), // RSI >= ini = overbought (bukti + untuk pola bearish)
+  MOM_LOOKBACK: _posInt(process.env.PATTERN_MOM_LOOKBACK, 3), // RSI kembali melewati batas / MACD memotong signal dalam <= sekian candle terakhir
+  TWEEZER_MOMENTUM_GATE: !["0", "false", "off"].includes(String(process.env.PATTERN_TWEEZER_MOMENTUM_GATE ?? "1").toLowerCase()), // tweezer yang MACD dan RSI-nya sama-sama melawan arah pola ditangani sesuai TWEEZER_GATE_MODE
+  TWEEZER_GATE_MODE: String(process.env.PATTERN_TWEEZER_GATE_MODE || "weaken").toLowerCase() === "drop" ? "drop" : "weaken", // "weaken" = tetap tampil, grade lemah + keterangan "momentum belum mendukung"; "drop" = dibuang
   // --- konteks wajib: ekstrem swing / zona SNR (tanpa lookahead) ---
   EXT_LOOKBACK: _posInt(process.env.PATTERN_EXT_LOOKBACK, 20), // ekstrem berjalan: low/high pola dibanding sekian candle sebelum pola
   EXT_TOL_ATR: _num(process.env.PATTERN_EXT_TOL_ATR, 0.5), // toleransi "di ekstrem" (x ATR)
