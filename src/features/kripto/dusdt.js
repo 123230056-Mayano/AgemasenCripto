@@ -6,7 +6,8 @@
  * !dusdt [15m|1H|4H|1D] -> USDT Dominance (USDT.D) ditampilkan seperti sebuah koin: nilai terkini,
  * perubahan pada timeframe yang dipilih, arah (NAIK / TURUN / SIDEWAYS), lalu struktur HHLL
  * (Higher High / Lower Low) dan Fibonacci yang dihitung dari candle USDT.D itu sendiri
- * (logika sama dengan !hhll -> hhllCore.js dan !fib -> fib.js; levelnya dalam persen dominasi).
+ * (logika sama dengan !hhll -> hhllCore.js dan !fib -> fib.js; levelnya dalam persen dominasi),
+ * serta pola (candlestick + swing, kekuatan tren, trendline) dari mesin yang sama dengan !pola (patternCommand.js scanTf).
  *
  * Sumber data (semua API publik yang terdokumentasi / dipakai resmi oleh proyek ini; TradingView
  * TIDAK di-scrape):
@@ -35,11 +36,14 @@
 
 const axios = require("axios");
 const { t } = require("../../i18n");
+const { PATTERN_CONFIG } = require("../../config/indicatorConfig");
 const { computeStructure, CFG: HHLL_CFG } = require("./hhllCore");
 const { computeFib, retraceDepth } = require("./fib");
 const { fmtWhen, renderHhllChart } = require("./hhll");
 const { renderChart } = require("../analisis/analisisChart");
 const { computeLevels } = require("./market");
+const { scanTf, formatOne } = require("./patternCommand");
+const { htfOf } = require("./hhllContext");
 
 const CG = (process.env.COINGECKO_BASE || "https://api.coingecko.com").replace(/\/+$/, "");
 const CMC = (process.env.CMC_DATA_BASE || "https://api.coinmarketcap.com").replace(/\/+$/, "");
@@ -382,6 +386,46 @@ async function getDusdt(tf) {
   return { ...result, ...buildStructure(candles), candles, candleCount: candles ? candles.length : 0 };
 }
 
+// ---------- pola (mesin yang sama dengan !pola) ----------
+/**
+ * Candle USDT.D untuk timeframe BESAR di atas `tf` (15M -> 1H, 1H -> 4H, 4H -> 1D; 1D tidak punya), hanya untuk label
+ * prioritas pola. Dua request saja (riwayat USDT + total market cap) dan keduanya di-cache. Deret diskalakan ke
+ * level yang sama dengan candle utama. Gagal -> null (label prioritas ditulis "tidak tersedia", bukan ditebak).
+ */
+async function getHtfCandles(tf, level) {
+  const htf = htfOf(tf);
+  const sdef = htf && SERIES[htf];
+  if (!sdef) return null;
+  const [tether, cmc] = await Promise.all([fetchTether(sdef.cgDays), fetchCmcSeries(htf)]);
+  return buildCandles(tether, cmc, htf, level);
+}
+
+/**
+ * Pindai pola pada candle USDT.D. Hasil = keluaran scanTf (ok:true/false) atau null kalau candle belum ada / pemindaian gagal.
+ * Murni (tanpa jaringan), jadi bisa diuji.
+ */
+function scanDusdtPatterns(tf, candles, htfCandles) {
+  if (!candles || !candles.length) return null;
+  try {
+    return scanTf(tf, candles, htfCandles || null);
+  } catch (err) {
+    console.log("[dusdt] pola gagal:", err.message);
+    return null;
+  }
+}
+
+/** Ambil TF besar lalu pindai pola untuk hasil getDusdt. Tidak pernah melempar. */
+async function getDusdtPatterns(r) {
+  if (!r || !r.candles) return null;
+  let htf = null;
+  try {
+    htf = await getHtfCandles(r.tf, r.level);
+  } catch (err) {
+    console.log("[dusdt] candle TF besar gagal:", err.message);
+  }
+  return scanDusdtPatterns(r.tf, r.candles, htf);
+}
+
 // ---------- format pesan ----------
 const fmtSigned = (v, d = 2) => `${v >= 0 ? "+" : ""}${v.toFixed(d)}`;
 const fmtPctS = (v) => `${fmtSigned(v)}%`;
@@ -519,8 +563,15 @@ function buildFibSection(lang, r) {
   return [t(lang, "dusdt.fib.title", { tf: r.tfLabel }), trend, "", ...lines, "", note].join("\n");
 }
 
-/** @returns {string} teks WhatsApp: USDT.D seperti satu koin, lalu HHLL dan Fib-nya. */
-function formatDusdt(lang, r) {
+/** Bagian pola di pesan teks: format yang sama dengan !pola (formatOne), level dalam persen dominasi. */
+function buildPatternSection(lang, r, pola) {
+  if (!pola) return t(lang, "dusdt.pola.na", { tf: r.tfLabel });
+  if (!pola.ok) return t(lang, "pola.nodata", { coin: "USDT.D", tf: r.tfLabel, min: PATTERN_CONFIG.MIN_CANDLES });
+  return [t(lang, "dusdt.pola.title", { tf: r.tfLabel }), formatOne(lang, { coin: "USDT.D", tf: r.tf, res: pola })].join("\n");
+}
+
+/** @returns {string} teks WhatsApp: USDT.D seperti satu koin, lalu HHLL, Fib, dan pola. */
+function formatDusdt(lang, r, pola) {
   const head = [t(lang, "dusdt.coin.title", { tf: r.tfLabel }), t(lang, "dusdt.level", { v: r.level.toFixed(2) })];
   if (isNum(r.deltaPp)) head.push(t(lang, "dusdt.change", { tf: r.tfLabel, pp: fmtSigned(r.deltaPp), rel: fmtPctS(r.relPct) }));
   else head.push(t(lang, "dusdt.change.na", { tf: r.tfLabel }));
@@ -531,7 +582,7 @@ function formatDusdt(lang, r) {
   if (r.candleCount === 0) {
     lines.push(t(lang, "dusdt.struct.na"));
   } else {
-    lines.push(buildHhllSection(lang, r), "", buildFibSection(lang, r));
+    lines.push(buildHhllSection(lang, r), "", buildFibSection(lang, r), "", buildPatternSection(lang, r, pola));
   }
   lines.push(
     "",
@@ -600,6 +651,22 @@ function renderDusdtChart(r) {
   }
 }
 
+/**
+ * Chart bukti pola (sama dengan chart !pola). Hanya dibuat kalau ada pola yang terdeteksi: tanpa pola, gambarnya cuma
+ * candle polos yang sudah ada di dua gambar lain.
+ * @returns {Buffer|null} PNG, atau null (tanpa pola / render gagal)
+ */
+function renderDusdtPatternChart(r, pola, lang = "id") {
+  if (!pola || !pola.ok || !pola.patterns.length || !r.candles || r.candles.length < 10) return null;
+  try {
+    const { renderPatternChart } = require("./patternChart");
+    return renderPatternChart({ lang, candles: r.candles, coin: "USDT.D", tf: r.tfLabel, res: pola, title: `USDT.D  ${r.tfLabel}  ${t(lang, "pola.chart.title")}` });
+  } catch (err) {
+    console.log("[dusdt] chart pola gagal:", err.message);
+    return null;
+  }
+}
+
 async function runDusdt(sock, msg, { jid, lang }, { tf }) {
   const result = await getDusdt(tf);
   if (!result) {
@@ -607,6 +674,8 @@ async function runDusdt(sock, msg, { jid, lang }, { tf }) {
     return;
   }
   const { hhll, chart } = renderDusdtCharts(result);
+  const pola = await getDusdtPatterns(result);
+  const polaImg = renderDusdtPatternChart(result, pola, lang);
   let quoted = msg;
   // Gambar 1: HHLL (seperti !hhll), gambar 2: chart (seperti !chart). Teks lengkap menyusul sebagai pesan terpisah.
   if (hhll) {
@@ -617,7 +686,11 @@ async function runDusdt(sock, msg, { jid, lang }, { tf }) {
     await sock.sendMessage(jid, { image: chart, caption: t(lang, "dusdt.img.chart", { tf: result.tfLabel }) }, quoted ? { quoted } : undefined);
     quoted = undefined;
   }
-  await sock.sendMessage(jid, { text: formatDusdt(lang, result) }, quoted ? { quoted } : undefined);
+  if (polaImg) {
+    await sock.sendMessage(jid, { image: polaImg, caption: t(lang, "dusdt.img.pola", { tf: result.tfLabel }) }, quoted ? { quoted } : undefined);
+    quoted = undefined;
+  }
+  await sock.sendMessage(jid, { text: formatDusdt(lang, result, pola) }, quoted ? { quoted } : undefined);
 }
 
 const DUSDT_RUNNERS = { dusdt: runDusdt };
@@ -635,6 +708,10 @@ module.exports = {
   buildStructure,
   renderDusdtCharts,
   renderDusdtChart,
+  renderDusdtPatternChart,
+  getDusdtPatterns,
+  scanDusdtPatterns,
+  buildPatternSection,
   ratioWindow,
   btcMove,
   direction,

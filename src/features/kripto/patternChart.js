@@ -40,10 +40,11 @@ function defaultCreateCanvas(w, h) {
  * @param {string} a.tf          label TF (mis. "4H")
  * @param {object} a.res         hasil scanCandlePatterns (ok:true)
  * @param {number} [a.maxShow]   default PATTERN_CONFIG.MAX_SHOW
+ * @param {string|null} [a.title]  judul kustom (default "<coin>/USDT <tf> Pola"), mis. "USDT.D 4H Pola" untuk !dusdt
  * @param {Function} [a.createCanvasFn]
  * @returns {Buffer} PNG
  */
-function renderPatternChart({ lang, candles, coin, tf, res, maxShow = CFG.MAX_SHOW, createCanvasFn = defaultCreateCanvas }) {
+function renderPatternChart({ lang, candles, coin, tf, res, title: titleOverride = null, maxShow = CFG.MAX_SHOW, createCanvasFn = defaultCreateCanvas }) {
   if (!res || !res.ok) throw new Error("NO_PATTERN_RESULT");
   if (!candles || candles.length < 10) throw new Error("CANDLES_TOO_FEW");
   const family = fontFamily();
@@ -473,7 +474,7 @@ function renderPatternChart({ lang, candles, coin, tf, res, maxShow = CFG.MAX_SH
   g.textBaseline = "middle";
   g.font = `bold 28px ${family}`;
   g.fillStyle = C.title;
-  const title = `${coin}/USDT  ${tf}  ${t(lang, "pola.chart.title")}`;
+  const title = titleOverride || `${coin}/USDT  ${tf}  ${t(lang, "pola.chart.title")}`;
   g.fillText(title, Lm, 26);
   const titleW = g.measureText(title).width;
   const prev = candles[Math.max(0, n - 2)];
