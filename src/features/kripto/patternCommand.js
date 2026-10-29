@@ -208,6 +208,19 @@ function spanText(lang, tf, h) {
 }
 
 /**
+ * Kesimpulan satu baris untuk blok sebaran: terjemahan angka yang sudah ada ke bahasa awam. Bukan prediksi.
+ * - gerak wajar = setengah lebar rentang ~68% terhadap harga sekarang (+/- %)
+ * - kecenderungan = dari peluang naik historis (55-100 = condong naik, 0-45 = condong turun, sisanya seimbang)
+ */
+function gaussianConclusion(lang, tf, g, up) {
+  const pct = ((g.range1.hi - g.range1.lo) / 2 / g.last) * 100;
+  const move = pct >= 10 ? pct.toFixed(0) : pct >= 1 ? pct.toFixed(1) : pct.toFixed(2);
+  const lean = up >= 65 ? "up2" : up >= 55 ? "up1" : up <= 35 ? "down2" : up <= 45 ? "down1" : "flat";
+  const key = g.fatTail ? "pola.gs.sum.fat" : "pola.gs.sum";
+  return t(lang, key, { span: spanText(lang, tf, g.h), move, lean: t(lang, `pola.gs.lean.${lean}`) });
+}
+
+/**
  * Blok "Estimasi sebaran harga" (Fitur 4) untuk satu TF. Informasi saja: tidak mengubah grade / status pola.
  * Data kurang -> tulis "data belum cukup", TANPA angka. Ekor tebal -> rentang dari sebaran riil ikut ditampilkan.
  * @returns {string[]}
@@ -223,6 +236,7 @@ function gaussianBlock(lang, tf, g) {
     t(lang, "pola.gs.r68", { lo: fmtLevel(g.range1.lo), hi: fmtLevel(g.range1.hi) }),
     t(lang, "pola.gs.r95", { lo: fmtLevel(g.range2.lo), hi: fmtLevel(g.range2.hi) }),
   ];
+  out.push(gaussianConclusion(lang, tf, g, up));
   if (g.fatTail) out.push(t(lang, "pola.gs.fat", { lo68: fmtLevel(g.emp1.lo), hi68: fmtLevel(g.emp1.hi), lo95: fmtLevel(g.emp2.lo), hi95: fmtLevel(g.emp2.hi) }));
   out.push(t(lang, "pola.gs.note"));
   return out;
