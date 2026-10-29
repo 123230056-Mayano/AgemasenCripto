@@ -25,6 +25,7 @@
  *   v4 (2026-10-29) FOREX: !signal <pair> (mis. eurusd, eur/usd, xauusd) lewat adapter pasar (ctx.market, lihat marketAdapter.js dan
  *                   forex/forexMarket.js). Kripto tidak berubah. Forex: tanpa mood pasar/tren BTC (komponen dilewati), tanpa volume,
  *                   jarak SL/TP dalam pip, status entri tidak VALID saat pasar tutup, catatan gap pembukaan. Alias: !fxsignal, !fxsinyal.
+ *                   Satu TF forex juga mengirim chart AMD (digits pair, judul pair, penanda gap) seperti kripto.
  *   v3 (2026-10-24) !amd digabung ke !signal: tiap baris TF dapat satu baris status AMD (dihitung dari candle yang sama dengan
  *                   skenario, tanpa fetch tambahan) + catatan bila arah AMD berlawanan dengan skenario; satu TF -> chart AMD.
  *   v2 (2026-10-22) Sudden Move Guard: tiap skenario LONG/SHORT dinilai suddenMove.assessEntry (status VALID / TUNGGU /
@@ -459,19 +460,23 @@ const CAPTION_MAX = 1000; // batas aman caption gambar WhatsApp (1024)
  * Chart AMD + penjelasan fase lengkap (isi lama !amd) untuk SATU timeframe.
  * @returns {Promise<boolean>} true kalau terkirim. Pola belum ada / render gagal -> false (baris ringkas di pesan sinyal tetap ada).
  */
-async function sendAmdDetail(sock, msg, { jid, lang }, { coin, row, tick }) {
+async function sendAmdDetail(sock, msg, { jid, lang }, { coin, row, tick, market = null }) {
   const { buildPhaseText, renderAmdChart } = require("./amd");
   const { TF_LABEL: MKT_TF, fetchCandles, fmtUsd, fmtPct } = require("./market");
   const st = row.amd;
   if (!st || st.phase === "none") return false;
 
-  const candles = row.candles || (await fetchCandles(coin, row.tf));
-  const caption = t(lang, "amd.body", {
+  // Forex: harga/level memakai digits pair, judul "EURUSD 4H ...", kripto tidak berubah.
+  const isFx = market?.id === "forex";
+  const candles = row.candles || (isFx ? await market.fetchCandles(row.tf) : await fetchCandles(coin, row.tf));
+  const phase = buildPhaseText(lang, st, candles, row.tf, tick.price, isFx ? { level: market.fmtLevel, price: market.fmtPrice } : {});
+  const caption = t(lang, isFx ? "amd.bodyFx" : "amd.body", {
     coin,
+    pair: isFx ? market.label : coin,
     tf: MKT_TF[row.tf],
-    price: fmtUsd(tick.price),
-    change: fmtPct(tick.changePct),
-    phase: buildPhaseText(lang, st, candles, row.tf, tick.price),
+    price: isFx ? market.fmtPrice(tick.price) : fmtUsd(tick.price),
+    change: isFx ? market.fmtPct(tick.changePct) : fmtPct(tick.changePct),
+    phase,
     minBars: AMD_CFG.RANGE_MIN_BARS,
     maxAtr: AMD_CFG.RANGE_MAX_ATR,
     confirmBars: AMD_CFG.CONFIRM_BARS,
@@ -480,7 +485,8 @@ async function sendAmdDetail(sock, msg, { jid, lang }, { coin, row, tick }) {
   // Render gagal (font/canvas bermasalah) -> tetap kirim versi teks supaya detail AMD tidak hilang.
   let png = null;
   try {
-    png = renderAmdChart({ candles, coin, tf: MKT_TF[row.tf], st });
+    const fx = isFx ? { dp: market.digits, title: `${market.label}${market.proxy === "futures" ? " (GC=F)" : ""}  ${MKT_TF[row.tf]}  Accumulation / Manipulation / Distribution` } : {};
+    png = renderAmdChart({ candles, coin, tf: MKT_TF[row.tf], st, ...fx });
   } catch (err) {
     console.log("[kripto] !signal chart AMD gagal, kirim teks saja:", err.message);
   }
@@ -534,11 +540,11 @@ async function runSinyal(sock, msg, ctx, { coin, tfs, allCoins, only }) {
   }
 
   // Satu TF: detail AMD (chart) dulu. Kalau gagal dikirim, baris ringkas tetap ditampilkan di pesan sinyal.
-  // Forex: chart AMD belum disesuaikan (judul "/USDT", format harga), jadi baris AMD ringkas tetap di pesan sinyal.
+  // Forex ikut: chart AMD memakai digits pair dan judul pair (lihat sendAmdDetail).
   let amdSent = false;
-  if (!isFx && rows.length === 1 && rows[0].bias) {
+  if (rows.length === 1 && rows[0].bias) {
     try {
-      amdSent = await sendAmdDetail(sock, msg, ctx, { coin, row: rows[0], tick });
+      amdSent = await sendAmdDetail(sock, msg, ctx, { coin, row: rows[0], tick, market });
     } catch (err) {
       console.log("[kripto] !signal detail AMD gagal:", err.message);
     }

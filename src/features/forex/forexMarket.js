@@ -21,7 +21,7 @@
 
 const axios = require("axios");
 const { PAIRS, resolvePair, roundPrice, toPips, allowedTfs } = require("./forexPairs");
-const { fmtPrice } = require("../../utils/priceFormat");
+const { fmtPrice, fmtPercent } = require("../../utils/priceFormat");
 
 const YAHOO = (process.env.YAHOO_BASE || "https://query1.finance.yahoo.com").replace(/\/+$/, "");
 const CACHE_MS = Number.isFinite(Number(process.env.FOREX_CACHE_MS)) && process.env.FOREX_CACHE_MS ? Number(process.env.FOREX_CACHE_MS) : 30_000;
@@ -35,6 +35,11 @@ const STALE_MS = 3 * 3600_000;
 const TF_STEP = { "15M": 900_000, "1H": 3_600_000, "4H": 14_400_000, "1D": 86_400_000 };
 // interval + range Yahoo per TF (4H dibentuk dari 1H). 15m maksimum 60 hari di Yahoo; dipakai 30 hari.
 const YAHOO_REQ = { "15M": { interval: "15m", range: "30d" }, "1H": { interval: "60m", range: "180d" }, "4H": { interval: "60m", range: "180d" }, "1D": { interval: "1d", range: "2y" } };
+
+// Riwayat panjang untuk estimasi sebaran (Gaussian butuh WINDOW 800 + HORIZON 6 candle). Yahoo membatasi 60m sampai 730 hari
+// dan 15m sampai 60 hari, jadi 1H/4H memakai 1y (aman di bawah batas), 1D memakai 5y (2y hanya ~520 candle, kurang).
+const HIST_REQ = { "15M": { interval: "15m", range: "60d" }, "1H": { interval: "60m", range: "1y" }, "4H": { interval: "60m", range: "1y" }, "1D": { interval: "1d", range: "5y" } };
+const HIST_CACHE_MS = 300_000; // riwayat berat dan jarang berubah: cache 5 menit
 
 class ForexDataError extends Error {
   constructor(msg, cause) {
@@ -193,6 +198,29 @@ async function loadCandles(pair, tf, now = Date.now()) {
   return closed.slice(-FETCH_LIMIT);
 }
 
+/**
+ * Candle closed panjang (default 806 = GAUSSIAN WINDOW + HORIZON) untuk estimasi sebaran. Aturan data sama dengan loadCandles
+ * (closed saja, tanpa v, harga dibulatkan, gap ditandai). Data lebih pendek dari `bars` tetap dikembalikan apa adanya;
+ * pemanggil (estimateGaussian) yang memutuskan "data belum cukup".
+ */
+async function loadHistory(pair, tf, bars = 806, now = Date.now()) {
+  const info = PAIRS[pair];
+  const req = HIST_REQ[tf];
+  if (!info || !req) throw new Error("TF_UNSUPPORTED");
+  if (!allowedTfs(pair).includes(tf)) throw new ForexDataError("TF_NOT_ALLOWED");
+  const raw = await cached(`h:${pair}:${req.interval}:${req.range}`, HIST_CACHE_MS, async () => {
+    try {
+      return parseYahooCandles(await yahooChart(info.yahoo, req), pair);
+    } catch (err) {
+      throw err instanceof ForexDataError ? err : new ForexDataError("YAHOO_FETCH_FAILED", err);
+    }
+  });
+  const base = tf === "4H" ? aggregate4h(raw) : raw;
+  const closed = flagGaps(closedOnly(base, tf, now), tf);
+  if (!closed.length) throw new ForexDataError("NO_CANDLES");
+  return closed.slice(-bars);
+}
+
 /** @returns {Promise<{price:number, changePct:number, asOf:number|null}>} */
 async function loadTicker(pair, now = Date.now()) {
   const info = PAIRS[pair];
@@ -242,9 +270,12 @@ function createForexMarket(pairInput) {
     allowedTfs: (tfs) => allowedTfs(pair, tfs),
     fetchTicker: () => loadTicker(pair),
     fetchCandles: (tf) => loadCandles(pair, tf),
-    computeLevels: (candles, price) => computeLevels(candles, price, { tol: LEVEL_TOL }),
+    fetchCandlesHistory: (tf, { bars } = {}) => loadHistory(pair, tf, bars),
+    // opts (mis. { count: 3 } dari !pola) digabung; toleransi gabung level forex 0,2% selalu berlaku kecuali ditimpa.
+    computeLevels: (candles, price, opts = {}) => computeLevels(candles, price, { tol: LEVEL_TOL, ...opts }),
     fmtLevel: (v) => fmtPrice(v, info.digits),
-    fmtPrice: (v) => fmtPrice(v, info.digits),
+    fmtPrice: (v) => fmtPrice(v, info.digits), // digits tetap per pair (dp dari pemanggil diabaikan)
+    fmtPct: (v) => fmtPercent(v),
     pips: (distance) => toPips(pair, distance),
     status: async () => {
       let lastT = null;
@@ -263,6 +294,7 @@ module.exports = {
   TF_STEP,
   createForexMarket,
   loadCandles,
+  loadHistory,
   loadTicker,
   marketStatus,
   // diekspor untuk pengujian

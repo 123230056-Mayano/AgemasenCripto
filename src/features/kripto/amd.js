@@ -14,7 +14,7 @@
 const { createCanvas } = require("@napi-rs/canvas");
 const { t } = require("../../i18n");
 const { C, fontFamily, fmtPrice, niceStep, tickLabel } = require("./chartKit");
-const { fmtUsd, fmtLevel, fmtPct, pctFrom } = require("./market");
+const { fmtUsd: fmtUsdDefault, fmtLevel: fmtLevelDefault, fmtPct, pctFrom } = require("./market");
 const { fmtWhen } = require("./hhll");
 const { CFG } = require("./amdCore");
 
@@ -27,14 +27,16 @@ const PLAN_PAD_SLOTS = 12; // ruang kosong di kanan candle terakhir untuk zona S
 const PLAN_TP2_MAX_EXTEND = 0.6; // TP2 hanya ikut skala sumbu kalau memperluasnya <= 60% dari rentang; kalau lebih, ditandai di tepi panel
 
 /**
- * @param {{candles:object[], coin:string, tf:string, st:object, plan?:object|null}} o
+ * @param {{candles:object[], coin:string, tf:string, st:object, plan?:object|null, dp?:number|null, title?:string|null}} o
+ *   dp (forex) = digits pair untuk label harga; title (forex) = judul kustom (default "<coin>/USDT <tf> Accumulation / ...").
  *   plan (opsional, dari amdAlertCore.computePlan): kalau ada, digambar zona risiko (merah) + reward (hijau) di kanan candle
  *   terakhir, garis Entry/SL/TP dan label harga di sumbu kanan.
  * @returns {Buffer} PNG
  */
-function renderAmdChart({ candles, coin, tf, st, plan = null }) {
+function renderAmdChart({ candles, coin, tf, st, plan = null, dp = null, title: titleOverride = null }) {
   if (!candles || candles.length < 10) throw new Error("CANDLES_TOO_FEW");
   const family = fontFamily();
+  const fp = (v) => fmtPrice(v, dp == null ? undefined : dp); // forex: dp = digits pair; kripto: format bertingkat lama
   const n = candles.length;
   const last = candles[n - 1];
   // Tampilan difokuskan ke pola: mulai sedikit sebelum range, tapi paling banyak CHART_BARS dan paling sedikit 40 candle.
@@ -116,7 +118,7 @@ function renderAmdChart({ candles, coin, tf, st, plan = null }) {
     g.stroke();
     if (tagYs.some((ty) => Math.abs(ty - yy) < 18)) continue;
     g.fillStyle = C.axis;
-    g.fillText(fmtPrice(p), right + 10, yy);
+    g.fillText(fp(p), right + 10, yy);
   }
 
   // grid vertikal + label waktu
@@ -132,6 +134,34 @@ function renderAmdChart({ candles, coin, tf, st, plan = null }) {
     g.stroke();
     g.fillStyle = C.axis;
     g.fillText(tickLabel(bars[i].t, tf), xx, pPrice.y + pPrice.h + 14);
+  }
+
+  // forex: penanda gap pembukaan (akhir pekan / rollover) di batas candle; kripto tidak punya field gap, tidak ada yang digambar
+  {
+    let marked = 0;
+    for (let k = 1; k < nb; k++) {
+      if (!bars[k].gap) continue;
+      const xx = Math.round(X(from + k) - slot / 2) + 0.5;
+      g.save();
+      g.strokeStyle = "#a16207";
+      g.lineWidth = 1.2;
+      g.setLineDash([2, 5]);
+      g.beginPath();
+      g.moveTo(xx, pPrice.y);
+      g.lineTo(xx, pPrice.y + pPrice.h);
+      g.stroke();
+      g.restore();
+      if (marked < 6) {
+        g.save();
+        g.font = `15px ${family}`;
+        g.fillStyle = "#ca8a04";
+        g.textAlign = "center";
+        g.textBaseline = "top";
+        g.fillText("gap", xx, pPrice.y + 4);
+        g.restore();
+      }
+      marked++;
+    }
   }
 
   // kotak range akumulasi: dari awal range sampai tepi kanan (akumulasi berjalan) atau sampai 2 candle setelah sweep
@@ -303,13 +333,13 @@ function renderAmdChart({ candles, coin, tf, st, plan = null }) {
     };
     const lastColor = last.c >= last.o ? C.up : C.down;
     const tags = [
-      rg && { txt: `Hi ${fmtPrice(rg.hi)}`, y: Yp(rg.hi), color: C.arrow },
-      rg && { txt: `Lo ${fmtPrice(rg.lo)}`, y: Yp(rg.lo), color: C.arrow },
-      sw && st.level && { txt: `MSS ${fmtPrice(st.level.price)}`, y: Yp(st.level.price), color: AMBER },
-      plan && { txt: `SL ${fmtPrice(plan.sl)}`, y: Yp(plan.sl), color: C.down },
-      plan && { txt: `TP1 ${fmtPrice(plan.tps[0])}`, y: Yp(plan.tps[0]), color: C.up },
-      plan && plan.tps.length > 1 && { txt: `TP2 ${fmtPrice(plan.tps[1])}`, y: tp2InView ? Yp(plan.tps[1]) : plan.tps[1] > hi ? pPrice.y + 14 : pPrice.y + pPrice.h - 14, color: C.up, off: tp2InView ? null : plan.tps[1] > hi ? "up" : "down" },
-      { txt: fmtPrice(last.c), y: Yp(last.c), color: lastColor },
+      rg && { txt: `Hi ${fp(rg.hi)}`, y: Yp(rg.hi), color: C.arrow },
+      rg && { txt: `Lo ${fp(rg.lo)}`, y: Yp(rg.lo), color: C.arrow },
+      sw && st.level && { txt: `MSS ${fp(st.level.price)}`, y: Yp(st.level.price), color: AMBER },
+      plan && { txt: `SL ${fp(plan.sl)}`, y: Yp(plan.sl), color: C.down },
+      plan && { txt: `TP1 ${fp(plan.tps[0])}`, y: Yp(plan.tps[0]), color: C.up },
+      plan && plan.tps.length > 1 && { txt: `TP2 ${fp(plan.tps[1])}`, y: tp2InView ? Yp(plan.tps[1]) : plan.tps[1] > hi ? pPrice.y + 14 : pPrice.y + pPrice.h - 14, color: C.up, off: tp2InView ? null : plan.tps[1] > hi ? "up" : "down" },
+      { txt: fp(last.c), y: Yp(last.c), color: lastColor },
     ]
       .filter(Boolean)
       .sort((a, b) => a.y - b.y);
@@ -324,14 +354,14 @@ function renderAmdChart({ candles, coin, tf, st, plan = null }) {
   g.textBaseline = "middle";
   g.font = `bold 28px ${family}`;
   g.fillStyle = C.title;
-  const title = `${coin}/USDT  ${tf}  Accumulation / Manipulation / Distribution`;
+  const title = titleOverride || `${coin}/USDT  ${tf}  Accumulation / Manipulation / Distribution`;
   g.fillText(title, Lm, 26);
   const titleW = g.measureText(title).width;
   const prev = candles[Math.max(0, n - 2)];
   const chgLast = ((last.c - prev.c) / prev.c) * 100;
   g.font = `22px ${family}`;
   g.fillStyle = last.c >= prev.c ? C.up : C.down;
-  g.fillText(`${fmtPrice(last.c)}  (${chgLast >= 0 ? "+" : ""}${chgLast.toFixed(2)}%)`, Lm + titleW + 20, 27);
+  g.fillText(`${fp(last.c)}  (${chgLast >= 0 ? "+" : ""}${chgLast.toFixed(2)}%)`, Lm + titleW + 20, 27);
   g.font = `19px ${family}`;
   g.fillStyle = C.axis;
   const phaseTxt = { accumulation: "A: accumulation", manipulation: `M: manipulation (${st.dir})`, distribution: `D: distribution (${st.dir})`, failed: "M failed (real breakout)" }[st.phase] || "";
@@ -343,7 +373,7 @@ function renderAmdChart({ candles, coin, tf, st, plan = null }) {
 // ---------- teks ----------
 const pctTxt = (v) => (Number.isFinite(v) ? v.toFixed(1) : "-");
 
-function rangeVars(st) {
+function rangeVars(st, fmtLevel = fmtLevelDefault) {
   const r = st.range;
   return {
     lo: fmtLevel(r.lo),
@@ -357,7 +387,7 @@ function rangeVars(st) {
 }
 
 /** Tambahan baris: volume range dan R1/S1 di dalam range (kalau ada). */
-function extraLines(lang, st) {
+function extraLines(lang, st, fmtLevel = fmtLevelDefault) {
   const out = [];
   if (Number.isFinite(st.volRatio)) {
     const volKey = st.volRatio < 0.9 ? "amd.vol.low" : st.volRatio > 1.1 ? "amd.vol.high" : "amd.vol.mid";
@@ -374,10 +404,13 @@ function extraLines(lang, st) {
   return out.join("\n");
 }
 
-function buildPhaseText(lang, st, candles, tf, price) {
+function buildPhaseText(lang, st, candles, tf, price, fmt = {}) {
+  // fmt (forex): { level: (v) => string, price: (v) => string }; tanpa fmt = format kripto seperti sebelumnya.
+  const fmtLevel = fmt.level || fmtLevelDefault;
+  const fmtUsd = fmt.price || fmtUsdDefault;
   const dirKey = st.dir === "bullish" ? "bull" : "bear";
-  const base = rangeVars(st);
-  const ex = extraLines(lang, st);
+  const base = rangeVars(st, fmtLevel);
+  const ex = extraLines(lang, st, fmtLevel);
   if (st.phase === "accumulation") {
     const pos = Math.round(((price - st.range.lo) / st.range.width) * 100);
     return t(lang, "amd.phase.accumulation", { ...base, pos: Math.max(0, Math.min(100, pos)), extra: ex ? "\n" + ex : "" });

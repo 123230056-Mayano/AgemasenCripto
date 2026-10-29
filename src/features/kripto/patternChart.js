@@ -41,7 +41,8 @@ function defaultCreateCanvas(w, h) {
  * @param {string} a.tf          label TF (mis. "4H")
  * @param {object} a.res         hasil scanCandlePatterns (ok:true)
  * @param {number} [a.maxShow]   default PATTERN_CONFIG.MAX_SHOW
- * @param {string|null} [a.title]  judul kustom (default "<coin>/USDT <tf> Pola"), mis. "USDT.D 4H Pola" untuk !dusdt
+ * @param {string|null} [a.title]  judul kustom (default "<coin>/USDT <tf> Pola"), mis. "USDT.D 4H Pola" untuk !dusdt, "EURUSD 4H Pola" untuk forex
+ *   Forex: res.dp = digits pair (label harga tanpa float panjang); candle ber-flag gap ditandai garis titik "gap".
  * @param {Function} [a.createCanvasFn]
  * @returns {Buffer} PNG
  */
@@ -177,6 +178,35 @@ function renderPatternChart({ lang, candles, coin, tf, res, title: titleOverride
     g.stroke();
     g.fillStyle = C.axis;
     g.fillText(tickLabel(bars[i].t, tf), xx, pp.y + pp.h + 14);
+  }
+
+  // forex: penanda gap pembukaan (akhir pekan / rollover). Sumbu waktu berbasis urutan candle, jadi akhir pekan tidak punya
+  // ruang kosong; garis titik di batas candle ini menunjukkan di mana harga melompat. Kripto tidak punya field gap: tidak ada yang digambar.
+  {
+    let marked = 0;
+    for (let k = 1; k < nb; k++) {
+      if (!bars[k].gap) continue;
+      const xx = Math.round(X(from + k) - slot / 2) + 0.5;
+      g.save();
+      g.strokeStyle = "#a16207";
+      g.lineWidth = 1.2;
+      g.setLineDash([2, 5]);
+      g.beginPath();
+      g.moveTo(xx, pp.y);
+      g.lineTo(xx, pp.y + pp.h);
+      g.stroke();
+      g.restore();
+      if (marked < 6) {
+        g.save();
+        g.font = `15px ${family}`;
+        g.fillStyle = "#ca8a04";
+        g.textAlign = "center";
+        g.textBaseline = "top";
+        g.fillText("gap", xx, pp.y + 4);
+        g.restore();
+      }
+      marked++;
+    }
   }
 
   // kotak sorotan di candle pembentuk (di bawah candle supaya tidak menutupi)

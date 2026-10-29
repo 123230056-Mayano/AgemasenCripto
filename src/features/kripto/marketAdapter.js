@@ -8,9 +8,9 @@
  * Perilaku kripto TIDAK berubah: semua fungsi memanggil fungsi lama di market.js.
  *
  * Antarmuka adapter:
- *   id, symbol, label, hasVolume, noSnapshot
- *   fetchTicker() -> {price, changePct}      fetchCandles(tf) -> candle[]
- *   computeLevels(candles, price)            fmtLevel(v)  fmtPrice(v)  (harga header)
+ *   id, symbol, label, hasVolume, noSnapshot, digits (forex: presisi tetap; kripto: null = ikut data)
+ *   fetchTicker() -> {price, changePct}      fetchCandles(tf) -> candle[]    fetchCandlesHistory(tf, {bars}) -> candle[] panjang
+ *   computeLevels(candles, price, opts?)     fmtLevel(v)  fmtPrice(v, dp?)  (harga header)  fmtPct(v)
  *   pips(distance) -> number|null            status() -> {open, reason}
  */
 
@@ -27,9 +27,12 @@ function createCryptoMarket(coin) {
     allowedTfs: (tfs) => [...tfs],
     fetchTicker: () => mkt.fetchTicker(coin),
     fetchCandles: (tf) => mkt.fetchCandles(coin, tf),
-    computeLevels: (candles, price) => mkt.computeLevels(candles, price),
+    fetchCandlesHistory: (tf, opts) => mkt.fetchCandlesHistory(coin, tf, opts),
+    computeLevels: (candles, price, opts) => mkt.computeLevels(candles, price, opts),
     fmtLevel: (v) => mkt.fmtLevel(v),
-    fmtPrice: (v) => mkt.fmtUsd(v),
+    fmtPrice: (v, dp) => mkt.fmtUsd(v, dp), // dp = presisi koin (header !pola); tanpa dp perilaku lama
+    fmtPct: (v) => mkt.fmtPct(v),
+    digits: null,
     pips: () => null,
     status: async () => ({ open: true, reason: null }), // kripto 24/7
   };

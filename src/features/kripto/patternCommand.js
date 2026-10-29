@@ -3,8 +3,11 @@
 /**
  * features/kripto/patternCommand.js
  * ------------------------------------------------------------------
- * !pola <koin> [15m|1H|4H|1D|semua]  (alias: !pattern)
- * Runner + pemformat teks untuk candlePatterns.js (logika murni). Data langsung dari Binance (market.js).
+ * !pola <koin|pair> [15m|1H|4H|1D|semua] [detail]  (alias: !pattern, !fxpola, !fxpattern)
+ * Runner + pemformat teks untuk candlePatterns.js (logika murni). Data kripto langsung dari Binance (market.js).
+ * FOREX (2026-10-29): pair (eurusd, eur/usd, xauusd) dikenali otomatis lewat adapter pasar (marketAdapter.js / forex/forexMarket.js).
+ * Mesin pola tidak berubah; yang beda hanya sumber data, format harga (digits pair), judul, level SNR (toleransi 0,2%),
+ * tanpa volume, catatan pasar tutup / gap pembukaan, dan chart (judul pair, penanda gap).
  * Teks ada di i18n id.js / en.js (kunci "pola.*"). Hasil = bukti bersyarat (level konfirmasi + level batal), bukan sinyal.
  *
  * Fase 1: hanya candlestick. Satu TF = chart bukti (patternChart.js) + teks; mode semua = teks ringkas. Statistik historis belum ada
@@ -276,9 +279,9 @@ function gaussianBlock(lang, tf, g, dp, detail = false) {
 
 /**
  * Pesan untuk satu timeframe (tanpa baris harga; ditambah pemanggil). Murni: tidak ada jaringan.
- * @param {{coin:string, tf:string, res:object}} a res = hasil scanCandlePatterns (ok:true)
+ * @param {{coin:string, tf:string, res:object, detail?:boolean, extra?:string[]}} a res = hasil scanCandlePatterns (ok:true); extra = baris tambahan sebelum penutup
  */
-function formatOne(lang, { tf, res, detail = false }) {
+function formatOne(lang, { tf, res, detail = false, extra = [] }) {
   const lines = [];
   const dp = res.dp; // presisi koin (desimal terbanyak di data candle)
   const shown = res.patterns.slice(0, CFG.MAX_SHOW);
@@ -302,6 +305,7 @@ function formatOne(lang, { tf, res, detail = false }) {
     const ab = absorbedLine(lang, p);
     if (ab) lines.push(ab);
     lines.push(levelLine(lang, p, dp));
+    if (p.fxGap) lines.push(t(lang, "pola.fx.gap")); // forex: pola melibatkan candle pembuka yang melompat (gap)
     if (NEEDS_NEXT_CLOSE.has(p.variant) && p.status === STATUS.CANDIDATE) lines.push(t(lang, "pola.needConfirm"));
     lines.push("");
   }
@@ -313,6 +317,7 @@ function formatOne(lang, { tf, res, detail = false }) {
   if (tlLines.length) lines.push(...tlLines, "");
   const gsLines = gaussianBlock(lang, tf, res.gauss, dp, detail);
   if (gsLines.length) lines.push(SEP, ...gsLines, SEP, "");
+  if (extra.length) lines.push(...extra, ""); // forex: status pasar, label emas, catatan sumber data
   // satu baris penutup (mode detail: catatan lengkap seperti sebelumnya)
   if (detail) lines.push(t(lang, "pola.heuristic"), t(lang, "pola.foot"));
   else lines.push(t(lang, "pola.foot.one"));
@@ -320,13 +325,13 @@ function formatOne(lang, { tf, res, detail = false }) {
 }
 
 /** Ringkasan semua timeframe (res per TF boleh null = data belum cukup). */
-function formatAll(lang, { coin, results, price, change }) {
-  const lines = [t(lang, "pola.all.title", { coin, price, change }), ""];
+function formatAll(lang, { coin, results, price, change, fx = false, tfs = ALL_TFS, extra = [] }) {
+  const lines = [t(lang, fx ? "pola.all.titleFx" : "pola.all.title", { coin, pair: coin, price, change }), ""];
   // kesimpulan arah TF besar: struktur 1D (TF tertinggi); tidak tersedia = ditulis, bukan ditebak
   const top = results["1D"];
   const topState = top && top.ok && top.trend ? top.trend : "na";
   lines.push(t(lang, `pola.all.htf.${topState}`, { htf: TF_LABEL["1D"] }), "");
-  for (const tf of ALL_TFS) {
+  for (const tf of tfs) {
     const res = results[tf];
     const label = TF_LABEL[tf];
     if (!res || !res.ok) {
@@ -356,9 +361,34 @@ function formatAll(lang, { coin, results, price, change }) {
     const sl = strengthLine(lang, res.strength);
     if (sl) lines.push(sl);
   }
+  if (extra.length) lines.push("", ...extra);
   lines.push("", t(lang, "pola.all.hint", { coin }), t(lang, "pola.foot.one"));
   return lines.join("\n");
 }
+
+/**
+ * Forex: apakah pola candlestick (<= 5 candle) melibatkan candle pembuka yang melompat dari close sebelumnya (gap akhir pekan /
+ * rollover, ditandai `gap: true` oleh forexMarket.flagGaps)? Gap di antara candle pembentuk, atau di candle konfirmasi,
+ * bisa membuat pola berbasis celah / engulfing menjadi palsu. Candle pertama pola tidak dihitung (gap sebelumnya tidak masuk bentuk pola).
+ * Pola swing panjang tidak dicek (hampir selalu melewati akhir pekan).
+ */
+function patternHasGap(candles, p) {
+  if (!p || p.endI - p.startI > 4) return false;
+  for (let i = p.startI + 1; i <= p.endI; i++) if (candles[i] && candles[i].gap) return true;
+  return !!(Number.isInteger(p.confirmI) && p.confirmI > p.endI && candles[p.confirmI] && candles[p.confirmI].gap);
+}
+
+/** Baris catatan forex di bawah hasil: status pasar, label emas, catatan sumber data. */
+function fxNoteLines(lang, market, status) {
+  const out = [];
+  if (status && !status.open) out.push(t(lang, status.reason === "stale" ? "pola.fx.stale" : "pola.fx.closed"));
+  if (market.proxy === "futures") out.push(t(lang, "pola.fx.gold"));
+  out.push(t(lang, "pola.fx.note"));
+  return out;
+}
+
+/** Judul chart forex: "EURUSD  4H  Pola" (emas: "XAUUSD (GC=F)"). */
+const fxChartTitle = (lang, market, tfLabel) => `${market.label}${market.proxy === "futures" ? " (GC=F)" : ""}  ${tfLabel}  ${t(lang, "pola.chart.title")}`;
 
 /** Tren struktur TF besar yang SUDAH closed saat candle X (TF kecil) closed; tanpa lookahead (htfClosedAt). */
 function makeHtfTrendFn(tf, htfCandles) {
@@ -387,9 +417,13 @@ function mergeScans(a, b) {
   return { ...a, patterns, absorbed: [...a.absorbed, ...b.absorbed, ...res.absorbed], dropped: [...a.dropped, ...b.dropped, ...res.dropped], invalidated: a.invalidated + b.invalidated };
 }
 
-/** Pindai satu TF dengan level SNR (computeLevels) dan tren TF besar. Hasil ok:false bila data belum cukup. */
-function scanTf(tf, candles, htfCandles) {
-  const { computeLevels } = require("./market");
+/**
+ * Pindai satu TF dengan level SNR (computeLevels) dan tren TF besar. Hasil ok:false bila data belum cukup.
+ * opts.market = adapter pasar (forex: toleransi level 0,2%, presisi tampilan = digits pair); tanpa itu = kripto seperti sebelumnya.
+ */
+function scanTf(tf, candles, htfCandles, opts = {}) {
+  const mk = opts.market || null;
+  const computeLevels = mk ? (c, p, o) => mk.computeLevels(c, p, o) : require("./market").computeLevels;
   const { htfOf } = require("./hhllContext");
   const htfTf = htfOf(tf);
   const htfTrendFn = makeHtfTrendFn(tf, htfCandles);
@@ -405,6 +439,8 @@ function scanTf(tf, candles, htfCandles) {
   });
   const res = mergeScans(candle, swing);
   if (res.ok && res.dp == null) res.dp = coinDecimals(candles);
+  if (res.ok && mk && mk.digits != null) res.dp = mk.digits; // forex: presisi tampilan tetap per pair, bukan dari data
+  if (res.ok && mk && mk.id === "forex") for (const p of res.patterns) p.fxGap = patternHasGap(candles, p);
   if (res.ok) {
     // Fitur 2: label prioritas dari tren TF besar yang sudah closed (tanpa lookahead). Tidak mengubah grade / status.
     const htfTrend = htfTrendFn ? htfTrendFn(candles[candles.length - 1]) : null;
@@ -426,33 +462,52 @@ function scanTf(tf, candles, htfCandles) {
 
 async function runPola(sock, msg, { jid, lang }, { coin, tf, all, type }) {
   const detail = type === "DETAIL" || type === "DETIL"; // !pola btc 4H detail
-  const { fetchCandles, fetchTicker, fmtUsd, fmtPct } = require("./market");
   const { htfOf } = require("./hhllContext");
+  // Adapter pasar: pair forex dikenali lebih dulu (eurusd, eur/usd, xauusd), selain itu kripto persis seperti sebelumnya.
+  const { resolveMarket } = require("./marketAdapter");
+  const market = resolveMarket(coin);
+  const isFx = market.id === "forex";
+
+  // TF yang tidak boleh dipakai pair ini (USDIDR: mulai 1H). Satu TF ditolak -> beri tahu tanpa mengambil data.
+  const usable = market.allowedTfs(all ? ALL_TFS : [tf]);
+  if (!usable.length) {
+    await sock.sendMessage(jid, { text: t(lang, "pola.fx.tfNotAllowed", { pair: market.symbol }) }, { quoted: msg });
+    return;
+  }
 
   if (all) {
     // 4 set candle cukup: TF besar tiap TF = salah satu dari set yang sama (15M->1H, 1H->4H, 4H->1D)
-    const [tick, ...sets] = await Promise.all([fetchTicker(coin), ...ALL_TFS.map((x) => fetchCandles(coin, x).catch(() => null))]);
+    const [tick, ...sets] = await Promise.all([market.fetchTicker(), ...ALL_TFS.map((x) => (usable.includes(x) ? market.fetchCandles(x).catch(() => null) : null))]);
     const by = Object.fromEntries(ALL_TFS.map((x, i) => [x, sets[i]]));
-    if (ALL_TFS.every((x) => !by[x])) throw new Error("NO_DATA");
+    if (usable.every((x) => !by[x])) throw new Error("NO_DATA");
     const results = {};
-    for (const x of ALL_TFS) {
+    for (const x of usable) {
       const htf = htfOf(x);
-      results[x] = by[x] ? scanTf(x, by[x], htf ? by[htf] : null) : null;
+      results[x] = by[x] ? scanTf(x, by[x], htf ? by[htf] : null, { market }) : null;
     }
-    const dpAll = Math.max(0, ...ALL_TFS.map((x) => (by[x] ? coinDecimals(by[x]) : 0)));
-    await sock.sendMessage(jid, { text: formatAll(lang, { coin, results, price: fmtUsd(tick.price, dpAll), change: fmtPct(tick.changePct) }) }, { quoted: msg });
+    const dpAll = isFx ? market.digits : Math.max(0, ...usable.map((x) => (by[x] ? coinDecimals(by[x]) : 0)));
+    let extra = [];
+    if (isFx) {
+      extra = fxNoteLines(lang, market, await market.status());
+      const skipped = ALL_TFS.filter((x) => !usable.includes(x));
+      if (skipped.length) extra.push(t(lang, "pola.fx.tfSkipped", { pair: market.symbol, tfs: skipped.map((x) => TF_LABEL[x]).join(", ") }));
+    }
+    await sock.sendMessage(
+      jid,
+      { text: formatAll(lang, { coin: market.symbol, results, price: market.fmtPrice(tick.price, dpAll), change: market.fmtPct(tick.changePct), fx: isFx, tfs: usable, extra }) },
+      { quoted: msg },
+    );
     return;
   }
 
   const htfTf = htfOf(tf);
-  const { fetchCandlesHistory } = require("./market");
   const [candles, tick, htf, hist] = await Promise.all([
-    fetchCandles(coin, tf),
-    fetchTicker(coin),
-    htfTf ? fetchCandles(coin, htfTf).catch(() => null) : null,
-    fetchCandlesHistory(coin, tf, { bars: GCFG.WINDOW + GCFG.HORIZON }).catch(() => null), // Fitur 4: jendela lebih panjang dari 320; gagal = pakai candle biasa
+    market.fetchCandles(tf),
+    market.fetchTicker(),
+    htfTf && market.allowedTfs([htfTf]).length ? market.fetchCandles(htfTf).catch(() => null) : null,
+    market.fetchCandlesHistory(tf, { bars: GCFG.WINDOW + GCFG.HORIZON }).catch(() => null), // Fitur 4: jendela lebih panjang dari 320; gagal = pakai candle biasa
   ]);
-  const res = scanTf(tf, candles, htf);
+  const res = scanTf(tf, candles, htf, { market });
   // Fitur 4: estimasi sebaran (informasi saja); gagal hitung -> null, !pola tetap jalan
   if (res.ok) {
     try {
@@ -462,17 +517,20 @@ async function runPola(sock, msg, { jid, lang }, { coin, tf, all, type }) {
     }
   }
   if (!res.ok) {
-    await sock.sendMessage(jid, { text: t(lang, "pola.nodata", { coin, tf: TF_LABEL[tf], min: CFG.MIN_CANDLES }) }, { quoted: msg });
+    await sock.sendMessage(jid, { text: t(lang, "pola.nodata", { coin: market.symbol, tf: TF_LABEL[tf], min: CFG.MIN_CANDLES }) }, { quoted: msg });
     return;
   }
-  const head = t(lang, "pola.title", { coin, tf: TF_LABEL[tf], price: fmtUsd(tick.price, res.dp), change: fmtPct(tick.changePct) });
-  const caption = head + "\n\n" + formatOne(lang, { coin, tf, res, detail });
+  const status = isFx ? await market.status() : null;
+  const headVars = { coin: market.symbol, pair: market.symbol, tf: TF_LABEL[tf], price: market.fmtPrice(tick.price, res.dp), change: market.fmtPct(tick.changePct) };
+  const head = t(lang, isFx ? "pola.titleFx" : "pola.title", headVars);
+  const extra = isFx ? fxNoteLines(lang, market, status) : [];
+  const caption = head + "\n\n" + formatOne(lang, { coin: market.symbol, tf, res, detail, extra });
 
   // Chart bukti. Kalau render gagal (font/canvas bermasalah) tetap kirim teks supaya fitur tidak mati total.
   let png = null;
   try {
     const { renderPatternChart } = require("./patternChart");
-    png = renderPatternChart({ lang, candles, coin, tf: TF_LABEL[tf], res });
+    png = renderPatternChart({ lang, candles, coin: market.symbol, tf: TF_LABEL[tf], res, title: isFx ? fxChartTitle(lang, market, TF_LABEL[tf]) : null });
   } catch (err) {
     console.log("[kripto] !pola chart gagal, kirim teks saja:", err.message);
   }
@@ -488,4 +546,4 @@ async function runPola(sock, msg, { jid, lang }, { coin, tf, all, type }) {
   }
 }
 
-module.exports = { runPola, strengthBlock, trendlineBlock, gaussianBlock, formatOne, formatAll, scanTf, mergeScans, makeHtfTrendFn, ALL_TFS };
+module.exports = { runPola, patternHasGap, fxNoteLines, fxChartTitle, strengthBlock, trendlineBlock, gaussianBlock, formatOne, formatAll, scanTf, mergeScans, makeHtfTrendFn, ALL_TFS };

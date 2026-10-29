@@ -11,7 +11,7 @@
  *   !snr <koin> [tf]     -> Support & Resistance lengkap: R1-R3/S1-S3 + kekuatan level + chart (snr.js)
  *   !fib <koin> [tf]     -> Fibonacci retracement + extension otomatis, arah ikut tren + chart (fib.js)
  *   !trenstate <koin> [tf|semua] -> lanjut tren / pullback sehat / waspada reversal / reversal terkonfirmasi / range + alasan + level batal (trenState.js). Alias: !ts, !pullback
- *   !pola <koin> [tf|semua] [detail] -> pola candlestick (engulfing, pin bar, doji, star, inside bar, tweezer, harami, piercing/dark cloud, marubozu, three soldiers/crows, three methods) di ekstrem swing / zona SNR, bukti bersyarat dengan level konfirmasi + batal (candlePatterns.js, patternCommand.js). Alias: !pattern
+ *   !pola <koin> [tf|semua] [detail] -> pola candlestick (engulfing, pin bar, doji, star, inside bar, tweezer, harami, piercing/dark cloud, marubozu, three soldiers/crows, three methods) di ekstrem swing / zona SNR, bukti bersyarat dengan level konfirmasi + batal (candlePatterns.js, patternCommand.js). Alias: !pattern. FOREX: pair dikenali otomatis (!pola eurusd 4h, !pola eur/usd, !pola xauusd semua; alias !fxpola), chart + teks seperti kripto; tanpa volume, ada catatan pasar tutup dan gap pembukaan
  *   !hhll <koin> [tf]    -> market structure Higher High / Higher Low / Lower High / Lower Low + status tren + chart (hhll.js). Alias: !struktur
  *   !ema <koin> [tf]     -> EMA 20/50/200 + posisi harga (di atas / di bawah)
  *   !movave <koin> [tf] [sma|ema] -> Moving Average SMA & EMA 20/50/200 + posisi harga + golden/death cross (movave.js). Alias: !ma, !movingaverage
@@ -26,7 +26,7 @@
  *   !ringkasan / !stat / !scan <kondisi> [tf] -> statistik & screener pasar (statistik.js)
  *   !bias <koin> [tf|semua] -> bias arah gabungan indikator per timeframe (bias.js)
  *   !signal <koin> [tf|semua] -> skenario entry / SL / TP1 / TP2 / RR semua timeframe + kondisi AMD (Accumulation / Manipulation / Distribution) tiap timeframe, tanpa AI (signal.js). Satu timeframe -> chart AMD ikut dikirim. Alias: !sinyal, !amd, !powerof3, !po3 (!amd lama sudah digabung ke sini)
- *                        FOREX: !signal <pair> [tf|semua] (eurusd / eur/usd / xauusd, dikenali otomatis; alias !fxsignal, !fxsinyal). Data Yahoo lewat forex/forexMarket.js; SL/TP dalam pip, pasar tutup = tidak VALID. Belum: !signal all, alarm, chart AMD untuk forex.
+ *                        FOREX: !signal <pair> [tf|semua] (eurusd / eur/usd / xauusd, dikenali otomatis; alias !fxsignal, !fxsinyal). Data Yahoo lewat forex/forexMarket.js; SL/TP dalam pip, pasar tutup = tidak VALID. Satu TF = chart AMD ikut dikirim (seperti kripto). Belum: !signal all, alarm forex.
  *   !alertind <koin|watchlist> [tf] [bias|cross] [live] | list | off | hapus <id|semua>  (alarm bias berubah / crossover baru, advAlertCommand.js)
  *   !posisi buka <koin> [tf] <long|short> entry <harga> sl <harga> [tp <harga>] | list | sl <id> <harga> | tutup <id|semua>  (posisi + peringatan WASPADA/CUT, positionCommand.js)
  *   !alertsnr <koin|watchlist> [tf] [reject|tembus|wick|sweep] [kuat] | list | off | hapus <id|semua>  (alarm titik balik S/R, snrAlertCommand.js)
@@ -64,6 +64,7 @@ const { PASAR_COMMANDS, PASAR_RUNNERS, parsePasarArgs } = require("./pasar");
 const { STAT_COMMANDS, STAT_RUNNERS, parseStatArgs } = require("./statistik");
 const { BIAS_COMMANDS, BIAS_RUNNERS, parseBiasArgs } = require("./bias");
 const { SIGNAL_COMMANDS, SIGNAL_RUNNERS, parseSignalArgs } = require("./signal");
+const { normalizePairText } = require("../forex/forexPairs");
 const { DIVALERT_COMMANDS, DIVALERT_RUNNERS, parseDivAlertArgs } = require("./divAlertCommand");
 const { ADVALERT_COMMANDS, ADVALERT_RUNNERS, parseAdvAlertArgs } = require("./advAlertCommand");
 const { SNRALERT_COMMANDS, SNRALERT_RUNNERS, parseSnrAlertArgs } = require("./snrAlertCommand");
@@ -104,7 +105,7 @@ const COMMANDS = {
   fib: { re: /^!(?:fib|fibo|fibonacci)(?:\s+([\s\S]*))?$/i, useTf: true, allTf: true },
   hhll: { re: /^!(?:hhll|struktur|structure)(?:\s+([\s\S]*))?$/i, useTf: true },
   trenstate: { re: /^!(?:trenstate|ts|pullback)(?:\s+([\s\S]*))?$/i, useTf: true, allTf: true, allWords: ["ALL", "SEMUA"] },
-  pola: { re: /^!(?:pola|pattern)(?:\s+([\s\S]*))?$/i, useTf: true, allTf: true, allWords: ["ALL", "SEMUA"], types: ["DETAIL", "DETIL"] },
+  pola: { re: /^!(?:pola|pattern|fxpola|fxpattern)(?:\s+([\s\S]*))?$/i, useTf: true, allTf: true, allWords: ["ALL", "SEMUA"], types: ["DETAIL", "DETIL"] },
   ema: { re: /^!ema(?:\s+([\s\S]*))?$/i, useTf: true },
   movave: { re: /^!(?:movave|movingaverage|ma)(?:\s+([\s\S]*))?$/i, useTf: true, types: MOVAVE_TYPES },
   tren: { re: /^!(?:tren|trend)(?:\s+([\s\S]*))?$/i, useTf: true },
@@ -647,7 +648,7 @@ async function handleKriptoCommand(sock, msg, { jid, text, lang }) {
   else if (isDusdtAlert) args = parseDusdtAlertArgs(name, match[1] || "", getDefaultTf(senderId));
   else if (isDusdt) args = parseDusdtArgs(name, match[1] || "", getDefaultTf(senderId));
   else if (name === "list") args = { coin: null, coin2: null, tf: null, keyword: match[1] || "" };
-  else args = parseArgs(match[1] || "", COMMANDS[name]);
+  else args = parseArgs(name === "pola" ? normalizePairText(match[1] || "") : match[1] || "", COMMANDS[name]); // "eur/usd" -> "eurusd" (pair forex; parser koin menolak "/")
   if (!args) {
     await sendCommandDetail(sock, jid, name, lang);
     return true;
@@ -754,7 +755,8 @@ async function handleKriptoCommand(sock, msg, { jid, text, lang }) {
     if (err instanceof UnsupportedCoinError) {
       key = "kripto.unsupported";
       params = { coin: err.coin || args.coin };
-    } else if (err.code === "ECONNABORTED" || err.code === "ETIMEDOUT") key = "kripto.timeout";
+    } else if (err.code === "FOREX_DATA") key = "kripto.fx.fail"; // sumber data forex (Yahoo) gagal / kosong
+    else if (err.code === "ECONNABORTED" || err.code === "ETIMEDOUT") key = "kripto.timeout";
     await sock.sendMessage(jid, { text: t(lang, key, params) });
   } finally {
     inFlight.delete(senderId);
