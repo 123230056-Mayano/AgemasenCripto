@@ -71,6 +71,8 @@ const { createPositionEngine } = require("./positionEngine");
 const { createHhllEngine } = require("./hhllAlertEngine");
 const { createPatternEngine } = require("./patternAlertEngine");
 const { buildHhllPdf } = require("./hhllPdf");
+const { resolvePair } = require("../forex/forexPairs");
+const { createForexMarket } = require("../forex/forexMarket");
 const { createAmdEngine } = require("./amdAlertEngine");
 const { renderAmdChart } = require("./amd");
 const { createDusdtEngine } = require("./dusdtAlertEngine");
@@ -85,6 +87,12 @@ const LEVEL_REFRESH_MS = 10 * 60_000;
 const NEAR_PCT = 0.5; // "mendekati" level
 const REARM_PCT = 1.5; // jarak yang membuat alert level aktif lagi
 const SYMBOL_CHUNK = 100;
+
+/**
+ * Candle closed untuk alarm pola (!alertpola) dan sinyal (!alertsignal): pair forex (eurusd, xauusd, ...) diambil dari
+ * Yahoo lewat forex/forexMarket.js, selain itu kripto dari Binance seperti biasa. Alarm lain tetap kripto saja.
+ */
+const fetchCandlesAny = (coin, tf, opts) => (resolvePair(coin) ? createForexMarket(coin).fetchCandles(tf) : fetchCandles(coin, tf, opts));
 
 let sockRef = null;
 let started = false;
@@ -619,7 +627,7 @@ const checkSnrAlerts = (now) => (sockRef ? snrEngine.tick(now) : undefined);
 // ---------- alarm skenario sinyal (!alertsignal) ----------
 const signalEngine = createSignalEngine({
   store,
-  fetchCandles,
+  fetchCandles: fetchCandlesAny,
   notify,
   langFor,
   isUnsupported: (err) => err instanceof UnsupportedCoinError,
@@ -658,7 +666,7 @@ const checkHhllAlerts = (now) => (sockRef ? hhllEngine.tick(now) : undefined);
 // ---------- alarm pola (!alertpola) ----------
 const patternEngine = createPatternEngine({
   store,
-  fetchCandles,
+  fetchCandles: fetchCandlesAny,
   notify,
   langFor,
   isUnsupported: (err) => err instanceof UnsupportedCoinError,

@@ -32,6 +32,7 @@ const { TF_MS, COIN_WATCHLIST, ChatRateLimiter } = require("./divAlertCore");
 const { selectLivePairs } = require("./advAlertCore");
 const { runPool } = require("./advAlertEngine");
 const { coinDecimals } = require("../../utils/priceFormat");
+const { pairInfo } = require("../forex/forexPairs");
 const { detectEvents, matchSub, isAfterCreation, patKey, chunk, sortEvents, buildPatternText, capCoins } = require("./patternAlertCore");
 
 const defaultSleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -41,10 +42,18 @@ const SCAN_CACHE_MAX = 200;
  * Pindai bawaan: scanTf dari patternCommand.js, tanpa candle TF besar. Dimuat malas supaya modul ini ringan saat diuji.
  * @returns {object[]|null} daftar pola; null = data belum cukup / pindai gagal
  */
-function defaultScan(tf, candles) {
+function defaultScan(tf, candles, coin) {
   const { scanTf } = require("./patternCommand");
-  const res = scanTf(tf, candles, null);
+  // Pair forex: toleransi level 0,2%, presisi = digits pair, dan pola yang melibatkan gap ditandai (p.fxGap).
+  const market = pairInfo(String(coin || "").toUpperCase()) ? require("../forex/forexMarket").createForexMarket(coin) : null;
+  const res = scanTf(tf, candles, null, market ? { market } : {});
   return res && res.ok ? res.patterns || [] : null;
+}
+
+/** Pasar forex tutup menurut kalender (akhir pekan)? Kripto / pair tak dikenal = false. */
+function fxMarketClosed(coin, now) {
+  if (!pairInfo(String(coin || "").toUpperCase())) return false;
+  return require("../forex/forexMarket").marketStatus(now).open === false;
 }
 
 /**
@@ -53,7 +62,7 @@ function defaultScan(tf, candles) {
  *   fetchCandles: (coin:string, tf:string, opts?:object) => Promise<object[]>,
  *   notify: (chat:string, userJid:string, text:string) => Promise<boolean>,
  *   langFor: (chat:string, userJid:string) => string,
- *   scan?: (tf:string, candles:object[]) => object[]|null,   // default: scanTf tanpa TF besar
+ *   scan?: (tf:string, candles:object[], coin:string) => object[]|null,   // default: scanTf tanpa TF besar (forex: dengan adapter pasar)
  *   isUnsupported?: (err:Error) => boolean,
  *   limiter?: ChatRateLimiter, sleep?: Function, log?: Function
  * }} deps
@@ -82,8 +91,8 @@ function createPatternEngine(deps) {
     if (scanCache.has(k)) return scanCache.get(k);
     let out = null;
     try {
-      const prev = scan(tf, closed.slice(0, -1));
-      const now = prev ? scan(tf, closed) : null;
+      const prev = scan(tf, closed.slice(0, -1), coin);
+      const now = prev ? scan(tf, closed, coin) : null;
       if (prev && now) out = { prev, now };
     } catch (err) {
       log(`[patalert] gagal memindai ${coin} ${tf}:`, err.message);
@@ -113,14 +122,16 @@ function createPatternEngine(deps) {
 
     const pair = scanPair(coin, tf, closed);
     if (!pair) return out;
-    const dp = coinDecimals(closed); // presisi koin: level di pesan tampil tanpa pembulatan
+    // Presisi: kripto = desimal terbanyak di data candle (level tampil tanpa pembulatan); forex = digits tetap per pair.
+    const dp = pairInfo(String(coin).toUpperCase())?.digits ?? coinDecimals(closed);
+    const fxClosed = fxMarketClosed(coin, now);
 
     for (const raw of detectEvents(pair.prev, pair.now)) {
       if (!matchSub(raw, sub)) continue;
       // id berbasis waktu candle penutup pola (tahan terhadap pergeseran jendela candle)
       const endT = closed[raw.endI]?.t ?? raw.endI;
       const id = [raw.variant || raw.kind, raw.dir, endT].join(":");
-      const ev = { ...raw, id, chat: sub.chat, userJid, coin, tf, subId: sub.id, candleT: X.t, now: X.c, dp };
+      const ev = { ...raw, id, chat: sub.chat, userJid, coin, tf, subId: sub.id, candleT: X.t, now: X.c, dp, fxClosed };
       const key = patKey(sub.chat, userJid, coin, tf, ev.stage, ev, X.t);
       if (store.wasSent(key)) continue;
       out.events.push({ ...ev, key });

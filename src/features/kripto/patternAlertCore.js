@@ -23,6 +23,7 @@ const { t } = require("../../i18n");
 const { fmtPrice } = require("../../utils/priceFormat");
 const { PATTERN_ALERT_CONFIG: PA } = require("../../config/indicatorConfig");
 const { TF_MS, TF_LABEL, COIN_WATCHLIST, DAILY_TZ_LABEL, fmtCandleTime } = require("./divAlertCore");
+const { pairInfo } = require("../forex/forexPairs");
 
 const DIRS = ["up", "down"]; // pola netral (doji, rectangle, dst) = dir "neutral", hanya cocok kalau arah tidak dibatasi
 const STAGES = ["early", "confirm"];
@@ -78,6 +79,7 @@ function detectEvents(prevPatterns, nowPatterns) {
       level: p.confirmLevel,
       invalid: p.invalidLevel,
       momentumAgainst: !!p.momentumAgainst, // tweezer yang MACD dan RSI-nya melawan (grade sudah dibatasi lemah)
+      fxGap: !!p.fxGap, // forex: pola melibatkan candle pembuka yang melompat (gap akhir pekan / rollover), bisa palsu
       id: patternId(p),
       endI: p.endI, // index candle penutup di array yang dipindai; engine memakainya untuk kunci dedupe berbasis waktu
     });
@@ -241,6 +243,7 @@ function buildLine(lang, ev) {
   const head = `${ICON[ev.dir] || ICON.neutral} *${ev.coin}* ${TF_LABEL[ev.tf] || ev.tf} ${label} - ${status} - ${grade}`;
   const lines = [head, levelLine(lang, ev)];
   if (ev.momentumAgainst) lines.push(t(lang, "patalert.momAgainst"));
+  if (ev.fxGap) lines.push(t(lang, "pola.fx.gap"));
   for (const fn of EXTRA_LINE_BUILDERS) {
     const extra = fn(lang, ev);
     if (extra) lines.push(extra);
@@ -274,7 +277,25 @@ function buildPatternText(lang, events, { ms, part = 1, parts = 1, total = event
   const blocks = sortEvents(events).map((ev) => buildLine(lang, ev));
   const head = t(lang, "patalert.head", { time: fmtCandleTime(lang, ms), n: total });
   const partTag = parts > 1 ? ` (${part}/${parts})` : "";
-  return `${head}${partTag}\n${blocks.join("\n\n")}\n\n${t(lang, "patalert.foot")}`;
+  const fx = fxFootLines(lang, events);
+  return `${head}${partTag}\n${blocks.join("\n\n")}\n\n${t(lang, "patalert.foot")}${fx.length ? "\n" + fx.join("\n") : ""}`;
+}
+
+/** Pair forex (EURUSD, XAUUSD, ...)? Kripto = false. */
+const isFxCoin = (coin) => !!pairInfo(String(coin || "").toUpperCase());
+
+/**
+ * Catatan kaki khusus forex (kosong bila tidak ada kejadian forex): pasar sedang tutup, label emas (futures GC=F),
+ * sumber data. Satu kali per pesan, bukan per kejadian.
+ */
+function fxFootLines(lang, events) {
+  const fx = (events || []).filter((e) => isFxCoin(e.coin));
+  if (!fx.length) return [];
+  const out = [];
+  if (fx.some((e) => e.fxClosed)) out.push(t(lang, "patalert.fx.closed"));
+  if (fx.some((e) => pairInfo(e.coin)?.proxy === "futures")) out.push(t(lang, "pola.fx.gold"));
+  out.push(t(lang, "pola.fx.note"));
+  return out;
 }
 
 /** Ringkasan satu langganan untuk !alertpola list / pesan konfirmasi. */
@@ -307,5 +328,7 @@ module.exports = {
   sortEvents,
   chunk,
   describePattern,
+  isFxCoin,
+  fxFootLines,
   DAILY_TZ_LABEL,
 };

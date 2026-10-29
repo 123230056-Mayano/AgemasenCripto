@@ -11,6 +11,9 @@
  *   !alertsignal watchlist 1h
  *   !alertsignal list | off | hapus <id|semua>
  *
+ * FOREX: pair dikenali otomatis (!alertsignal eurusd 1h, !alertsignal eur/usd 4h long, !alertsignal xauusd 4h; alias
+ * !alertfxsignal). SL/TP dalam pip, pasar tutup (akhir pekan) = tidak dikirim (VALID turun jadi TUNGGU). Watchlist hanya kripto.
+ *
  * Hanya membuat/melihat/menghapus langganan (state/cryptoStore.js). Pemeriksaan dan pengiriman ada di
  * signalAlertEngine.js (dijalankan alertMonitor.js); aturan murninya di signalAlertCore.js.
  */
@@ -19,14 +22,16 @@ const { t } = require("../../i18n");
 const store = require("../../state/cryptoStore");
 const { withSyncNotice } = require("./syncNotice");
 const { fetchTicker } = require("./market");
+const { resolvePair, normalizePairText, allowedTfs } = require("../forex/forexPairs");
 const { COIN_WATCHLIST, TF_LABEL, DAILY_TZ_LABEL } = require("./divAlertCore");
 const { CFG, parseSignalAlertArgs: parseCore, describeSignalAlert } = require("./signalAlertCore");
 
 const SIGNALALERT_COMMANDS = {
-  alertsignal: { re: /^!(?:alertsignal|alertsinyal)(?:\s+([\s\S]*))?$/i },
+  alertsignal: { re: /^!(?:alertsignal|alertsinyal|alertfxsignal|alertfxsinyal)(?:\s+([\s\S]*))?$/i },
 };
 
-const parseSignalAlertArgs = (name, raw, defaultTf) => parseCore(raw, defaultTf);
+// "eur/usd" -> "eurusd" (pair forex; parser koin menolak karakter "/")
+const parseSignalAlertArgs = (name, raw, defaultTf) => parseCore(normalizePairText(raw), defaultTf);
 
 const pad = (s, n) => String(s).padEnd(n, " ");
 const say = (sock, jid, msg, text) => sock.sendMessage(jid, { text }, { quoted: msg });
@@ -35,7 +40,12 @@ const targetLabel = (lang, coin) => (coin === COIN_WATCHLIST ? t(lang, "divalert
 
 async function runCreate(sock, msg, { jid, lang, senderId }, args) {
   const { coin, tf, dirs, wait } = args;
-  if (coin !== COIN_WATCHLIST) await fetchTicker(coin); // koin tidak ada di Binance -> UnsupportedCoinError (ditangani pemanggil)
+  const pair = coin === COIN_WATCHLIST ? null : resolvePair(coin);
+  if (pair) {
+    // Forex: TF yang tidak didukung ditolak (USDIDR mulai 1H); data Yahoo dicek dulu (gagal -> FOREX_DATA, ditangani pemanggil).
+    if (!allowedTfs(pair).includes(tf)) return say(sock, jid, msg, t(lang, "sinyal.fx.tfNotAllowed", { pair }));
+    await require("../forex/forexMarket").loadTicker(pair);
+  } else if (coin !== COIN_WATCHLIST) await fetchTicker(coin); // koin tidak ada di Binance -> UnsupportedCoinError (ditangani pemanggil)
 
   const entry = store.addSignalAlert(senderId, { chat: jid, coin, tf, dirs, wait });
   if (entry === "exists") return say(sock, jid, msg, t(lang, "signalalert.exists"));
@@ -43,6 +53,7 @@ async function runCreate(sock, msg, { jid, lang, senderId }, args) {
   if (entry === "chatFull") return say(sock, jid, msg, t(lang, "signalalert.chatFull", { max: store.MAX_SIGNAL_ALERTS_PER_CHAT }));
 
   let note = "";
+  if (pair) note = "\n" + t(lang, "signalalert.created.fx");
   if (coin === COIN_WATCHLIST) {
     const n = store.getWatch(senderId).length;
     if (n > CFG.MAX_PAIRS) note = "\n" + t(lang, "signalalert.created.bigWatch", { n, max: CFG.MAX_PAIRS });

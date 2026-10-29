@@ -22,18 +22,25 @@ const { SIGNAL_ALERT_CONFIG: CFG } = require("../../config/indicatorConfig");
 const { TF_MS, COIN_WATCHLIST, ChatRateLimiter } = require("./divAlertCore");
 const { selectLivePairs } = require("./advAlertCore");
 const { runPool, defaultScoreOf } = require("./advAlertEngine");
+const { pairInfo } = require("../forex/forexPairs");
+const applyMarketClosed = (sc, status) => require("./signal").applyMarketClosed(sc, status);
 const { detectNewSignal, signalKey, chunk, sortEvents, buildSignalText } = require("./signalAlertCore");
 
 const defaultSleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** Adapter pasar forex untuk satu simbol (null = kripto). */
+const marketOf = (coin) => (pairInfo(String(coin || "").toUpperCase()) ? require("../forex/forexMarket").createForexMarket(coin) : null);
 
 /**
  * Skenario satu TF dari candle closed (sama dengan collectSignal di signal.js, tanpa mood pasar & BTC).
  * Harga acuan = close candle terakhir. null = data kurang.
  * @returns {{bias:object, scenario:object}|null}
  */
-function defaultScenarioOf(candles) {
+function defaultScenarioOf(candles, coin) {
   const { computeScenario } = require("./signal");
-  const { computeLevels } = require("./market");
+  // Forex: level S/R dengan toleransi forex (adapter pasar); kripto tetap computeLevels Binance.
+  const mkt = marketOf(coin);
+  const computeLevels = mkt ? (c, p) => mkt.computeLevels(c, p) : require("./market").computeLevels;
   const { computeEmas, atr } = require("./indicators");
   const bias = defaultScoreOf(candles);
   if (!bias) return null;
@@ -57,7 +64,7 @@ function defaultScenarioOf(candles) {
  *   fetchCandles: (coin:string, tf:string, opts?:object) => Promise<object[]>,
  *   notify: (chat:string, userJid:string, text:string) => Promise<boolean>,
  *   langFor: (chat:string, userJid:string) => string,
- *   scenarioOf?: (candles:object[]) => ({bias:object, scenario:object}|null),
+ *   scenarioOf?: (candles:object[], coin:string) => ({bias:object, scenario:object}|null),
  *   isUnsupported?: (err:Error) => boolean,
  *   limiter?: ChatRateLimiter, sleep?: Function, log?: Function
  * }} deps
@@ -81,8 +88,8 @@ function createSignalEngine(deps) {
     const k = `${coin}|${tf}`;
     const hit = cache.get(k);
     if (hit && hit.t === X.t) return hit;
-    const cur = scenarioOf(closed);
-    const prev = scenarioOf(closed.slice(0, -1));
+    const cur = scenarioOf(closed, coin);
+    const prev = scenarioOf(closed.slice(0, -1), coin);
     const entry = { t: X.t, cur: cur?.scenario ?? null, curBias: cur?.bias ?? null, prev: prev?.scenario ?? null };
     cache.set(k, entry);
     return entry;
@@ -108,7 +115,12 @@ function createSignalEngine(deps) {
     if (!finalReady || X.t + tfMs <= sub.createdAt) return out;
 
     const sc = scenariosFor(coin, tf, closed);
-    const hit = detectNewSignal(sc.cur, sc.prev, sub);
+    // Forex: pasar tutup (akhir pekan) menurunkan VALID jadi TUNGGU, sama seperti !signal. Hanya skenario sekarang;
+    // salinan supaya cache tidak berubah (skenario sebelumnya tetap apa adanya sebagai pembanding).
+    const mkt = marketOf(coin);
+    let cur = sc.cur;
+    if (mkt && cur) cur = applyMarketClosed({ ...cur }, require("../forex/forexMarket").marketStatus(now));
+    const hit = detectNewSignal(cur, sc.prev, sub);
     if (!hit) return out;
 
     const key = signalKey(sub.chat, userJid, coin, tf, hit.dir, X.t);
@@ -128,7 +140,8 @@ function createSignalEngine(deps) {
       price: X.c,
       candleT: X.t,
       closeMs: X.t + tfMs,
-      row: { tf, bias: sc.curBias, limited: false, scenario: sc.cur },
+      market: mkt, // forex: format harga/pip sesuai pair; kripto null
+      row: { tf, bias: sc.curBias, limited: false, scenario: cur, gapAtr: closed.slice(-15).some((k) => k.gap === true) },
       key,
       commit: () => store.markSent([key]),
     });

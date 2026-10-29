@@ -12,6 +12,10 @@
  *   !alertpola watchlist 4h konfirmasi kuat -> hanya pola grade kuat (otomatis hanya konfirmasi)
  *   !alertpola list | off | hapus <id|semua>
  *
+ * FOREX: pair dikenali otomatis (!alertpola eurusd 4h, !alertpola eur/usd 1h naik, !alertpola xauusd 4h konfirmasi;
+ * alias !alertfxpola). Data Yahoo lewat forex/forexMarket.js, level dengan digits pair, tanpa volume, pola yang
+ * melibatkan gap pembukaan diberi tanda. Watchlist hanya kripto.
+ *
  * Hanya membuat/melihat/menghapus langganan (state/cryptoStore.js). Pemeriksaan dan pengiriman ada di
  * patternAlertEngine.js (dijalankan alertMonitor.js); aturan murninya di patternAlertCore.js.
  */
@@ -20,14 +24,16 @@ const { t } = require("../../i18n");
 const store = require("../../state/cryptoStore");
 const { withSyncNotice } = require("./syncNotice");
 const { fetchTicker } = require("./market");
+const { resolvePair, normalizePairText, allowedTfs } = require("../forex/forexPairs");
 const { COIN_WATCHLIST, TF_LABEL, DAILY_TZ_LABEL } = require("./divAlertCore");
 const { parsePatternArgs, describePattern, capCoins } = require("./patternAlertCore");
 
 const PATALERT_COMMANDS = {
-  alertpola: { re: /^!(?:alertpola|alertpattern)(?:\s+([\s\S]*))?$/i },
+  alertpola: { re: /^!(?:alertpola|alertpattern|alertfxpola|alertfxpattern)(?:\s+([\s\S]*))?$/i },
 };
 
-const parsePatternAlertArgs = (name, raw, defaultTf) => parsePatternArgs(raw, defaultTf);
+// "eur/usd" -> "eurusd" (pair forex; parser koin menolak karakter "/")
+const parsePatternAlertArgs = (name, raw, defaultTf) => parsePatternArgs(normalizePairText(raw), defaultTf);
 
 const pad = (s, n) => String(s).padEnd(n, " ");
 const say = (sock, jid, msg, text) => sock.sendMessage(jid, { text }, { quoted: msg });
@@ -36,7 +42,12 @@ const targetLabel = (lang, coin) => (coin === COIN_WATCHLIST ? t(lang, "divalert
 
 async function runCreate(sock, msg, { jid, lang, senderId }, args) {
   const { coin, tf, dirs, anyDir, stages, strongOnly = false } = args;
-  if (coin !== COIN_WATCHLIST) await fetchTicker(coin); // koin tidak ada di Binance -> UnsupportedCoinError (ditangani pemanggil)
+  const pair = coin === COIN_WATCHLIST ? null : resolvePair(coin);
+  if (pair) {
+    // Forex: TF yang tidak didukung ditolak di sini (USDIDR mulai 1H); data Yahoo dicek dulu (gagal -> FOREX_DATA, ditangani pemanggil).
+    if (!allowedTfs(pair).includes(tf)) return say(sock, jid, msg, t(lang, "pola.fx.tfNotAllowed", { pair }));
+    await require("../forex/forexMarket").loadTicker(pair);
+  } else if (coin !== COIN_WATCHLIST) await fetchTicker(coin); // koin tidak ada di Binance -> UnsupportedCoinError (ditangani pemanggil)
 
   const entry = store.addPatternAlert(senderId, { chat: jid, coin, tf, dirs, anyDir, stages, strongOnly });
   if (entry === "exists") return say(sock, jid, msg, t(lang, "patalert.exists"));
@@ -44,6 +55,7 @@ async function runCreate(sock, msg, { jid, lang, senderId }, args) {
   if (entry === "chatFull") return say(sock, jid, msg, t(lang, "patalert.chatFull", { max: store.MAX_PATTERN_ALERTS_PER_CHAT }));
 
   let note = "";
+  if (pair) note = "\n" + t(lang, "patalert.created.fx");
   if (coin === COIN_WATCHLIST) {
     const { used, cut } = capCoins(store.getWatch(senderId));
     if (cut > 0) note = "\n" + t(lang, "patalert.created.bigWatch", { n: used.length + cut, max: used.length, cut });

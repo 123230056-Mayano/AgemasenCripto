@@ -136,8 +136,11 @@ function chunk(list, size = CFG.BLOCKS_PER_MSG) {
 function buildBlock(lang, ev) {
   const { fmtUsd } = require("./market");
   const { formatTfBlock } = require("./signal");
-  const head = t(lang, "signalalert.blockHead", { coin: ev.coin, tf: TF_LABEL[ev.tf] || ev.tf, price: fmtUsd(ev.price) });
-  return `${head}\n${formatTfBlock(lang, ev.row, { overall: null })}`;
+  const mkt = ev.market || null; // forex: adapter pasar (digits pair, pip)
+  const head = mkt
+    ? t(lang, "signalalert.blockHeadFx", { pair: ev.coin, tf: TF_LABEL[ev.tf] || ev.tf, price: mkt.fmtPrice(ev.price) })
+    : t(lang, "signalalert.blockHead", { coin: ev.coin, tf: TF_LABEL[ev.tf] || ev.tf, price: fmtUsd(ev.price) });
+  return `${head}\n${formatTfBlock(lang, ev.row, { overall: null, market: mkt })}`;
 }
 
 /** Teks satu pesan alarm. ms = waktu candle closed (tutup). */
@@ -145,7 +148,11 @@ function buildSignalText(lang, events, { ms, part = 1, parts = 1 }) {
   const blocks = sortEvents(events).map((ev) => buildBlock(lang, ev));
   const head = t(lang, "signalalert.head", { time: fmtCandleTime(lang, ms), n: events.length });
   const partTag = parts > 1 ? ` (${part}/${parts})` : "";
-  return `${head}${partTag}\n\n${blocks.join("\n\n")}\n\n${t(lang, "signalalert.foot")}\n${t(lang, "sinyal.disclaimer")}`;
+  const fx = events.filter((e) => e.market);
+  const foot = [t(lang, fx.length && fx.length === events.length ? "signalalert.footFx" : "signalalert.foot")];
+  if (fx.some((e) => e.market.proxy === "futures")) foot.push(t(lang, "sinyal.note.fxGold"));
+  foot.push(t(lang, "sinyal.disclaimer"));
+  return `${head}${partTag}\n\n${blocks.join("\n\n")}\n\n${foot.join("\n")}`;
 }
 
 /** Ringkasan satu langganan untuk !alertsignal list / pesan konfirmasi. */
