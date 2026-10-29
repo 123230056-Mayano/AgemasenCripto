@@ -5,8 +5,9 @@
  * ------------------------------------------------------------------
  * Daftar & pencarian pasar (Command Kripto - Bagian 3):
  *   !semua [kategori] [tf]  -> semua koin + harga + % perubahan, dipaginasi (!next)
- *   !top [jumlah]           -> top gainers 24 jam (default 10)
- *   !flop [jumlah]          -> top losers 24 jam (default 10)
+ *   !top [jumlah] [semua|kripto|forex]   -> top gainers 24 jam (default 10, cakupan default: semua)
+ *   !flop [jumlah] [semua|kripto|forex]  -> top losers 24 jam (default 10)
+ *     cakupan "semua" = bagian kripto di atas, bagian forex di bawah
  *   !kategori               -> daftar kategori + jumlah koin
  *   !cari <nama>            -> cari koin berdasarkan nama / ticker (parsial)
  *
@@ -23,6 +24,9 @@ const { getAvailableCoins } = require("./kriptoList");
 const { binanceSymbol } = require("../analisis/analisisChart");
 const { TIMEFRAMES, TF_LABEL, fmtUsd, fmtPct } = require("./market");
 const { getSenderJid } = require("../../utils/whatsapp");
+const { listPairs, pairInfo } = require("../forex/forexPairs");
+const { loadTicker, marketStatus } = require("../forex/forexMarket");
+const { fmtPrice } = require("../../utils/priceFormat");
 
 const BINANCE = (process.env.BINANCE_BASE || "https://data-api.binance.vision").replace(/\/+$/, "");
 const CACHE_MS = 60_000;
@@ -32,6 +36,13 @@ const PAGER_TTL_MS = 15 * 60_000;
 const TOP_DEFAULT = 10;
 const TOP_MAX = 25;
 const SEARCH_MAX = 15;
+const SCOPE_DEFAULT = "semua";
+const SCOPE_ALIASES = {
+  semua: ["semua", "all", "both", "keduanya"],
+  kripto: ["kripto", "crypto", "koin", "coin"],
+  forex: ["forex", "fx"],
+};
+const scopeOf = (word) => Object.keys(SCOPE_ALIASES).find((k) => SCOPE_ALIASES[k].includes(String(word).toLowerCase())) || null;
 
 // ---------- kategori ----------
 // Kunci = nama kategori Indonesia di coinList.js (kanonik, tidak tergantung bahasa).
@@ -228,13 +239,57 @@ async function handleKriptoNext(sock, msg, { jid, lang, otherSessionAt = 0 }) {
 }
 
 // ---------- !top / !flop ----------
-async function runTopFlop(sock, msg, { jid, lang }, { n }, losers) {
-  const rows = await getMarketRows(lang, "24H");
-  const sorted = [...rows].sort((a, b) => (losers ? a.pct - b.pct : b.pct - a.pct)).slice(0, n);
-  const lines = sorted.map((r, i) => `${i + 1}. *${r.ticker}* ${fmtUsd(r.price)} | ${icon(r.pct)} ${fmtPct(r.pct)}`);
+/** Data forex 24 jam: satu request Yahoo per pair (di-cache oleh forexMarket). Pair yang gagal dilewati. */
+async function getForexRows() {
+  const pairs = listPairs();
+  const res = await Promise.allSettled(pairs.map((p) => loadTicker(p)));
+  const rows = [];
+  res.forEach((r, i) => {
+    if (r.status === "fulfilled" && isFinite(r.value.price) && isFinite(r.value.changePct)) {
+      rows.push({ ticker: pairs[i], price: r.value.price, pct: r.value.changePct, digits: pairInfo(pairs[i]).digits });
+    }
+  });
+  return rows;
+}
+
+const sortRows = (rows, losers, n) => [...rows].sort((a, b) => (losers ? a.pct - b.pct : b.pct - a.pct)).slice(0, n);
+const cryptoLines = (rows) => rows.map((r, i) => `${i + 1}. *${r.ticker}* ${fmtUsd(r.price)} | ${icon(r.pct)} ${fmtPct(r.pct)}`);
+const forexLines = (rows) => rows.map((r, i) => `${i + 1}. *${r.ticker}* ${fmtPrice(r.price, r.digits)} | ${icon(r.pct)} ${fmtPct(r.pct)}`);
+
+async function runTopFlop(sock, msg, { jid, lang }, { n, scope }, losers) {
+  const wantCrypto = scope !== "forex";
+  const wantForex = scope !== "kripto";
+  const [cr, fx] = await Promise.allSettled([
+    wantCrypto ? getMarketRows(lang, "24H") : Promise.resolve(null),
+    wantForex ? getForexRows() : Promise.resolve(null),
+  ]);
+
+  // Satu sisi gagal pada mode "semua" -> tetap tampilkan sisi lain dengan catatan. Mode tunggal yang gagal -> lempar (ditangani kriptoCommand).
+  if (scope === "kripto" && cr.status === "rejected") throw cr.reason;
+  if (scope === "forex" && (fx.status === "rejected" || !fx.value?.length)) throw fx.status === "rejected" ? fx.reason : new Error("EMPTY_MARKET");
+  if (scope === "semua" && cr.status === "rejected" && (fx.status === "rejected" || !fx.value?.length)) throw cr.reason;
+
+  const sections = [];
+  if (wantCrypto) {
+    const body = cr.status === "fulfilled" ? cryptoLines(sortRows(cr.value, losers, n)).join("\n") : t(lang, "pasar.section.fail");
+    sections.push(scope === "semua" ? `${t(lang, "pasar.sec.kripto")}\n${body}` : body);
+  }
+  if (wantForex) {
+    let body;
+    if (fx.status === "fulfilled" && fx.value.length) {
+      body = forexLines(sortRows(fx.value, losers, n)).join("\n");
+      if (!marketStatus().open) body += "\n" + t(lang, "pasar.fx.closed");
+    } else body = t(lang, "pasar.section.fail");
+    sections.push(scope === "semua" ? `${t(lang, "pasar.sec.forex")}\n${body}` : body);
+  }
+
+  const shown = Math.max(
+    wantCrypto && cr.status === "fulfilled" ? Math.min(n, cr.value.length) : 0,
+    wantForex && fx.status === "fulfilled" ? Math.min(n, fx.value.length) : 0,
+  );
   await sock.sendMessage(
     jid,
-    { text: t(lang, losers ? "pasar.flop.body" : "pasar.top.body", { n: sorted.length, rows: lines.join("\n") }) },
+    { text: t(lang, losers ? "pasar.flop.body" : "pasar.top.body", { n: shown || n, scope: t(lang, `pasar.scope.${scope}`), rows: sections.join("\n\n") }) },
     { quoted: msg },
   );
 }
@@ -314,10 +369,23 @@ function parsePasarArgs(name, raw, defaultTf) {
     }
     case "top":
     case "flop": {
-      if (!text) return { n: TOP_DEFAULT };
-      if (!/^\d{1,2}$/.test(text)) return null;
-      const n = Number(text);
-      return n >= 1 && n <= TOP_MAX ? { n } : null;
+      // Urutan bebas: "!top 5 forex", "!top forex 5", "!top forex".
+      let n = TOP_DEFAULT;
+      let scope = SCOPE_DEFAULT;
+      let seenN = false;
+      let seenScope = false;
+      for (const tok of text.split(/\s+/).filter(Boolean)) {
+        if (/^\d{1,2}$/.test(tok)) {
+          if (seenN) return null;
+          n = Number(tok);
+          seenN = true;
+        } else if (scopeOf(tok)) {
+          if (seenScope) return null;
+          scope = scopeOf(tok);
+          seenScope = true;
+        } else return null;
+      }
+      return n >= 1 && n <= TOP_MAX ? { n, scope } : null;
     }
     case "kategori":
       return text ? null : {};
