@@ -460,16 +460,21 @@ function formatBias(lang, { coin, price, rows, reasonTf, reasonResult, limitedAn
 async function collectBias(coin, tfs, ctx) {
   const stat = require("./statistik");
   const { fetchCandles } = require("./market");
+  // ctx.market (adapter pasar, lihat kripto/marketAdapter.js dan forex/forexMarket.js) opsional. Tanpa itu = kripto seperti sebelumnya.
+  // Pasar tanpa snapshot (forex, noSnapshot) melewati mood pasar & tren BTC: komponen itu null -> dilewati, bobot dinormalisasi ulang.
+  const mkt = ctx.market || null;
   return Promise.all(
     tfs.map(async (tf) => {
       let snapshot = null;
-      try {
-        snapshot = await stat.getSnapshot(ctx.lang, tf); // gagal -> mood & BTC dilewati
-      } catch {
-        snapshot = null;
+      if (!mkt?.noSnapshot) {
+        try {
+          snapshot = await stat.getSnapshot(ctx.lang, tf); // gagal -> mood & BTC dilewati
+        } catch {
+          snapshot = null;
+        }
       }
       try {
-        const candles = await fetchCandles(coin, tf);
+        const candles = mkt ? await mkt.fetchCandles(tf) : await fetchCandles(coin, tf);
         const inputs = await gatherBiasInputs(coin, tf, { lang: ctx.lang, tick: ctx.tick, snapshot, candles });
         return { tf, result: computeBias(inputs), limited: inputs.limited, candles };
       } catch (err) {

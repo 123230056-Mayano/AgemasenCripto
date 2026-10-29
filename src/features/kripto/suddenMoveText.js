@@ -16,8 +16,8 @@ const fmtRR = (v) => (isNum(v) ? v.toFixed(2).replace(/\.?0+$/, "") : "-");
 const fmt = () => require("./market");
 
 /** Satu kalimat alasan dari {code, vars} hasil assessEntry / assessPosition. */
-function reasonText(lang, r) {
-  const { fmtLevel } = fmt();
+function reasonText(lang, r, fmtLevelFn) {
+  const fmtLevel = fmtLevelFn || fmt().fmtLevel; // forex: format harga sesuai digits pair (forex/forexMarket.js)
   const v = r.vars || {};
   const lv = (x) => (isNum(x) ? fmtLevel(x) : "-");
   const vars = {

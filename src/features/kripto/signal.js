@@ -22,6 +22,9 @@
  * Skenario = ilustrasi level dari indikator, BUKAN ajakan beli/jual.
  *
  * Changelog:
+ *   v4 (2026-10-29) FOREX: !signal <pair> (mis. eurusd, eur/usd, xauusd) lewat adapter pasar (ctx.market, lihat marketAdapter.js dan
+ *                   forex/forexMarket.js). Kripto tidak berubah. Forex: tanpa mood pasar/tren BTC (komponen dilewati), tanpa volume,
+ *                   jarak SL/TP dalam pip, status entri tidak VALID saat pasar tutup, catatan gap pembukaan. Alias: !fxsignal, !fxsinyal.
  *   v3 (2026-10-24) !amd digabung ke !signal: tiap baris TF dapat satu baris status AMD (dihitung dari candle yang sama dengan
  *                   skenario, tanpa fetch tambahan) + catatan bila arah AMD berlawanan dengan skenario; satu TF -> chart AMD.
  *   v2 (2026-10-22) Sudden Move Guard: tiap skenario LONG/SHORT dinilai suddenMove.assessEntry (status VALID / TUNGGU /
@@ -39,6 +42,8 @@ const sudden = require("./suddenMove");
 const { reasonText } = require("./suddenMoveText");
 const { detectAmd, CFG: AMD_CFG } = require("./amdCore");
 const { computeSnr } = require("./snr");
+const { createCryptoMarket, resolveMarket } = require("./marketAdapter");
+const { normalizePairText } = require("../forex/forexPairs");
 
 const SIGNAL_VERSION = CFG.VERSION;
 const TF_LABEL = { "15M": "15m", "1H": "1H", "4H": "4H", "1D": "1D" };
@@ -221,16 +226,19 @@ function computeScenario(input, cfg = CFG) {
  * ctx.skipAmd = true -> AMD tidak dihitung (dipakai !signal all, yang hanya butuh status skenario).
  */
 async function collectSignal(coin, tfs, ctx) {
-  const { computeLevels } = require("./market");
+  // ctx.market = adapter pasar (forex); tanpa itu = kripto persis seperti sebelumnya (alarm, !signal all).
+  const mkt = ctx.market || createCryptoMarket(coin);
   const rows = await collectBias(coin, tfs, ctx);
   return rows.map((r) => {
     if (!r.result || !r.candles) return { tf: r.tf, bias: null, limited: false, scenario: { status: "nodata" }, amd: null, err: r.err };
     const candles = r.candles;
     const atrAll = atrSeries(candles);
     const atr = atrAll.at(-1);
-    const levels = computeLevels(candles, ctx.tick.price);
+    const levels = mkt.computeLevels(candles, ctx.tick.price);
     const emas = computeEmas(candles).latest;
-    const scenario = computeScenario({ bias: r.result, price: ctx.tick.price, atr, levels, emas, candles, atrSeries: atrAll });
+    const scenario = applyMarketClosed(computeScenario({ bias: r.result, price: ctx.tick.price, atr, levels, emas, candles, atrSeries: atrAll }), ctx.marketStatus);
+    // Gap pembukaan (akhir pekan / rollover) di jendela ATR: ATR bisa terdorong naik (forex saja; kripto tidak menandai gap).
+    const gapAtr = candles.slice(-15).some((k) => k.gap === true);
     // AMD dari candle yang sama; gagal dihitung tidak boleh menggagalkan skenario sinyal.
     let amd = null;
     try {
@@ -238,8 +246,22 @@ async function collectSignal(coin, tfs, ctx) {
     } catch (err) {
       console.log(`[kripto] AMD ${coin} ${r.tf} gagal dihitung:`, err.message);
     }
-    return { tf: r.tf, bias: r.result, limited: r.limited, scenario, amd, err: undefined };
+    return { tf: r.tf, bias: r.result, limited: r.limited, scenario, amd, gapAtr, err: undefined };
   });
+}
+
+/**
+ * Pasar tutup (forex akhir pekan / data macet): skenario yang sedianya VALID diturunkan jadi TUNGGU dengan alasan yang jelas.
+ * HINDARI dan TUNGGU tidak diubah (sudah lebih ketat); sideways tidak punya status entri. Mengubah objek skenario (dibuat baru
+ * tiap panggilan computeScenario). Tanpa `status` (kripto) tidak melakukan apa pun.
+ * @param {object} sc skenario dari computeScenario
+ * @param {{open:boolean, reason:string|null}|null|undefined} status dari market.status()
+ */
+function applyMarketClosed(sc, status) {
+  if (!status || status.open !== false || !sc?.guard || sc.guard.status !== "VALID") return sc;
+  const code = status.reason === "stale" ? "marketStale" : "marketClosed";
+  sc.guard = { ...sc.guard, status: "TUNGGU", conditional: false, reasons: [{ code, vars: {} }, ...sc.guard.reasons] };
+  return sc;
 }
 
 // =====================================================================
@@ -248,6 +270,7 @@ async function collectSignal(coin, tfs, ctx) {
 const fmtScore = (v) => `${v >= 0 ? "+" : ""}${v.toFixed(2)}`;
 const fmtSignedPct = (v) => `${v >= 0 ? "+" : "-"}${Math.abs(v).toFixed(2)}%`;
 const fmtRR = (v) => (v == null ? "-" : v.toFixed(2).replace(/\.?0+$/, ""));
+const fmtPips = (v) => (v == null ? "-" : v.toFixed(1).replace(/\.0$/, ""));
 
 function entryLabel(lang, entry) {
   if (entry.kind === "market") return t(lang, "sinyal.entry.market");
@@ -257,14 +280,14 @@ function entryLabel(lang, entry) {
 const STATUS_ICON = { VALID: "✅", TUNGGU: "⏳", HINDARI: "⛔" };
 
 /** Baris status entri + alasan + saran tindak lanjut. Kosong bila skenario tidak dinilai guard. */
-function formatGuardLines(lang, sc, tf) {
+function formatGuardLines(lang, sc, tf, fmtLevelFn) {
   const g = sc.guard;
   if (!g) return [];
-  const { fmtLevel } = require("./market");
+  const fmtLevel = fmtLevelFn || require("./market").fmtLevel;
   const label = t(lang, `sudden.status.${g.status}`);
   const head = g.status === "VALID" && g.conditional ? t(lang, "sudden.statusConditional", { label }) : label;
   const out = [`${STATUS_ICON[g.status]} ${t(lang, "sudden.line.status", { status: head })}`];
-  for (const r of g.reasons) out.push(`↳ ${reasonText(lang, r)}`);
+  for (const r of g.reasons) out.push(`↳ ${reasonText(lang, r, fmtLevel)}`);
   if (g.status === "TUNGGU") {
     if (g.confirmAt != null) {
       out.push(`↳ ${t(lang, sc.status === "long" ? "sudden.advice.confirmAbove" : "sudden.advice.confirmBelow", { lvl: fmtLevel(g.confirmAt), tf: TF_LABEL[tf] || tf })}`);
@@ -280,9 +303,9 @@ function formatGuardLines(lang, sc, tf) {
  * Satu baris ringkas status AMD satu TF (detail lengkap + chart: !signal <koin> <tf>).
  * @returns {string|null} null bila AMD tidak dihitung (data kurang / baris dari alarm).
  */
-function formatAmdLine(lang, amd) {
+function formatAmdLine(lang, amd, fmtLevelFn) {
   if (!amd) return null;
-  const { fmtLevel } = require("./market");
+  const fmtLevel = fmtLevelFn || require("./market").fmtLevel;
   if (amd.phase === "none") return t(lang, "sinyal.amd.none");
   const dirKey = amd.dir === "bullish" ? "bull" : "bear";
   if (amd.phase === "accumulation") {
@@ -303,7 +326,8 @@ function amdConflicts(sc, amd) {
 }
 
 function formatTfBlock(lang, row, ctx) {
-  const { fmtLevel } = require("./market");
+  const fmtLevel = ctx.market?.fmtLevel || require("./market").fmtLevel; // forex: sesuai digits pair
+  const pipsOf = (distance) => (ctx.market?.pips ? ctx.market.pips(distance) : null);
   const tf = TF_LABEL[row.tf];
   const sc = row.scenario;
   if (sc.status === "nodata") return `*${tf}* ⚪ ${t(lang, "sinyal.nodata")}`;
@@ -322,7 +346,7 @@ function formatTfBlock(lang, row, ctx) {
     ];
     if (sc.outside) lines.push(t(lang, `sinyal.range.outside.${sc.outside}`, { tf }));
     if (sc.narrow) lines.push(t(lang, "sinyal.range.narrow"));
-    const amdRange = ctx.amdLine === false ? null : formatAmdLine(lang, row.amd);
+    const amdRange = ctx.amdLine === false ? null : formatAmdLine(lang, row.amd, fmtLevel);
     if (amdRange) lines.push(amdRange);
     return lines.join("\n");
   }
@@ -331,31 +355,50 @@ function formatTfBlock(lang, row, ctx) {
   const lines = [
     `*${tf}* ${isLong ? "🟢 LONG" : "🔴 SHORT"} | ${biasTag}`,
     ...(probLine ? [probLine] : []),
-    t(lang, "sinyal.line.entrySl", {
-      entry: fmtLevel(sc.entry.price),
-      elabel: entryLabel(lang, sc.entry),
-      sl: fmtLevel(sc.sl.price),
-      slPct: fmtSignedPct(((sc.sl.price - sc.entry.price) / sc.entry.price) * 100),
-    }),
-    t(lang, "sinyal.line.tp", {
-      tp1: fmtLevel(sc.tps[0].price),
-      rr1: fmtRR(sc.tps[0].rr),
-      tp2: fmtLevel(sc.tps[1].price),
-      rr2: fmtRR(sc.tps[1].rr),
-    }),
+    // Pair dengan pip (forex): jarak SL/TP ditampilkan dalam pip di samping harga. USDIDR (tanpa pip) memakai baris biasa.
+    pipsOf(sc.entry.price - sc.sl.price) != null
+      ? t(lang, "sinyal.line.entrySlPip", {
+          entry: fmtLevel(sc.entry.price),
+          elabel: entryLabel(lang, sc.entry),
+          sl: fmtLevel(sc.sl.price),
+          slPct: fmtSignedPct(((sc.sl.price - sc.entry.price) / sc.entry.price) * 100),
+          slPips: fmtPips(pipsOf(sc.entry.price - sc.sl.price)),
+        })
+      : t(lang, "sinyal.line.entrySl", {
+          entry: fmtLevel(sc.entry.price),
+          elabel: entryLabel(lang, sc.entry),
+          sl: fmtLevel(sc.sl.price),
+          slPct: fmtSignedPct(((sc.sl.price - sc.entry.price) / sc.entry.price) * 100),
+        }),
+    pipsOf(sc.tps[0].price - sc.entry.price) != null
+      ? t(lang, "sinyal.line.tpPip", {
+          tp1: fmtLevel(sc.tps[0].price),
+          rr1: fmtRR(sc.tps[0].rr),
+          p1: fmtPips(pipsOf(sc.tps[0].price - sc.entry.price)),
+          tp2: fmtLevel(sc.tps[1].price),
+          rr2: fmtRR(sc.tps[1].rr),
+          p2: fmtPips(pipsOf(sc.tps[1].price - sc.entry.price)),
+        })
+      : t(lang, "sinyal.line.tp", {
+          tp1: fmtLevel(sc.tps[0].price),
+          rr1: fmtRR(sc.tps[0].rr),
+          tp2: fmtLevel(sc.tps[1].price),
+          rr2: fmtRR(sc.tps[1].rr),
+        }),
   ];
-  const guardLines = formatGuardLines(lang, sc, row.tf);
+  const guardLines = formatGuardLines(lang, sc, row.tf, fmtLevel);
   const notes = [];
   if (sc.entry.kind !== "market") notes.push(t(lang, "sinyal.note.entryDist", { pct: fmtSignedPct(sc.entryDistPct) }));
   if (sc.entry.fallback) notes.push(t(lang, "sinyal.note.entryFallback"));
   if (sc.sl.fallback) notes.push(t(lang, "sinyal.note.slFallback"));
   if (sc.tp1BlockedBy != null) notes.push(t(lang, "sinyal.note.tp1Blocked", { lvl: fmtLevel(sc.tp1BlockedBy) }));
+  if (row.gapAtr) notes.push(t(lang, "sinyal.note.fxGap"));
   if (ctx.overall && !ctx.overall.insufficient && ctx.overall.bias !== "netral" && ctx.overall.bias !== row.bias.bias) {
     notes.push(t(lang, "sinyal.note.counter"));
   }
   if (notes.length) lines.push(...notes.map((n) => `↳ ${n}`));
   lines.push(...guardLines);
-  const amdDir = ctx.amdLine === false ? null : formatAmdLine(lang, row.amd);
+  const amdDir = ctx.amdLine === false ? null : formatAmdLine(lang, row.amd, fmtLevel);
   if (amdDir) {
     lines.push(amdDir);
     if (amdConflicts(sc, row.amd)) lines.push(`↳ ${t(lang, "sinyal.amd.conflict")}`);
@@ -363,8 +406,12 @@ function formatTfBlock(lang, row, ctx) {
   return lines.join("\n");
 }
 
-function formatSignal(lang, { coin, price, rows, overall, failedAny, limitedAny, amdLine = true }) {
-  const parts = [t(lang, "sinyal.head", { coin, ver: SIGNAL_VERSION, price })];
+function formatSignal(lang, { coin, price, rows, overall, failedAny, limitedAny, amdLine = true, market = null, marketStatus = null, skippedTfs = [] }) {
+  const isFx = market?.id === "forex";
+  const parts = [isFx ? t(lang, "sinyal.headFx", { pair: market.label, ver: SIGNAL_VERSION, price }) : t(lang, "sinyal.head", { coin, ver: SIGNAL_VERSION, price })];
+  if (isFx && marketStatus && marketStatus.open === false) {
+    parts.push(t(lang, marketStatus.reason === "stale" ? "sinyal.fx.stale" : "sinyal.fx.closed"));
+  }
   if (overall && !overall.insufficient) {
     parts.push(
       t(lang, "bias.overall.line", {
@@ -386,7 +433,7 @@ function formatSignal(lang, { coin, price, rows, overall, failedAny, limitedAny,
     }),
     "",
   );
-  const ctx = { overall, amdLine };
+  const ctx = { overall, amdLine, market };
   parts.push(rows.map((r) => formatTfBlock(lang, r, ctx)).join("\n\n"));
 
   const notes = [];
@@ -394,6 +441,12 @@ function formatSignal(lang, { coin, price, rows, overall, failedAny, limitedAny,
   if (failedAny) notes.push(t(lang, "bias.note.failed"));
   if (rows.some((r) => r.bias && !r.bias.insufficient)) notes.push(t(lang, "prob.note"));
   notes.push(t(lang, "sinyal.note.method"));
+  if (isFx) {
+    notes.push(t(lang, "sinyal.note.fxMethod"));
+    if (market.proxy === "futures") notes.push(t(lang, "sinyal.note.fxGold"));
+    if (skippedTfs.length) notes.push(t(lang, "sinyal.note.tfSkipped", { pair: market.label, tfs: skippedTfs.map((x) => TF_LABEL[x] || x).join(", ") }));
+    notes.push(t(lang, "sinyal.note.fxRef"));
+  }
   if (amdLine && rows.some((r) => r.amd)) notes.push(t(lang, rows.length > 1 ? "sinyal.note.amdMulti" : "sinyal.note.amd"));
   if (rows.some((r) => r.scenario?.guard)) notes.push(t(lang, "sudden.note.method"));
   parts.push("", ...notes, "", t(lang, "sinyal.disclaimer"));
@@ -447,18 +500,32 @@ async function sendAmdDetail(sock, msg, { jid, lang }, { coin, row, tick }) {
  * Banyak TF: satu pesan, tiap TF berisi skenario + satu baris AMD.
  */
 async function runSinyal(sock, msg, ctx, { coin, tfs, allCoins, only }) {
-  if (allCoins) return require("./signalAll").runSinyalAll(sock, msg, ctx, { tfs, only }); // !signal all [status] [tf...] -> signalAll.js
+  if (allCoins) return require("./signalAll").runSinyalAll(sock, msg, ctx, { tfs, only }); // !signal all [status] [tf...] -> signalAll.js (kripto saja)
   const { jid, lang } = ctx;
-  const { fetchTicker, fmtUsd, UnsupportedCoinError } = require("./market");
+  const { UnsupportedCoinError } = require("./market");
   const stat = require("./statistik");
 
-  const tick = await fetchTicker(coin); // koin tidak dikenal -> UnsupportedCoinError (ditangani handler)
+  // Pair forex dikenali lebih dulu (eurusd, eur/usd, xauusd), selain itu kripto seperti biasa.
+  const market = resolveMarket(coin);
+  const isFx = market.id === "forex";
 
-  if (tfs.some((tf) => !stat.isSnapshotWarm(tf))) {
+  // TF yang tidak boleh dipakai pair ini (USDIDR: mulai 1H) dibuang; semuanya dibuang -> beri tahu, tanpa mengambil data.
+  const usableTfs = market.allowedTfs(tfs);
+  const skippedTfs = tfs.filter((x) => !usableTfs.includes(x));
+  if (!usableTfs.length) {
+    await sock.sendMessage(jid, { text: t(lang, "sinyal.fx.tfNotAllowed", { pair: market.label }) }, { quoted: msg });
+    return;
+  }
+  tfs = usableTfs;
+
+  const tick = await market.fetchTicker(); // koin tidak dikenal -> UnsupportedCoinError (ditangani handler)
+
+  if (!isFx && tfs.some((tf) => !stat.isSnapshotWarm(tf))) {
     await sock.sendMessage(jid, { text: t(lang, "sinyal.scanning", { coin }) }, { quoted: msg });
   }
 
-  const rows = await collectSignal(coin, tfs, { lang, tick });
+  const marketStatus = isFx ? await market.status() : null;
+  const rows = await collectSignal(coin, tfs, isFx ? { lang, tick, market, marketStatus } : { lang, tick });
   const ok = rows.filter((r) => r.bias);
   if (!ok.length) {
     const e = rows.find((r) => r.err)?.err;
@@ -467,8 +534,9 @@ async function runSinyal(sock, msg, ctx, { coin, tfs, allCoins, only }) {
   }
 
   // Satu TF: detail AMD (chart) dulu. Kalau gagal dikirim, baris ringkas tetap ditampilkan di pesan sinyal.
+  // Forex: chart AMD belum disesuaikan (judul "/USDT", format harga), jadi baris AMD ringkas tetap di pesan sinyal.
   let amdSent = false;
-  if (rows.length === 1 && rows[0].bias) {
+  if (!isFx && rows.length === 1 && rows[0].bias) {
     try {
       amdSent = await sendAmdDetail(sock, msg, ctx, { coin, row: rows[0], tick });
     } catch (err) {
@@ -479,18 +547,22 @@ async function runSinyal(sock, msg, ctx, { coin, tfs, allCoins, only }) {
   const overall = ok.length > 1 ? computeOverallBias(rows.map((r) => ({ tf: r.tf, result: r.bias }))) : null;
   const text = formatSignal(lang, {
     coin,
-    price: fmtUsd(tick.price),
+    price: market.fmtPrice(tick.price),
     rows,
     overall,
     failedAny: rows.some((r) => !r.bias),
     limitedAny: ok.some((r) => r.limited),
     amdLine: !amdSent,
+    market,
+    marketStatus,
+    skippedTfs,
   });
   await sock.sendMessage(jid, { text }, amdSent ? undefined : { quoted: msg });
 }
 
 // !amd / !powerof3 / !po3 (command lama) sekarang masuk ke sini: satu command untuk skenario sinyal + kondisi AMD.
-const SIGNAL_COMMANDS = { sinyal: { re: /^!(?:sinyal|signal|amd|powerof3|po3)(?:\s+([\s\S]*))?$/i } };
+// !fxsignal / !fxsinyal = alias eksplisit untuk forex; pair forex juga dikenali otomatis dari argumen (!signal eurusd 4h).
+const SIGNAL_COMMANDS = { sinyal: { re: /^!(?:sinyal|signal|amd|powerof3|po3|fxsignal|fxsinyal)(?:\s+([\s\S]*))?$/i } };
 
 // Kata filter status untuk !signal all (id + en). "tidak valid" = HINDARI (skenario ada, tapi kondisinya buruk).
 const STATUS_WORDS = {
@@ -520,6 +592,8 @@ const STATUS_ORDER = ["VALID", "TUNGGU", "HINDARI", "SIDEWAYS"];
  *   `only` = daftar status yang ditampilkan; tidak ada = tampilkan semua.
  */
 function parseSignalArgs(name, raw) {
+  // "eur/usd" / "EUR-USD" -> "eurusd" (pair forex; parser koin menolak karakter "/")
+  raw = normalizePairText(raw);
   // "tidak valid" / "gak valid" / "not valid" -> satu kata supaya tidak terbaca sebagai koin "TIDAK"
   const norm = String(raw || "").replace(/\b(?:tidak|tak|gak|ga|nggak|ngga|not)\s+valid\b/gi, "tidakvalid");
   const tokens = norm.trim().split(/\s+/).filter(Boolean);
@@ -560,6 +634,7 @@ module.exports = {
   buildDirectional,
   buildRange,
   computeScenario,
+  applyMarketClosed,
   collectSignal,
   formatSignal,
   formatTfBlock,

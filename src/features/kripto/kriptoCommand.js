@@ -26,6 +26,7 @@
  *   !ringkasan / !stat / !scan <kondisi> [tf] -> statistik & screener pasar (statistik.js)
  *   !bias <koin> [tf|semua] -> bias arah gabungan indikator per timeframe (bias.js)
  *   !signal <koin> [tf|semua] -> skenario entry / SL / TP1 / TP2 / RR semua timeframe + kondisi AMD (Accumulation / Manipulation / Distribution) tiap timeframe, tanpa AI (signal.js). Satu timeframe -> chart AMD ikut dikirim. Alias: !sinyal, !amd, !powerof3, !po3 (!amd lama sudah digabung ke sini)
+ *                        FOREX: !signal <pair> [tf|semua] (eurusd / eur/usd / xauusd, dikenali otomatis; alias !fxsignal, !fxsinyal). Data Yahoo lewat forex/forexMarket.js; SL/TP dalam pip, pasar tutup = tidak VALID. Belum: !signal all, alarm, chart AMD untuk forex.
  *   !alertind <koin|watchlist> [tf] [bias|cross] [live] | list | off | hapus <id|semua>  (alarm bias berubah / crossover baru, advAlertCommand.js)
  *   !posisi buka <koin> [tf] <long|short> entry <harga> sl <harga> [tp <harga>] | list | sl <id> <harga> | tutup <id|semua>  (posisi + peringatan WASPADA/CUT, positionCommand.js)
  *   !alertsnr <koin|watchlist> [tf] [reject|tembus|wick|sweep] [kuat] | list | off | hapus <id|semua>  (alarm titik balik S/R, snrAlertCommand.js)

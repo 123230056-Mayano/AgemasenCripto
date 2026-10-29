@@ -146,7 +146,7 @@ async function fetchUsdIdr() {
  * Support/resistance dari swing high/low (port dari lib/indicators.js web).
  * Resistance urut terdekat -> terjauh (R1, R2), support terdekat -> terjauh (S1, S2).
  */
-function computeLevels(candles, price, { lookback = 150, win = 3, count = 2 } = {}) {
+function computeLevels(candles, price, { lookback = 150, win = 3, count = 2, tol = 0.01 } = {}) {
   const slice = candles.slice(-lookback);
   const highs = [];
   const lows = [];
@@ -158,7 +158,7 @@ function computeLevels(candles, price, { lookback = 150, win = 3, count = 2 } = 
   const uniq = (arr) => {
     const out = [];
     for (const v of [...arr].sort((a, b) => a - b)) {
-      if (!out.length || Math.abs(v - out[out.length - 1]) / v > 0.01) out.push(v);
+      if (!out.length || Math.abs(v - out[out.length - 1]) / v > tol) out.push(v); // tol: toleransi gabung level (kripto 1%, forex 0,2% lewat adapter forex)
     }
     return out;
   };
