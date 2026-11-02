@@ -722,7 +722,7 @@ module.exports = {
   "sinyal.range.outside.above": "Price is already above the range, wait for a {tf} close to confirm",
   "sinyal.range.outside.below": "Price is already below the range, wait for a {tf} close to confirm",
   "sinyal.range.narrow": "narrow range, easily broken by noise",
-  "sinyal.note.method": "ℹ️ Direction follows !bias per timeframe. Entry/SL/TP come from closed candles, ATR 14 and swing S/R levels; RR is calculated from the entry/SL/TP numbers. Not a prediction.",
+  "sinyal.note.method": "ℹ️ Signal direction is based only on EMA, RSI and MACD (same as !bias per timeframe). Entry/SL/TP come from closed candles, ATR 14 and swing S/R levels; RR is calculated from the entry/SL/TP numbers. Not a prediction.",
   "sinyal.disclaimer": "_Educational scenario from technical indicators, not a buy/sell call and not a guarantee. Levels are illustrative, decide your own risk._",
   "sinyal.headFx": "🎯 *SCENARIO {pair}* (v{ver})\nPrice: {price}",
   "sinyal.line.entrySlPip": "Entry {entry} ({elabel}) | SL {sl} ({slPct}, {slPips} pips)",

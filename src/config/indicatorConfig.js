@@ -34,16 +34,20 @@ const INDICATOR_CONFIG = Object.freeze({
  * (komponen tanpa data dilewati, bobot dinormalisasi ulang, bukan dihitung 0).
  */
 const BIAS_CONFIG = Object.freeze({
-  VERSION: 2,
+  VERSION: 3, // v3: sinyal HANYA dari EMA + RSI + MACD (mood pasar, tren BTC, OI/funding dimatikan)
   // Bobot komponen per TF (total 1.00).
+  // Komponen berbobot 0 = nonaktif: dilewati total (tidak dihitung, tidak ditampilkan sebagai N/A, data pendukungnya tidak diambil).
+  // EMA = trend (posisi harga vs EMA 20/50/200) + cross (golden/death cross 20/50 & 50/200).
+  // Rasio antar komponen sama dengan v2 (.30/.15/.10/.15 dinormalisasi ke total 1.00), jadi karakter skor tidak berubah.
+  // Mau menyalakan lagi: isi bobot mood / btc / oiFunding > 0 (naikkan VERSION).
   WEIGHTS: Object.freeze({
-    trend: 0.3,
-    cross: 0.15,
-    rsi: 0.1,
-    macd: 0.15,
-    mood: 0.1,
-    btc: 0.1,
-    oiFunding: 0.1,
+    trend: 0.43,
+    cross: 0.21,
+    rsi: 0.14,
+    macd: 0.22,
+    mood: 0,
+    btc: 0,
+    oiFunding: 0,
   }),
   // Ambang bias (eksklusif): skor > BULL = bullish, skor < BEAR = bearish, selain itu netral.
   BULL: 0.25,

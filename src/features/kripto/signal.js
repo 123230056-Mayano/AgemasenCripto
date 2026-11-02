@@ -37,7 +37,7 @@
 const { t } = require("../../i18n");
 const { SIGNAL_CONFIG: CFG } = require("../../config/indicatorConfig");
 const { computeEmas, atr: atrSeries } = require("./indicators");
-const { computeOverallBias, collectBias, confidenceLevel, parseBiasArgs, BIAS_TFS } = require("./bias");
+const { computeOverallBias, collectBias, confidenceLevel, parseBiasArgs, needsMarketSnapshot, BIAS_TFS } = require("./bias");
 const { computeProbability, formatProbLine, formatProbBasis, PROB_VERSION } = require("./probability");
 const sudden = require("./suddenMove");
 const { reasonText } = require("./suddenMoveText");
@@ -526,7 +526,7 @@ async function runSinyal(sock, msg, ctx, { coin, tfs, allCoins, only }) {
 
   const tick = await market.fetchTicker(); // koin tidak dikenal -> UnsupportedCoinError (ditangani handler)
 
-  if (!isFx && tfs.some((tf) => !stat.isSnapshotWarm(tf))) {
+  if (!isFx && needsMarketSnapshot() && tfs.some((tf) => !stat.isSnapshotWarm(tf))) {
     await sock.sendMessage(jid, { text: t(lang, "sinyal.scanning", { coin }) }, { quoted: msg });
   }
 

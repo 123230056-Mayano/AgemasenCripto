@@ -26,6 +26,8 @@
  *                   lintas TF (computeOverallBias, bobot TF 15m .10 / 1H .20 / 4H .30 / 1D .40);
  *                   collectBias() dipisah dari runBias agar bisa dipakai ulang 08 dan 09.
  *                   Skor per komponen dan per TF TIDAK berubah dari v1.
+ *   v3 (2026-11-03) sinyal HANYA dari EMA (trend + cross), RSI, dan MACD. Mood pasar, tren BTC, OI/funding berbobot 0
+ *                   (config) -> dilewati, snapshot semua koin tidak lagi diambil. Fungsi skor tidak berubah.
  */
 
 const { t } = require("../../i18n");
@@ -61,6 +63,9 @@ const BIAS_CONF_MID = CFG.CONF_MID;
 const BIAS_REASON_MIN = CFG.REASON_MIN; // komponen dengan |bobot*skor| di bawah ini tidak ditampilkan di alasan
 const BIAS_REASON_MAX = CFG.REASON_MAX;
 const BIAS_TF_WEIGHTS = CFG.TF_WEIGHTS; // bobot TF untuk bias keseluruhan
+
+/** Snapshot semua koin (mood pasar + tren BTC) hanya perlu diambil kalau salah satu komponennya aktif (bobot > 0). */
+const needsMarketSnapshot = () => (BIAS_WEIGHTS.mood ?? 0) > 0 || (BIAS_WEIGHTS.btc ?? 0) > 0;
 
 const BIAS_TFS = ["15M", "1H", "4H", "1D"]; // urutan tampilan (sama dengan !mtf)
 const TF_LABEL = { "15M": "15m", "1H": "1H", "4H": "4H", "1D": "1D" };
@@ -430,7 +435,10 @@ function formatBias(lang, { coin, price, rows, reasonTf, reasonResult, limitedAn
     if (lines.length) parts.push(t(lang, "bias.reasonsHead", { tf: TF_LABEL[reasonTf] }), ...lines);
     // N/A hanya untuk data yang memang tidak ada. "Tidak ada cross baru" bukan N/A, dan tren BTC
     // memang dilewati saat koinnya BTC sendiri.
-    const na = reasonResult.skipped.filter((k) => k !== "cross" && !(k === "btc" && coin === "BTC")).map((k) => t(lang, `bias.comp.${k}`));
+    // Komponen yang sengaja dimatikan (bobot 0) tidak ditampilkan sebagai N/A.
+    const na = reasonResult.skipped
+      .filter((k) => k !== "cross" && (BIAS_WEIGHTS[k] ?? 0) > 0 && !(k === "btc" && coin === "BTC"))
+      .map((k) => t(lang, `bias.comp.${k}`));
     if (na.length) parts.push(t(lang, "bias.na", { list: na.join(", ") }));
   }
   const notes = [];
@@ -466,7 +474,7 @@ async function collectBias(coin, tfs, ctx) {
   return Promise.all(
     tfs.map(async (tf) => {
       let snapshot = null;
-      if (!mkt?.noSnapshot) {
+      if (!mkt?.noSnapshot && needsMarketSnapshot()) {
         try {
           snapshot = await stat.getSnapshot(ctx.lang, tf); // gagal -> mood & BTC dilewati
         } catch {
@@ -496,7 +504,7 @@ async function runBias(sock, msg, ctx, { coin, tfs }) {
   const tick = await fetchTicker(coin); // koin tidak dikenal -> UnsupportedCoinError (ditangani handler)
 
   // Satu pesan "memindai" saja kalau ada snapshot yang belum hangat.
-  if (tfs.some((tf) => !stat.isSnapshotWarm(tf))) {
+  if (needsMarketSnapshot() && tfs.some((tf) => !stat.isSnapshotWarm(tf))) {
     await sock.sendMessage(jid, { text: t(lang, "bias.scanning", { coin }) }, { quoted: msg });
   }
 
@@ -556,6 +564,7 @@ const BIAS_RUNNERS = { bias: runBias };
 module.exports = {
   BIAS_VERSION,
   BIAS_WEIGHTS,
+  needsMarketSnapshot,
   BIAS_BULL,
   BIAS_BEAR,
   BIAS_TF_WEIGHTS,

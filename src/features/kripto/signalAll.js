@@ -97,6 +97,7 @@ function groupByTf(coins, tf) {
 
 async function collectAllUncached(lang, tfs) {
   const { collectSignal } = require("./signal");
+  const { needsMarketSnapshot } = require("./bias");
   const stat = require("./statistik");
 
   const list = await getAvailableCoins(lang);
@@ -111,7 +112,7 @@ async function collectAllUncached(lang, tfs) {
   }
 
   // Hangatkan snapshot mood pasar & BTC per TF satu kali (bukan dibangun berebutan oleh tiap koin).
-  await Promise.all(tfs.map((tf) => stat.getSnapshot(lang, tf).catch(() => null)));
+  if (needsMarketSnapshot()) await Promise.all(tfs.map((tf) => stat.getSnapshot(lang, tf).catch(() => null)));
 
   const results = await mapLimit(list, CONCURRENCY, async (c) => {
     const lv = live.get(c.ticker);

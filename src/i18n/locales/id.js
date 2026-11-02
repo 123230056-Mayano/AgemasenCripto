@@ -722,7 +722,7 @@ module.exports = {
   "sinyal.range.outside.above": "Harga sudah di atas range, tunggu close {tf} untuk konfirmasi",
   "sinyal.range.outside.below": "Harga sudah di bawah range, tunggu close {tf} untuk konfirmasi",
   "sinyal.range.narrow": "range sempit, mudah tertembus noise",
-  "sinyal.note.method": "ℹ️ Arah mengikuti !bias per timeframe. Entry/SL/TP dihitung dari candle closed, ATR 14, dan level swing S/R; RR dihitung dari angka entry/SL/TP. Bukan prediksi.",
+  "sinyal.note.method": "ℹ️ Arah sinyal hanya dari EMA, RSI, dan MACD (sama dengan !bias per timeframe). Entry/SL/TP dihitung dari candle closed, ATR 14, dan level swing S/R; RR dihitung dari angka entry/SL/TP. Bukan prediksi.",
   "sinyal.disclaimer": "_Skenario edukasi dari indikator teknikal, bukan ajakan beli/jual dan bukan jaminan hasil. Level hanya ilustrasi, tentukan sendiri risikomu._",
   "sinyal.headFx": "🎯 *SKENARIO {pair}* (v{ver})\nHarga: {price}",
   "sinyal.line.entrySlPip": "Entry {entry} ({elabel}) | SL {sl} ({slPct}, {slPips} pip)",
