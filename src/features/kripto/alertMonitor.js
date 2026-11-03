@@ -12,6 +12,7 @@
  *   - ringkasan harian (!harian): dikirim sekali per hari pada jam pilihan user.
  *   - alarm skenario sinyal (!alertsignal): skenario LONG / SHORT baru seperti !signal, hanya konfirmasi (candle closed). Mesinnya di signalAlertEngine.js.
  *   - alarm titik balik S/R (!alertsnr): reject / tembus (default), wick / sweep (opt-in), hanya konfirmasi (candle closed). Mesinnya di snrAlertEngine.js.
+ *   - alarm Farley (!alertfarley): skenario BUY / SELL baru dari candle closed; tiap kejadian dikirim sebagai gambar chart + caption (teks saja kalau chart gagal). Mesinnya di farleyAlertEngine.js.
  *   - peringatan posisi (!posisi): WASPADA / CUT / time stop / saran break-even. Mesinnya di positionEngine.js.
  *   - alarm Higher High / Lower Low (!alerthhll): swing baru (dini) + close menembus swing (konfirmasi), dari candle closed.
  *     Mesinnya di hhllAlertEngine.js; banyak kejadian dikirim sebagai 1 PDF per penerima.
@@ -68,6 +69,7 @@ const { createAdvEngine } = require("./advAlertEngine");
 const { createSnrEngine } = require("./snrAlertEngine");
 const { createSignalEngine } = require("./signalAlertEngine");
 const { createFarleyEngine } = require("./farleyAlertEngine");
+const { renderFarleyPng } = require("./farley");
 const { createPositionEngine } = require("./positionEngine");
 const { createHhllEngine } = require("./hhllAlertEngine");
 const { createPatternEngine } = require("./patternAlertEngine");
@@ -640,10 +642,13 @@ const checkSignalAlerts = (now) => (sockRef ? signalEngine.tick(now) : undefined
 
 // ---------- alarm Farley (!alertfarley) ----------
 // Kripto saja (candle Binance); konteks TF besar diambil engine sendiri.
+// Tiap skenario dikirim sebagai gambar chart (candle + ribbon SMA + Bollinger + Stochastic + zona SL/TP) + caption; chart gagal -> teks saja.
 const farleyEngine = createFarleyEngine({
   store,
   fetchCandles,
   notify,
+  notifyImage,
+  renderChart: (ev, lang) => renderFarleyPng(lang, { closed: ev.closed, coin: ev.coin, tf: ev.tf, sc: ev.sc }),
   langFor,
   isUnsupported: (err) => err instanceof UnsupportedCoinError,
 });

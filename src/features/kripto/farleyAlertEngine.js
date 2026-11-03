@@ -27,10 +27,14 @@ function defaultAnalyze(candles, ctxRaw, tf) {
 }
 
 /**
+ * Bila notifyImage + renderChart disuntik, tiap kejadian dikirim sebagai SATU gambar chart + caption (teks saja kalau chart gagal
+ * dibuat / dikirim). Tanpa keduanya, perilaku lama: teks, beberapa blok per pesan.
  * @param {{
  *   store: object,   // cryptoStore (allFarleyAlerts, getWatch, wasSent, markSent, persist)
  *   fetchCandles: (coin:string, tf:string, opts?:object) => Promise<object[]>,
  *   notify: (chat:string, userJid:string, text:string) => Promise<boolean>,
+ *   notifyImage?: (chat:string, userJid:string, png:Buffer, caption:string) => Promise<boolean>,
+ *   renderChart?: (ev:object, lang:string) => Buffer|Promise<Buffer>,   // ev.closed = candle closed, ev.sc = skenario
  *   langFor: (chat:string, userJid:string) => string,
  *   analyze?: (candles:object[], ctxRaw:object[]|null, tf:string) => object,
  *   isUnsupported?: (err:Error) => boolean,
@@ -39,6 +43,8 @@ function defaultAnalyze(candles, ctxRaw, tf) {
  */
 function createFarleyEngine(deps) {
   const { store, fetchCandles, notify, langFor } = deps;
+  const notifyImage = deps.notifyImage || null;
+  const renderChart = deps.renderChart || null;
   const analyze = deps.analyze || defaultAnalyze;
   const isUnsupported = deps.isUnsupported || (() => false);
   const sleep = deps.sleep || defaultSleep;
@@ -96,15 +102,58 @@ function createFarleyEngine(deps) {
       candleT: X.t,
       closeMs: X.t + tfMs,
       sc: sc.cur,
+      closed,
       key,
       commit: () => store.markSent([key]),
     });
     return out;
   }
 
+  /** Chart satu kejadian; null kalau tidak ada renderer atau gagal (kejadian tetap dikirim sebagai teks). */
+  async function chartFor(ev, lang) {
+    if (!renderChart || !notifyImage) return null;
+    try {
+      return await renderChart(ev, lang);
+    } catch (err) {
+      log(`[farleyalert] chart ${ev.coin} ${ev.tf} gagal, kirim teks saja:`, err.message);
+      return null;
+    }
+  }
+
+  /** Satu kejadian = satu pesan: gambar chart + caption (atau teks saja kalau chart tidak ada / gagal terkirim). */
+  async function sendEvent(chat, userJid, ev, lang) {
+    const caption = buildFarleyAlertText(lang, [ev], { ms: ev.closeMs });
+    const png = await chartFor(ev, lang);
+    if (png && (await notifyImage(chat, userJid, png, caption))) return true;
+    if (png) log(`[farleyalert] gambar ${ev.coin} ${ev.tf} gagal terkirim, coba kirim teks`);
+    return notify(chat, userJid, caption);
+  }
+
   async function deliver(chat, userJid, events) {
     const lang = langFor(chat, userJid);
     const res = { sent: 0, failed: 0, deferred: 0 };
+
+    // Dengan chart: satu pesan per kejadian. Jatah pesan per jam habis -> sisanya ditunda ke putaran berikutnya.
+    if (renderChart && notifyImage) {
+      const sorted = sortEvents(events);
+      for (let i = 0; i < sorted.length; i++) {
+        if (limiter.remaining(chat) < 1) {
+          res.deferred += sorted.length - i;
+          break;
+        }
+        const ok = await sendEvent(chat, userJid, sorted[i], lang);
+        if (!ok) {
+          res.failed++;
+          break;
+        }
+        limiter.record(chat);
+        res.sent++;
+        sorted[i].commit();
+        if (CFG.SEND_GAP_MS && i < sorted.length - 1) await sleep(CFG.SEND_GAP_MS);
+      }
+      return res;
+    }
+
     const parts = chunk(sortEvents(events), CFG.BLOCKS_PER_MSG);
     for (let i = 0; i < parts.length; i++) {
       if (limiter.remaining(chat) < 1) {

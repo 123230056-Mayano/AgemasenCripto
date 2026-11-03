@@ -695,6 +695,9 @@ const FARLEY_CONFIG = Object.freeze({
   VOL_MULT: 1.5,
   MIN_CANDLES: 60,
   MIN_HTF_CANDLES: 60, // MACD butuh jauh lebih banyak candle dari periodenya agar stabil
+  // --- tampilan chart (!farley dan !alertfarley) ---
+  CHART_BARS: _posInt(process.env.FARLEY_CHART_BARS, 90), // candle yang digambar
+  CHART_PLAN_SLOTS: 12, // ruang kosong di kanan candle terakhir untuk zona SL/TP
 });
 
 const FARLEY_ALERT_CONFIG = Object.freeze({

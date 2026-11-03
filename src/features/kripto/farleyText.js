@@ -133,4 +133,29 @@ function buildFarleyFooter(lang, { ctxTf }) {
   ].join("\n");
 }
 
-module.exports = { buildFarleyBlock, buildFarleyFooter };
+/**
+ * Label teks untuk chart Farley (farleyChart.js): status singkat berwarna + nama level. Tanpa markdown / emoji
+ * karena digambar di canvas.
+ * @returns {{title:string, status:string, tone:string, entry:string, sl:string, tp1:string, tp2:string, brk:string, tp2Out:string, stoch:string, foot:string}}
+ */
+function chartLabels(lang, sc) {
+  const tone = sc && ["buy", "sell", "wait", "range", "nodata"].includes(sc.status) ? sc.status : "nodata";
+  let status = t(lang, `farleychart.st.${tone}`);
+  if ((tone === "buy" || tone === "sell") && sc.trigger) status += ` | ${t(lang, `farleychart.trigger.${sc.trigger}`)}`;
+  else if (tone === "wait" && sc.why) status += ` | ${t(lang, `farleychart.why.${sc.why}`)}`;
+  return {
+    title: t(lang, "farleychart.title"),
+    status,
+    tone,
+    entry: t(lang, "farleychart.entry"),
+    sl: "SL",
+    tp1: "TP1",
+    tp2: "TP2",
+    brk: t(lang, "farleychart.brk"),
+    tp2Out: "",
+    stoch: t(lang, "farleychart.stoch", { sm: CFG.STOCH_SMOOTH, d: CFG.STOCH_D }),
+    foot: t(lang, "farleychart.foot"),
+  };
+}
+
+module.exports = { buildFarleyBlock, buildFarleyFooter, chartLabels };
