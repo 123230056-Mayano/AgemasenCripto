@@ -74,7 +74,7 @@ const posInt = (v, d) => (Number.isInteger(Number(v)) && Number(v) > 0 ? Number(
 const MAX_DIV_ALERTS = posInt(process.env.DIV_ALERT_MAX_PER_USER, 10);
 const MAX_DIV_ALERTS_PER_CHAT = posInt(process.env.DIV_ALERT_MAX_PER_CHAT, 20);
 // Batas alarm indikator lanjutan (!alertind, item 10); angka sama dengan ADV_ALERT_CONFIG.
-const { ADV_ALERT_CONFIG, SNR_ALERT_CONFIG, SIGNAL_ALERT_CONFIG, HHLL_ALERT_CONFIG, AMD_ALERT_CONFIG, DUSDT_ALERT_CONFIG, POSITION_CONFIG, PATTERN_ALERT_CONFIG } = require("../config/indicatorConfig");
+const { ADV_ALERT_CONFIG, SNR_ALERT_CONFIG, SIGNAL_ALERT_CONFIG, HHLL_ALERT_CONFIG, AMD_ALERT_CONFIG, DUSDT_ALERT_CONFIG, POSITION_CONFIG, PATTERN_ALERT_CONFIG, FARLEY_ALERT_CONFIG } = require("../config/indicatorConfig");
 const MAX_ADV_ALERTS = ADV_ALERT_CONFIG.MAX_PER_USER;
 const MAX_ADV_ALERTS_PER_CHAT = ADV_ALERT_CONFIG.MAX_PER_CHAT;
 // Batas alarm titik balik S/R (!alertsnr); angka sama dengan SNR_ALERT_CONFIG.
@@ -83,6 +83,9 @@ const MAX_SNR_ALERTS_PER_CHAT = SNR_ALERT_CONFIG.MAX_PER_CHAT;
 // Batas alarm skenario sinyal (!alertsignal); angka sama dengan SIGNAL_ALERT_CONFIG.
 const MAX_SIGNAL_ALERTS = SIGNAL_ALERT_CONFIG.MAX_PER_USER;
 const MAX_SIGNAL_ALERTS_PER_CHAT = SIGNAL_ALERT_CONFIG.MAX_PER_CHAT;
+// Batas alarm Farley (!alertfarley); angka sama dengan FARLEY_ALERT_CONFIG.
+const MAX_FARLEY_ALERTS = FARLEY_ALERT_CONFIG.MAX_PER_USER;
+const MAX_FARLEY_ALERTS_PER_CHAT = FARLEY_ALERT_CONFIG.MAX_PER_CHAT;
 
 // Batas posisi (!posisi); angka sama dengan POSITION_CONFIG.
 const MAX_POSITIONS = POSITION_CONFIG.MAX_PER_USER;
@@ -140,7 +143,7 @@ let failures = 0;
 let started = false;
 
 // ---------- helper ----------
-const isEmpty = (u) => !u || (!u.watch?.length && !u.alerts?.length && !u.divAlerts?.length && !u.advAlerts?.length && !u.snrAlerts?.length && !u.signalAlerts?.length && !u.hhllAlerts?.length && !u.patternAlerts?.length && !u.amdAlerts?.length && !u.dusdtAlerts?.length && !u.positions?.length && !u.daily && !u.tf);
+const isEmpty = (u) => !u || (!u.watch?.length && !u.alerts?.length && !u.divAlerts?.length && !u.advAlerts?.length && !u.snrAlerts?.length && !u.signalAlerts?.length && !u.farleyAlerts?.length && !u.hhllAlerts?.length && !u.patternAlerts?.length && !u.amdAlerts?.length && !u.dusdtAlerts?.length && !u.positions?.length && !u.daily && !u.tf);
 const snap = (jid) => (isEmpty(users[jid]) ? null : JSON.stringify(users[jid]));
 const hasPending = () => dirtyUsers.size > 0 || dirtyClosed.size > 0 || dirtySent.size > 0 || pruneBefore != null;
 
@@ -451,6 +454,8 @@ function user(jid) {
   if (!u.nextSnrId) u.nextSnrId = 1;
   if (!Array.isArray(u.signalAlerts)) u.signalAlerts = [];
   if (!u.nextSignalId) u.nextSignalId = 1;
+  if (!Array.isArray(u.farleyAlerts)) u.farleyAlerts = [];
+  if (!u.nextFarleyId) u.nextFarleyId = 1;
   if (!Array.isArray(u.hhllAlerts)) u.hhllAlerts = [];
   if (!u.nextHhllId) u.nextHhllId = 1;
   // v2 (konteks HHLL): field baru diberi default "mati" supaya alarm lama berperilaku persis seperti sebelumnya
@@ -892,6 +897,63 @@ function allSignalAlerts() {
   return out;
 }
 
+// ---------- alarm Farley (!alertfarley) ----------
+/**
+ * farleyAlerts: [{ id: "f1", chat, coin: "BTC"|"WATCHLIST", tf, dirs: ["buy","sell"], createdAt, active: true }]
+ * Hanya candle closed; hanya status BUY / SELL yang dikabari. Penanda kejadian terkirim memakai wasSent / markSent.
+ */
+const getFarleyAlerts = (jid) => [...user(jid).farleyAlerts];
+
+/** @returns {object|"full"|"chatFull"|"exists"} */
+function addFarleyAlert(jid, sub) {
+  const u = user(jid);
+  if (u.farleyAlerts.some((a) => a.chat === sub.chat && a.coin === sub.coin && a.tf === sub.tf && sameList(a.dirs, sub.dirs))) return "exists";
+  if (u.farleyAlerts.length >= MAX_FARLEY_ALERTS) return "full";
+  if (countFarleyAlertsInChat(sub.chat) >= MAX_FARLEY_ALERTS_PER_CHAT) return "chatFull";
+  const entry = { ...sub, id: `f${u.nextFarleyId++}`, createdAt: Date.now(), active: true };
+  u.farleyAlerts.push(entry);
+  save(jid);
+  return entry;
+}
+
+function countFarleyAlertsInChat(chat) {
+  let n = 0;
+  for (const u of Object.values(users)) for (const a of u.farleyAlerts || []) if (a.chat === chat) n++;
+  return n;
+}
+
+/** id boleh "f3" / "F3" / "3". @returns {boolean} */
+function removeFarleyAlert(jid, id) {
+  const u = user(jid);
+  const want = /^\d+$/.test(String(id)) ? `f${id}` : String(id).toLowerCase();
+  const i = u.farleyAlerts.findIndex((a) => a.id === want);
+  if (i < 0) return false;
+  u.farleyAlerts.splice(i, 1);
+  prune(jid);
+  save(jid);
+  return true;
+}
+
+/** @returns {number} jumlah alarm yang dihapus */
+function clearFarleyAlerts(jid) {
+  const u = user(jid);
+  const n = u.farleyAlerts.length;
+  if (!n) return 0;
+  u.farleyAlerts = [];
+  prune(jid);
+  save(jid);
+  return n;
+}
+
+/** Semua alarm Farley aktif semua user (untuk monitor). */
+function allFarleyAlerts() {
+  const out = [];
+  for (const [jid, u] of Object.entries(users)) {
+    for (const a of u.farleyAlerts || []) if (a.active !== false) out.push({ userJid: jid, sub: a });
+  }
+  return out;
+}
+
 // ---------- posisi pengguna (!posisi) ----------
 /**
  * positions: [{ id: "p1", chat, coin, tf, dir: "long"|"short", entry, sl, sl0, tp1, openedAt, active: true,
@@ -1240,6 +1302,8 @@ module.exports = {
   MAX_DUSDT_ALERTS_PER_CHAT,
   MAX_SIGNAL_ALERTS,
   MAX_SIGNAL_ALERTS_PER_CHAT,
+  MAX_FARLEY_ALERTS,
+  MAX_FARLEY_ALERTS_PER_CHAT,
   MAX_POSITIONS,
   MAX_POSITIONS_PER_CHAT,
   MAX_HHLL_ALERTS,
@@ -1287,6 +1351,12 @@ module.exports = {
   clearSignalAlerts,
   allSignalAlerts,
   countSignalAlertsInChat,
+  getFarleyAlerts,
+  addFarleyAlert,
+  removeFarleyAlert,
+  clearFarleyAlerts,
+  allFarleyAlerts,
+  countFarleyAlertsInChat,
   getPositions,
   addPosition,
   updatePosition,

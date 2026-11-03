@@ -14,6 +14,7 @@
  *   !trenstate <koin> [tf|semua] -> lanjut tren / pullback sehat / waspada reversal / reversal terkonfirmasi / range + alasan + level batal (trenState.js). Alias: !ts, !pullback
  *   !pola <koin> [tf|semua] [detail] -> pola candlestick (engulfing, pin bar, doji, star, inside bar, tweezer, harami, piercing/dark cloud, marubozu, three soldiers/crows, three methods) di ekstrem swing / zona SNR, bukti bersyarat dengan level konfirmasi + batal (candlePatterns.js, patternCommand.js). Alias: !pattern. FOREX: pair dikenali otomatis (!pola eurusd 4h, !pola eur/usd, !pola xauusd semua; alias !fxpola), chart + teks seperti kripto; tanpa volume, ada catatan pasar tutup dan gap pembukaan
  *   !hhll <koin> [tf]    -> market structure Higher High / Higher Low / Lower High / Lower Low + status tren + chart (hhll.js). Alias: !struktur
+ *   !farley <koin> [tf]  -> pendekatan Alan S. Farley: ribbon SMA 5-8-13 + Bollinger 13,2 + Stochastic + MACD TF besar -> BUY / SELL / TUNGGU / RANGE + entry, SL, TP1, TP2 + alasan (farley.js, farleyCore.js)
  *   !ema <koin> [tf]     -> EMA 20/50/200 + posisi harga (di atas / di bawah)
  *   !movave <koin> [tf] [sma|ema] -> Moving Average SMA & EMA 20/50/200 + posisi harga + golden/death cross (movave.js). Alias: !ma, !movingaverage
  *   !tren <koin> [tf]    -> bullish / bearish / sideways (+ golden/death cross baru)
@@ -33,6 +34,7 @@
  *   !alertsnr <koin|watchlist> [tf] [reject|tembus|wick|sweep] [kuat] | list | off | hapus <id|semua>  (alarm titik balik S/R, snrAlertCommand.js)
  *   !alertsignal <koin|watchlist> [tf] [long|short] [tunggu] | list | off | hapus <id|semua>  (alarm skenario sinyal seperti !signal, signalAlertCommand.js). Alias: !alertsinyal
  *   !alertamd <koin|watchlist> [tf] [naik|turun] [dini|konfirmasi] [rr<tp1>:<tp2>] [sl <harga>] [tp <harga>] | list | off | hapus <id|semua>  (alarm AMD, amdAlertCommand.js)
+ *   !alertfarley <koin|watchlist> [tf] [buy|sell] | list | off | hapus <id|semua>  (alarm skenario Farley BUY / SELL baru, farleyAlertCommand.js)
  *   !alerthhll <koin|watchlist> [tf] [naik|turun] [dini|konfirmasi] [balik] | list | off | hapus <id|semua>  (alarm Higher High / Lower Low, hhllAlertCommand.js)
  *   !alertpola <koin|watchlist> [tf] [naik|turun] [dini|konfirmasi] [kuat] | list | off | hapus <id|semua>  (alarm pola baru / terkonfirmasi, patternAlertCommand.js). Alias: !alertpattern
  *   !alertdivergent (!alertdiv) <koin|semua|watchlist> [tf] [rsi|macd] | list | hapus <id|semua>
@@ -58,6 +60,7 @@ const { runSnr } = require("./snr");
 const { runFib, computeFib } = require("./fib");
 const { buildChartInsight } = require("./chartInsight");
 const { runHhll } = require("./hhll");
+const { runFarley } = require("./farley");
 const { runTrenState } = require("./trenStateCommand");
 const { runPola } = require("./patternCommand");
 const { ALL_RUNNERS } = require("./allPdf");
@@ -72,6 +75,7 @@ const { ADVALERT_COMMANDS, ADVALERT_RUNNERS, parseAdvAlertArgs } = require("./ad
 const { SNRALERT_COMMANDS, SNRALERT_RUNNERS, parseSnrAlertArgs } = require("./snrAlertCommand");
 const { SIGNALALERT_COMMANDS, SIGNALALERT_RUNNERS, parseSignalAlertArgs } = require("./signalAlertCommand");
 const { POSITION_COMMANDS, POSITION_RUNNERS, parsePositionCommandArgs } = require("./positionCommand");
+const { FARLEYALERT_COMMANDS, FARLEYALERT_RUNNERS, parseFarleyAlertArgs } = require("./farleyAlertCommand");
 const { HHLLALERT_COMMANDS, HHLLALERT_RUNNERS, parseHhllAlertArgs } = require("./hhllAlertCommand");
 const { PATALERT_COMMANDS, PATALERT_RUNNERS, parsePatternAlertArgs } = require("./patternAlertCommand");
 const { AMDALERT_COMMANDS, AMDALERT_RUNNERS, parseAmdAlertArgs } = require("./amdAlertCommand");
@@ -106,6 +110,7 @@ const COMMANDS = {
   snr: { re: /^!(?:snr|sr)(?:\s+([\s\S]*))?$/i, useTf: true, allTf: true },
   fib: { re: /^!(?:fib|fibo|fibonacci)(?:\s+([\s\S]*))?$/i, useTf: true, allTf: true },
   hhll: { re: /^!(?:hhll|struktur|structure)(?:\s+([\s\S]*))?$/i, useTf: true },
+  farley: { re: /^!farley(?:\s+([\s\S]*))?$/i, useTf: true },
   trenstate: { re: /^!(?:trenstate|ts|pullback)(?:\s+([\s\S]*))?$/i, useTf: true, allTf: true, allWords: ["ALL", "SEMUA"] },
   pola: { re: /^!(?:pola|pattern|fxpola|fxpattern)(?:\s+([\s\S]*))?$/i, useTf: true, allTf: true, allWords: ["ALL", "SEMUA"], types: ["DETAIL", "DETIL"] },
   ema: { re: /^!ema(?:\s+([\s\S]*))?$/i, useTf: true },
@@ -384,7 +389,7 @@ async function runBandingkan(sock, msg, { jid, lang, senderId }, { coin, coin2 }
   );
 }
 
-const RUNNERS = { chart: runChart, harga: runHarga, level: runLevel, snr: runSnr, fib: runFib, hhll: runHhll, trenstate: runTrenState, pola: runPola, ema: runEma, movave: runMovave, tren: runTren, mtf: runMtf, bandingkan: runBandingkan };
+const RUNNERS = { chart: runChart, harga: runHarga, level: runLevel, snr: runSnr, fib: runFib, hhll: runHhll, farley: runFarley, trenstate: runTrenState, pola: runPola, ema: runEma, movave: runMovave, tren: runTren, mtf: runMtf, bandingkan: runBandingkan };
 
 async function runList(sock, msg, { jid, lang }, keyword) {
   const all = await getAvailableCoins(lang);
@@ -531,6 +536,19 @@ async function handleKriptoCommand(sock, msg, { jid, text, lang }) {
       }
     }
   }
+  // Alarm Farley (!alertfarley: BUY / SELL baru dari ribbon SMA 5-8-13 + Bollinger + Stochastic + MACD, konfirmasi) -> lihat farleyAlertCommand.js
+  let isFarleyAlert = false;
+  if (!name) {
+    for (const [key, def] of Object.entries(FARLEYALERT_COMMANDS)) {
+      const m = text.match(def.re);
+      if (m) {
+        name = key;
+        match = m;
+        isFarleyAlert = true;
+        break;
+      }
+    }
+  }
   // Posisi pengguna + peringatan WASPADA / CUT (!posisi) -> lihat positionCommand.js
   let isPosition = false;
   if (!name) {
@@ -647,6 +665,7 @@ async function handleKriptoCommand(sock, msg, { jid, text, lang }) {
   else if (isAdvAlert) args = parseAdvAlertArgs(name, match[1] || "", getDefaultTf(senderId));
   else if (isSnrAlert) args = parseSnrAlertArgs(name, match[1] || "", getDefaultTf(senderId));
   else if (isSignalAlert) args = parseSignalAlertArgs(name, match[1] || "", getDefaultTf(senderId));
+  else if (isFarleyAlert) args = parseFarleyAlertArgs(name, match[1] || "", getDefaultTf(senderId));
   else if (isPosition) args = parsePositionCommandArgs(name, match[1] || "", getDefaultTf(senderId));
   else if (isHhllAlert) args = parseHhllAlertArgs(name, match[1] || "", getDefaultTf(senderId));
   else if (isPatAlert) args = parsePatternAlertArgs(name, match[1] || "", getDefaultTf(senderId));
@@ -711,6 +730,10 @@ async function handleKriptoCommand(sock, msg, { jid, text, lang }) {
     }
     if (isSignalAlert) {
       await SIGNALALERT_RUNNERS[name](sock, msg, { jid, lang, senderId }, args);
+      return true;
+    }
+    if (isFarleyAlert) {
+      await FARLEYALERT_RUNNERS[name](sock, msg, { jid, lang, senderId }, args);
       return true;
     }
     if (isPosition) {

@@ -650,4 +650,67 @@ const PATTERN_ALERT_CONFIG = Object.freeze({
   CONCURRENCY: _posInt(process.env.PATALERT_CONCURRENCY, 6),
 });
 
-module.exports = { PATTERN_ALERT_CONFIG, INDICATOR_CONFIG, BIAS_CONFIG, SIGNAL_CONFIG, PROB_CONFIG, SUDDEN_CONFIG, POSITION_CONFIG, ADV_ALERT_CONFIG, SNR_ALERT_CONFIG, SIGNAL_ALERT_CONFIG, HHLL_CONFIG, HHLL_CONTEXT_CONFIG, HHLL_BACKTEST_CONFIG, HHLL_ALERT_CONFIG, TRENSTATE_CONFIG, STRENGTH_CONFIG, GAUSSIAN_CONFIG, PATTERN_CONFIG, AMD_CONFIG, AMD_ALERT_CONFIG, DUSDT_ALERT_CONFIG };
+// =====================================================================
+// Farley (!farley / !alertfarley): ribbon SMA 5-8-13 + Bollinger 13,2 + Stochastic + MACD 12-26-9 (konteks TF besar).
+// Sumber teori: Teori_Indikator_Alan_Farley_untuk_Bot_rev1.pdf. Yang dari buku [Buku*]: BB 13 periode 2 SD, SMA 5 & 8 di atasnya,
+// stochastic smoothed five-bar, MACD 12-26-9. SEMUA ANGKA LAIN (smoothing stochastic, toleransi, SL/TP, rasio R) = DEFAULT SISTEM,
+// BUKAN setelan Farley, titik awal untuk diuji (backtest in-sample/out-of-sample + biaya) sebelum dipercaya. Naikkan VERSION kalau aturan diubah.
+// =====================================================================
+const FARLEY_CONFIG = Object.freeze({
+  VERSION: 1,
+  // --- dari teori ([Buku*] / [Buku]) ---
+  SMA_FAST: 5,
+  SMA_MID: 8,
+  SMA_SLOW: 13, // = garis tengah Bollinger (dihitung SEKALI, tidak dihitung ganda)
+  BB_PERIOD: 13,
+  BB_K: 2,
+  STOCH_N: 5,
+  MACD_FAST: 12,
+  MACD_SLOW: 26,
+  MACD_SIGNAL: 9,
+  HTF: Object.freeze({ "15M": "1H", "1H": "4H", "4H": "1D", "1D": null }), // konteks: 60 menit untuk 5 menit (peran Farley), digeser ke TF yang dipakai bot
+  // --- DEFAULT SISTEM (bukan setelan Farley) ---
+  STOCH_SMOOTH: 3, // %K lambat = SMA(%K mentah, 3)
+  STOCH_D: 3, // %D = SMA(%K lambat, 3)
+  STOCH_OB: 80,
+  STOCH_OS: 20,
+  SLOPE_BARS: 3, // kemiringan SMA = selisih dengan N candle lalu
+  SLOPE_MIN_ATR: _num(process.env.FARLEY_SLOPE_MIN_ATR, 0.1), // |kemiringan| minimal (x ATR) agar dianggap miring
+  RIBBON_MIN_ATR: _num(process.env.FARLEY_RIBBON_MIN_ATR, 0.3), // lebar ribbon |SMA5-SMA13| minimal (x ATR); di bawah ini = kompresi / sideways
+  TOUCH_ATR: _num(process.env.FARLEY_TOUCH_ATR, 0.15), // toleransi "menyentuh" SMA 8 (x ATR)
+  HUG_ATR: 0.3, // harga dianggap menempel di SMA 5 bila |close - SMA5| <= ini x ATR (informasi saja)
+  PULLBACK_BARS: 3, // jendela pullback (candle closed terakhir termasuk candle X)
+  BREAKOUT_BARS: 10, // breakout = close X di atas high tertinggi N candle sebelumnya (sebaliknya untuk SELL)
+  BW_LOOKBACK: 50, // pembanding bandwidth Bollinger
+  BW_SQUEEZE_PCT: 20, // persentil bandwidth <= ini = squeeze
+  BW_EXPAND_PCT: 80, // persentil bandwidth >= ini = ekspansi
+  SL_BUFFER_ATR: _num(process.env.FARLEY_SL_BUFFER_ATR, 0.25), // buffer di luar low/high swing pendek / SMA 13
+  SL_SWING_BARS: 3, // SL dasar = low/high N candle terakhir (aturan artikel: low/high candle breakout, diukur terhadap ATR)
+  MIN_RISK_ATR: _num(process.env.FARLEY_MIN_RISK_ATR, 0.8), // jarak SL minimal (x ATR); lebih sempit dilebarkan
+  MAX_RISK_ATR: _num(process.env.FARLEY_MAX_RISK_ATR, 3), // jarak SL maksimal (x ATR); lebih lebar = skenario TUNGGU (risiko terlalu besar)
+  TP1_R: _num(process.env.FARLEY_TP1_R, 1.5),
+  TP2_R: _num(process.env.FARLEY_TP2_R, 2.5),
+  MIN_RR_TO_LEVEL: 1, // level lawan terdekat harus memberi ruang >= ini x risiko, kalau tidak = TUNGGU
+  VOL_LOOKBACK: 20, // volume X dibanding rata-rata N candle sebelumnya (informasi saja)
+  VOL_MULT: 1.5,
+  MIN_CANDLES: 60,
+  MIN_HTF_CANDLES: 60, // MACD butuh jauh lebih banyak candle dari periodenya agar stabil
+});
+
+const FARLEY_ALERT_CONFIG = Object.freeze({
+  VERSION: 1,
+  CHECK_MS: Math.max(5_000, _posInt(process.env.FARLEY_ALERT_CHECK_MS, 15_000)),
+  INTERVAL_MS: Math.max(30_000, _posInt(process.env.FARLEY_ALERT_INTERVAL_MS, 60_000)),
+  MAX_PAIRS: _posInt(process.env.FARLEY_ALERT_MAX_PAIRS, 60),
+  FINAL_DELAY_MS: _posInt(process.env.FARLEY_ALERT_FINAL_DELAY_MS, 10_000),
+  COOLDOWN_CANDLES: Math.max(0, Math.floor(_num(process.env.FARLEY_ALERT_COOLDOWN_CANDLES, 3))),
+  MIN_CANDLES: 61, // FARLEY_CONFIG.MIN_CANDLES + 1 untuk pembanding candle sebelumnya
+  MAX_MSG_PER_CHAT_HOUR: _posInt(process.env.FARLEY_ALERT_MAX_MSG_PER_CHAT_HOUR, 20),
+  BLOCKS_PER_MSG: _posInt(process.env.FARLEY_ALERT_BLOCKS_PER_MSG, 3),
+  SEND_GAP_MS: _posInt(process.env.FARLEY_ALERT_SEND_GAP_MS, 1_000),
+  MAX_PER_USER: _posInt(process.env.FARLEY_ALERT_MAX_PER_USER, 10),
+  MAX_PER_CHAT: _posInt(process.env.FARLEY_ALERT_MAX_PER_CHAT, 20),
+  CONCURRENCY: _posInt(process.env.FARLEY_ALERT_CONCURRENCY, 8),
+});
+
+module.exports = { PATTERN_ALERT_CONFIG, INDICATOR_CONFIG, BIAS_CONFIG, SIGNAL_CONFIG, PROB_CONFIG, SUDDEN_CONFIG, POSITION_CONFIG, ADV_ALERT_CONFIG, SNR_ALERT_CONFIG, SIGNAL_ALERT_CONFIG, HHLL_CONFIG, HHLL_CONTEXT_CONFIG, HHLL_BACKTEST_CONFIG, HHLL_ALERT_CONFIG, TRENSTATE_CONFIG, STRENGTH_CONFIG, GAUSSIAN_CONFIG, PATTERN_CONFIG, AMD_CONFIG, AMD_ALERT_CONFIG, DUSDT_ALERT_CONFIG, FARLEY_CONFIG, FARLEY_ALERT_CONFIG };

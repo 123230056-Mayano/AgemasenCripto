@@ -67,6 +67,7 @@ const {
 const { createAdvEngine } = require("./advAlertEngine");
 const { createSnrEngine } = require("./snrAlertEngine");
 const { createSignalEngine } = require("./signalAlertEngine");
+const { createFarleyEngine } = require("./farleyAlertEngine");
 const { createPositionEngine } = require("./positionEngine");
 const { createHhllEngine } = require("./hhllAlertEngine");
 const { createPatternEngine } = require("./patternAlertEngine");
@@ -77,7 +78,7 @@ const { createAmdEngine } = require("./amdAlertEngine");
 const { renderAmdChart } = require("./amd");
 const { createDusdtEngine } = require("./dusdtAlertEngine");
 const { getDusdt, renderDusdtChart } = require("./dusdt");
-const { ADV_ALERT_CONFIG: ADV, SNR_ALERT_CONFIG: SNR, SIGNAL_ALERT_CONFIG: SIGCFG, HHLL_ALERT_CONFIG: HHLL, PATTERN_ALERT_CONFIG: PATCFG, AMD_ALERT_CONFIG: AMDCFG, DUSDT_ALERT_CONFIG: DUSDTCFG, POSITION_CONFIG: POSCFG } = require("../../config/indicatorConfig");
+const { ADV_ALERT_CONFIG: ADV, SNR_ALERT_CONFIG: SNR, SIGNAL_ALERT_CONFIG: SIGCFG, FARLEY_ALERT_CONFIG: FARCFG, HHLL_ALERT_CONFIG: HHLL, PATTERN_ALERT_CONFIG: PATCFG, AMD_ALERT_CONFIG: AMDCFG, DUSDT_ALERT_CONFIG: DUSDTCFG, POSITION_CONFIG: POSCFG } = require("../../config/indicatorConfig");
 
 const BINANCE = (process.env.BINANCE_BASE || "https://data-api.binance.vision").replace(/\/+$/, "");
 const POLL_MS = Math.max(10_000, Number(process.env.ALERT_POLL_MS) || 30_000);
@@ -102,6 +103,7 @@ let divBusy = false;
 let advBusy = false;
 let snrBusy = false;
 let signalBusy = false;
+let farleyBusy = false;
 let posBusy = false;
 let hhllBusy = false;
 let patBusy = false;
@@ -636,6 +638,19 @@ const signalEngine = createSignalEngine({
 /** Pemeriksaan alarm skenario sinyal (konfirmasi). Dipanggil timer; aman dipanggil manual untuk uji. */
 const checkSignalAlerts = (now) => (sockRef ? signalEngine.tick(now) : undefined);
 
+// ---------- alarm Farley (!alertfarley) ----------
+// Kripto saja (candle Binance); konteks TF besar diambil engine sendiri.
+const farleyEngine = createFarleyEngine({
+  store,
+  fetchCandles,
+  notify,
+  langFor,
+  isUnsupported: (err) => err instanceof UnsupportedCoinError,
+});
+
+/** Pemeriksaan alarm Farley (konfirmasi). Dipanggil timer; aman dipanggil manual untuk uji. */
+const checkFarleyAlerts = (now) => (sockRef ? farleyEngine.tick(now) : undefined);
+
 // ---------- peringatan posisi (!posisi) ----------
 const positionEngine = createPositionEngine({
   store,
@@ -782,6 +797,18 @@ function setAlertSocket(sock) {
   }, SIGCFG.CHECK_MS).unref?.();
 
   setInterval(async () => {
+    if (farleyBusy) return;
+    farleyBusy = true;
+    try {
+      await checkFarleyAlerts();
+    } catch (err) {
+      console.log("[farleyalert] pengecekan gagal:", err.message);
+    } finally {
+      farleyBusy = false;
+    }
+  }, FARCFG.CHECK_MS).unref?.();
+
+  setInterval(async () => {
     if (posBusy) return;
     posBusy = true;
     try {
@@ -842,4 +869,4 @@ function setAlertSocket(sock) {
   }, DUSDTCFG.CHECK_MS).unref?.();
 }
 
-module.exports = { setAlertSocket, notifyImage, checkPriceAlerts, checkDaily, checkDivergence, checkAdvAlerts, checkSnrAlerts, checkSignalAlerts, checkPositions, checkHhllAlerts, checkPatternAlerts, checkAmdAlerts, checkDusdtAlerts, localNow, fetchPrices };
+module.exports = { setAlertSocket, notifyImage, checkPriceAlerts, checkDaily, checkDivergence, checkAdvAlerts, checkSnrAlerts, checkSignalAlerts, checkFarleyAlerts, checkPositions, checkHhllAlerts, checkPatternAlerts, checkAmdAlerts, checkDusdtAlerts, localNow, fetchPrices };
