@@ -534,6 +534,17 @@ function removeWatch(jid, coin) {
   return true;
 }
 
+/** Kosongkan watchlist (!unwatch all). @returns {number} jumlah koin yang dihapus */
+function clearWatch(jid) {
+  const u = user(jid);
+  const n = u.watch.length;
+  if (!n) return 0;
+  u.watch = [];
+  prune(jid);
+  save(jid);
+  return n;
+}
+
 // ---------- alert ----------
 const getAlerts = (jid) => [...user(jid).alerts];
 
@@ -560,6 +571,44 @@ function removeAlert(jid, id) {
   prune(jid);
   save(jid);
   return true;
+}
+
+/** Hapus semua alert harga + level milik user (yang tampil di !alerts). @returns {number} jumlah yang dihapus */
+function clearAlerts(jid) {
+  const u = user(jid);
+  const n = u.alerts.length;
+  if (!n) return 0;
+  u.alerts = [];
+  prune(jid);
+  save(jid);
+  return n;
+}
+
+/**
+ * Hapus SEMUA alert milik user dari semua jenis: harga/level (!alert, !alertlevel) dan alarm
+ * divergence, indikator, S/R, sinyal, Farley, HH/LL, pola, AMD, USDT.D. Posisi (!posisi) dan ringkasan harian TIDAK ikut.
+ * @returns {Object<string, number>} jumlah terhapus per jenis (hanya jenis yang ada isinya)
+ */
+function clearEveryAlert(jid) {
+  const kinds = {
+    price: clearAlerts,
+    div: clearDivAlerts,
+    adv: clearAdvAlerts,
+    snr: clearSnrAlerts,
+    signal: clearSignalAlerts,
+    farley: clearFarleyAlerts,
+    hhll: clearHhllAlerts,
+    pattern: clearPatternAlerts,
+    amd: clearAmdAlerts,
+    dusdt: clearDusdtAlerts,
+  };
+  const out = {};
+  for (const [kind, fn] of Object.entries(kinds)) {
+    const n = fn(jid);
+    if (n) out[kind] = n;
+  }
+  prune(jid); // clearX yang hasilnya 0 bisa meninggalkan objek user kosong
+  return out;
 }
 
 /** Semua alert semua user (untuk monitor). */
@@ -1322,10 +1371,13 @@ module.exports = {
   getWatch,
   addWatch,
   removeWatch,
+  clearWatch,
   getAlerts,
   addAlert,
   findLevelAlert,
   removeAlert,
+  clearAlerts,
+  clearEveryAlert,
   allAlerts,
   getDivAlerts,
   addDivAlert,

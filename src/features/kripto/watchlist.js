@@ -5,12 +5,12 @@
  * ------------------------------------------------------------------
  * Watchlist & alert (Command Kripto - Bagian 5). Pantauan pribadi per user:
  *   !watch <koin ...>      -> tambah satu/beberapa koin (!watch BTC ETH SOL), atau !watch all
- *   !unwatch <koin>        -> hapus koin dari watchlist
+ *   !unwatch <koin>        -> hapus koin dari watchlist; !unwatch all / semua -> kosongkan seluruh watchlist
  *   !watchlist [pdf]       -> watchlist + harga, % 24 jam, tren singkat (lebih dari WATCH_PDF_MIN koin = PDF)
  *   !alert <koin> <harga>  -> alert harga (arah naik/turun ditentukan dari harga sekarang)
  *   !alertlevel <koin>     -> alert otomatis dekat support/resistance terdekat
  *   !alerts                -> semua alert aktif + ID
- *   !hapusalert <id>       -> hapus alert
+ *   !hapusalert <id>       -> hapus alert; !hapusalert all / semua -> hapus SEMUA alert (semua jenis)
  *   !harian [jam]          -> langganan ringkasan harian (mis. !harian 07:30, default 08:00)
  *   !stopharian            -> berhenti langganan
  *
@@ -94,6 +94,8 @@ function parseWatchArgs(name, raw) {
       return { coins };
     }
     case "unwatch":
+      if (tokens.length === 1 && WATCH_ALL_TOKENS.has(tokens[0].toUpperCase())) return { all: true };
+    // eslint-disable-next-line no-fallthrough
     case "alertlevel": {
       const coin = tokens.length === 1 ? coinOf(tokens[0]) : null;
       return coin ? { coin } : null;
@@ -105,6 +107,7 @@ function parseWatchArgs(name, raw) {
       return coin && price ? { coin, price } : null;
     }
     case "hapusalert": {
+      if (tokens.length === 1 && WATCH_ALL_TOKENS.has(tokens[0].toUpperCase())) return { all: true };
       if (tokens.length !== 1 || !/^#?\d{1,6}$/.test(tokens[0])) return null;
       return { id: Number(tokens[0].replace("#", "")) };
     }
@@ -284,7 +287,12 @@ async function runWatch(sock, msg, { jid, lang, senderId }, { coin, coins, all }
   await say(sock, jid, msg, formatWatchSummary(lang, senderId, res, { unknown, failed }));
 }
 
-async function runUnwatch(sock, msg, { jid, lang, senderId }, { coin }) {
+async function runUnwatch(sock, msg, { jid, lang, senderId }, { coin, all }) {
+  if (all) {
+    const n = store.clearWatch(senderId);
+    await say(sock, jid, msg, t(lang, n ? "watch.clearedAll" : "watch.empty", { n }));
+    return;
+  }
   const ok = store.removeWatch(senderId, coin);
   await say(sock, jid, msg, t(lang, ok ? "watch.removed" : "watch.notFound", { coin }));
 }
@@ -404,7 +412,20 @@ async function runAlerts(sock, msg, { jid, lang, senderId }) {
   await say(sock, jid, msg, t(lang, "alert.list.body", { n: alerts.length, max: store.MAX_ALERTS, table: "```\n" + table + "\n```" }));
 }
 
-async function runHapusAlert(sock, msg, { jid, lang, senderId }, { id }) {
+const ALERT_KINDS = ["price", "div", "adv", "snr", "signal", "farley", "hhll", "pattern", "amd", "dusdt"];
+
+async function runHapusAlert(sock, msg, { jid, lang, senderId }, { id, all }) {
+  if (all) {
+    const res = store.clearEveryAlert(senderId);
+    const total = Object.values(res).reduce((a, b) => a + b, 0);
+    if (!total) {
+      await say(sock, jid, msg, t(lang, "alert.list.empty"));
+      return;
+    }
+    const lines = ALERT_KINDS.filter((k) => res[k]).map((k) => `• ${t(lang, `alert.kind.${k}`)}: ${res[k]}`);
+    await say(sock, jid, msg, t(lang, "alert.deletedAll", { n: total, list: lines.join("\n") }));
+    return;
+  }
   const ok = store.removeAlert(senderId, id);
   await say(sock, jid, msg, t(lang, ok ? "alert.deleted" : "alert.notFound", { id }));
 }
