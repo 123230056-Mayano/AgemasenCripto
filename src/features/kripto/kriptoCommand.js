@@ -34,7 +34,7 @@
  *   !alertsnr <koin|watchlist> [tf] [reject|tembus|wick|sweep] [kuat] | list | off | hapus <id|semua>  (alarm titik balik S/R, snrAlertCommand.js)
  *   !alertsignal <koin|watchlist> [tf] [long|short] [tunggu] | list | off | hapus <id|semua>  (alarm skenario sinyal seperti !signal, signalAlertCommand.js). Alias: !alertsinyal
  *   !alertamd <koin|watchlist> [tf] [naik|turun] [dini|konfirmasi] [rr<tp1>:<tp2>] [sl <harga>] [tp <harga>] | list | off | hapus <id|semua>  (alarm AMD, amdAlertCommand.js)
- *   !alertfarley <koin|pair|watchlist> [tf] [buy|sell] | list | off | hapus <id|semua>  (alarm skenario Farley BUY / SELL baru, farleyAlertCommand.js). FOREX: !alertfarley eurusd 1h (alias !alertfxfarley); watchlist tetap kripto saja
+ *   !alertfarley <koin|pair|watchlist> [tf] [buy|sell] | list | off | hapus <id|semua>  (alarm skenario Farley BUY / SELL baru, farleyAlertCommand.js). FOREX: !alertfarley eurusd 1h (alias !alertfxfarley); KATEGORI forex: !alertfarley major|cross|exotic|logam|forex 1h (semua pair kategori itu); watchlist tetap kripto saja
  *   !alerthhll <koin|watchlist> [tf] [naik|turun] [dini|konfirmasi] [balik] | list | off | hapus <id|semua>  (alarm Higher High / Lower Low, hhllAlertCommand.js)
  *   !alertpola <koin|watchlist> [tf] [naik|turun] [dini|konfirmasi] [kuat] | list | off | hapus <id|semua>  (alarm pola baru / terkonfirmasi, patternAlertCommand.js). Alias: !alertpattern
  *   !alertdivergent (!alertdiv) <koin|semua|watchlist> [tf] [rsi|macd] | list | hapus <id|semua>

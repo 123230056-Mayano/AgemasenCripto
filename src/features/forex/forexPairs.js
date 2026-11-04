@@ -55,6 +55,43 @@ function normalizePairText(raw) {
   return String(raw || "").replace(/\b([A-Za-z]{3})\s?[\/\-_]\s?([A-Za-z]{3})\b/g, (m, a, b) => (resolvePair(a + b) ? a + b : m));
 }
 
+// ---------- target kategori (alarm untuk satu kelompok pair sekaligus) ----------
+// Disimpan di langganan sebagai "@MAJOR" / "@CROSS" / "@METAL" / "@EXOTIC" / "@FOREX" (semua pair). Awalan "@" tidak mungkin
+// bentrok dengan ticker kripto atau nama pair. Daftar pair diambil dari PAIRS saat dipakai, jadi pair baru otomatis ikut.
+const CAT_ALIASES = Object.freeze({
+  major: "major", mayor: "major", majors: "major",
+  cross: "cross", crosses: "cross", silang: "cross",
+  metal: "metal", metals: "metal", logam: "metal", emas: "metal", gold: "metal",
+  exotic: "exotic", exotics: "exotic", eksotik: "exotic", eksotis: "exotic",
+  forex: "all", fx: "all",
+});
+const CAT_TARGET_RE = /^@(MAJOR|CROSS|METAL|EXOTIC|FOREX)$/;
+
+/** "major" / "Logam" / "forex" -> kunci kategori ("major" | "cross" | "metal" | "exotic" | "all"); bukan kategori -> null. */
+function resolveCategory(input) {
+  const k = String(input || "").trim().toLowerCase();
+  return Object.prototype.hasOwnProperty.call(CAT_ALIASES, k) ? CAT_ALIASES[k] : null;
+}
+
+/** Kunci kategori -> nilai yang disimpan di langganan ("major" -> "@MAJOR", "all" -> "@FOREX"). */
+const categoryTarget = (cat) => (cat === "all" ? "@FOREX" : `@${String(cat).toUpperCase()}`);
+
+const isCategoryTarget = (coin) => typeof coin === "string" && CAT_TARGET_RE.test(coin);
+
+/** "@MAJOR" -> "major", "@FOREX" -> "all"; bukan target kategori -> null. */
+function categoryOfTarget(coin) {
+  const m = isCategoryTarget(coin) ? coin.match(CAT_TARGET_RE) : null;
+  if (!m) return null;
+  return m[1] === "FOREX" ? "all" : m[1].toLowerCase();
+}
+
+/** Pair milik target kategori, urut sesuai PAIRS. Bila tf diberikan, pair yang tidak mendukung TF itu dibuang (USDIDR di 15m). */
+function pairsOfTarget(coin, tf = null) {
+  const cat = categoryOfTarget(coin);
+  if (!cat) return [];
+  return Object.keys(PAIRS).filter((p) => (cat === "all" || PAIRS[p].cat === cat) && (!tf || allowedTfs(p).includes(tf)));
+}
+
 const pairInfo = (pair) => PAIRS[pair] || null;
 const listPairs = () => Object.keys(PAIRS);
 
@@ -84,4 +121,4 @@ function roundPrice(pair, v) {
   return Math.round(v * f) / f;
 }
 
-module.exports = { PAIRS, TF_ORDER, USD_QUOTE, USD_BASE, resolvePair, normalizePairText, pairInfo, listPairs, allowedTfs, toPips, roundPrice };
+module.exports = { PAIRS, TF_ORDER, USD_QUOTE, USD_BASE, resolvePair, normalizePairText, resolveCategory, categoryTarget, isCategoryTarget, categoryOfTarget, pairsOfTarget, pairInfo, listPairs, allowedTfs, toPips, roundPrice };

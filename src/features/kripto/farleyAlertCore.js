@@ -15,6 +15,7 @@
 const { t } = require("../../i18n");
 const { FARLEY_ALERT_CONFIG: CFG } = require("../../config/indicatorConfig");
 const { TF_MS, TF_ORDER, TF_LABEL, COIN_WATCHLIST, fmtCandleTime } = require("./divAlertCore");
+const { resolveCategory, categoryTarget } = require("../forex/forexPairs");
 
 const DIRS = ["buy", "sell"];
 
@@ -40,7 +41,8 @@ const OFF_TOKENS = new Set(["off", "mati", "matikan"]);
 const ALL_TOKENS = new Set(["semua", "all"]);
 
 /**
- * !alertfarley <koin|watchlist> [tf] [buy|sell] | list | off | hapus <id|semua>
+ * !alertfarley <koin|pair|kategori|watchlist> [tf] [buy|sell] | list | off | hapus <id|semua>
+ * kategori forex: major | cross | exotic | logam (alias mayor, silang, eksotik, metal, emas, gold) | forex (semua pair)
  * @returns {object|null} null = format salah (-> tampilkan penjelasan command)
  */
 function parseFarleyAlertArgs(raw, defaultTf) {
@@ -67,6 +69,7 @@ function parseFarleyAlertArgs(raw, defaultTf) {
     else if (DIR_TOKENS[low]) dirs.push(DIR_TOKENS[low]);
     else if (coin == null) {
       if (WATCH_TOKENS.has(low)) coin = COIN_WATCHLIST;
+      else if (resolveCategory(low)) coin = categoryTarget(resolveCategory(low)); // major / cross / exotic / logam / forex -> semua pair kategori itu
       else if (ALL_TOKENS.has(low)) return { action: "noAll" };
       else if (COIN_RE.test(up)) coin = up;
       else return null;

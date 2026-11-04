@@ -22,7 +22,7 @@ const { TF_MS, COIN_WATCHLIST, ChatRateLimiter } = require("./divAlertCore");
 const { selectLivePairs } = require("./advAlertCore");
 const { runPool } = require("./advAlertEngine");
 const { ctxTfOf, applyMarketClosed } = require("./farleyCore");
-const { pairInfo } = require("../forex/forexPairs");
+const { pairInfo, isCategoryTarget, pairsOfTarget } = require("../forex/forexPairs");
 const { detectNewFarley, farleyKey, chunk, sortEvents, buildFarleyAlertText } = require("./farleyAlertCore");
 
 const defaultSleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -63,7 +63,12 @@ function createFarleyEngine(deps) {
   const lastRun = new Map(); // "COIN|TF" -> ms hitung terakhir
   const cache = new Map(); // "COIN|TF" -> { t, cur, prev }
 
-  const resolveCoins = ({ userJid, sub }) => (sub.coin === COIN_WATCHLIST ? store.getWatch(userJid) : [sub.coin]);
+  // Watchlist -> koin kripto milik user; kategori forex (@MAJOR dst.) -> pair kategori itu yang mendukung TF langganan; selain itu satu simbol.
+  const resolveCoins = ({ userJid, sub }) => {
+    if (sub.coin === COIN_WATCHLIST) return store.getWatch(userJid);
+    if (isCategoryTarget(sub.coin)) return pairsOfTarget(sub.coin, sub.tf);
+    return [sub.coin];
+  };
 
   function scenariosFor(coin, tf, closed, ctxRaw) {
     const X = closed[closed.length - 1];
