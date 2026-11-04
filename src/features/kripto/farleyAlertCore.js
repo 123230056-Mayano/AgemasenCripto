@@ -9,6 +9,7 @@
  *   skenario sebelumnya = dari candle closed tanpa X
  *   "baru"             = sekarang BUY/SELL sesuai pilihan DAN sebelumnya bukan arah yang sama
  * TUNGGU / RANGE tidak pernah dikirim.
+ * FOREX: event membawa `market` (adapter pasar forex): harga/level sesuai digits pair, SL/TP dalam pip, catatan sumber data di footer.
  */
 
 const { t } = require("../../i18n");
@@ -30,7 +31,7 @@ function detectNewFarley(cur, prev, sub) {
 const farleyKey = (chat, userJid, coin, tf, dir, candleT) => ["farleyalert", chat, userJid, coin, tf, dir, candleT].join("|");
 
 // ---------- parser ----------
-const COIN_RE = /^[A-Z0-9]{1,15}$/;
+const COIN_RE = /^[A-Z0-9]{1,15}$/; // koin kripto atau pair forex tanpa pemisah (EURUSD); "eur/usd" dinormalkan lebih dulu oleh pemanggil
 const DIR_TOKENS = { buy: "buy", long: "buy", naik: "buy", sell: "sell", short: "sell", turun: "sell" };
 const WATCH_TOKENS = new Set(["watchlist", "wl"]);
 const LIST_TOKENS = new Set(["list", "daftar", "ls"]);
@@ -92,7 +93,8 @@ function chunk(list, size = CFG.BLOCKS_PER_MSG) {
 function buildBlock(lang, ev) {
   const { fmtUsd } = require("./market");
   const { buildFarleyBlock } = require("./farleyText");
-  return buildFarleyBlock(lang, { coin: ev.coin, tf: ev.tf, tfLabel: TF_LABEL[ev.tf] || ev.tf, price: fmtUsd(ev.price), sc: ev.sc });
+  const mk = ev.market || null; // forex: adapter pasar (digits pair, pip); kripto null
+  return buildFarleyBlock(lang, { coin: ev.coin, tf: ev.tf, tfLabel: TF_LABEL[ev.tf] || ev.tf, price: mk ? mk.fmtPrice(ev.price) : fmtUsd(ev.price), sc: ev.sc, market: mk });
 }
 
 /** Teks satu pesan alarm. ms = waktu candle closed (tutup). */
@@ -102,7 +104,11 @@ function buildFarleyAlertText(lang, events, { ms, part = 1, parts = 1 }) {
   const blocks = sortEvents(events).map((ev) => buildBlock(lang, ev));
   const head = t(lang, "farleyalert.head", { time: fmtCandleTime(lang, ms), n: events.length });
   const partTag = parts > 1 ? ` (${part}/${parts})` : "";
-  const foot = [t(lang, "farleyalert.foot"), buildFarleyFooter(lang, { ctxTf: ctxTfOf(events[0].tf) })];
+  // Forex: catatan sumber data (+ emas = futures, + gap pembukaan) ikut di footer. Status pasar tidak perlu: alarm hanya terkirim saat pasar buka.
+  const fx = events.filter((e) => e.market);
+  const market = fx.length ? { proxy: fx.some((e) => e.market.proxy === "futures") ? "futures" : null } : null;
+  const gap = fx.some((e) => e.gap === true);
+  const foot = [t(lang, "farleyalert.foot"), buildFarleyFooter(lang, { ctxTf: ctxTfOf(events[0].tf), market, gap })];
   return `${head}${partTag}\n\n${blocks.join("\n\n")}\n\n${foot.join("\n")}`;
 }
 

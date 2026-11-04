@@ -14,7 +14,7 @@
 
 const { createCanvas } = require("@napi-rs/canvas");
 const { FARLEY_CONFIG: CFG } = require("../../config/indicatorConfig");
-const { C, fontFamily, fmtPrice, niceStep, tickLabel } = require("./chartKit");
+const { C, fontFamily, fmtPrice: fmtPriceCrypto, niceStep, tickLabel } = require("./chartKit");
 const { sma, bollinger, stochastic } = require("./farleyCore");
 
 const COL = {
@@ -49,12 +49,14 @@ const DEFAULT_LABELS = {
 const toneColor = (tone) => (tone === "buy" ? C.up : tone === "sell" ? C.down : tone === "range" ? COL.range : COL.wait);
 
 /**
- * @param {{candles:object[], coin:string, tf:string, sc:object, labels?:object}} p
+ * @param {{candles:object[], coin:string, tf:string, sc:object, labels?:object, market?:object|null}} p
  *   candles = candle CLOSED TF utama (yang sama dengan yang dinilai); sc = hasil computeFarley.
+ *   market = adapter pasar forex (judul = label pair tanpa "/USDT", harga sesuai digits pair); null = kripto seperti sebelumnya.
  * @returns {Buffer} PNG
  */
-function renderFarleyChart({ candles, coin, tf, sc, labels = {} }) {
+function renderFarleyChart({ candles, coin, tf, sc, labels = {}, market = null }) {
   if (!candles || candles.length < 30) throw new Error("CANDLES_TOO_FEW");
+  const fmtPrice = market && market.fmtPrice ? (v) => market.fmtPrice(v) : fmtPriceCrypto;
   const lb = { ...DEFAULT_LABELS, ...labels };
   const family = fontFamily();
   const plan = sc && sc.plan && (sc.status === "buy" || sc.status === "sell") ? sc.plan : null;
@@ -415,7 +417,7 @@ function renderFarleyChart({ candles, coin, tf, sc, labels = {} }) {
   g.textBaseline = "middle";
   g.font = `bold 28px ${family}`;
   g.fillStyle = C.title;
-  const title = `${coin}/USDT  ${tf}  ${lb.title}`;
+  const title = market ? `${market.label}${market.proxy === "futures" ? " (GC=F)" : ""}  ${tf}  ${lb.title}` : `${coin}/USDT  ${tf}  ${lb.title}`;
   g.fillText(title, Lm, 26);
   const titleW = g.measureText(title).width;
   const prev = candles[Math.max(0, n - 2)];

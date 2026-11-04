@@ -8,25 +8,29 @@
  *   !alertfarley btc 1h                 -> BUY + SELL
  *   !alertfarley eth 4h buy             -> hanya BUY
  *   !alertfarley sol 15m sell           -> hanya SELL
+ *   !alertfarley eurusd 1h              -> FOREX (juga eur/usd, xauusd; alias !alertfxfarley)
  *   !alertfarley watchlist 1h
  *   !alertfarley list | off | hapus <id|semua>
  *
  * Hanya membuat/melihat/menghapus langganan (state/cryptoStore.js). Pemeriksaan dan pengiriman ada di
- * farleyAlertEngine.js (dijalankan alertMonitor.js); aturan murninya di farleyAlertCore.js. Kripto saja (belum forex).
+ * farleyAlertEngine.js (dijalankan alertMonitor.js); aturan murninya di farleyAlertCore.js. Kripto dan forex (pair dikenali otomatis;
+ * TF 15m ditolak untuk USDIDR; saat pasar tutup tidak ada kiriman). Watchlist hanya kripto.
  */
 
 const { t } = require("../../i18n");
 const store = require("../../state/cryptoStore");
 const { withSyncNotice } = require("./syncNotice");
 const { fetchTicker } = require("./market");
+const { resolvePair, normalizePairText, allowedTfs } = require("../forex/forexPairs");
 const { COIN_WATCHLIST, TF_LABEL, DAILY_TZ_LABEL } = require("./divAlertCore");
 const { CFG, parseFarleyAlertArgs: parseCore, describeFarleyAlert } = require("./farleyAlertCore");
 
 const FARLEYALERT_COMMANDS = {
-  alertfarley: { re: /^!alertfarley(?:\s+([\s\S]*))?$/i },
+  alertfarley: { re: /^!(?:alertfarley|alertfxfarley)(?:\s+([\s\S]*))?$/i },
 };
 
-const parseFarleyAlertArgs = (name, raw, defaultTf) => parseCore(raw, defaultTf);
+// "eur/usd" -> "eurusd" (pair forex; parser koin menolak karakter "/")
+const parseFarleyAlertArgs = (name, raw, defaultTf) => parseCore(normalizePairText(raw), defaultTf);
 
 const pad = (s, n) => String(s).padEnd(n, " ");
 const say = (sock, jid, msg, text) => sock.sendMessage(jid, { text }, { quoted: msg });
@@ -35,7 +39,12 @@ const targetLabel = (lang, coin) => (coin === COIN_WATCHLIST ? t(lang, "divalert
 
 async function runCreate(sock, msg, { jid, lang, senderId }, args) {
   const { coin, tf, dirs } = args;
-  if (coin !== COIN_WATCHLIST) await fetchTicker(coin); // koin tidak ada di Binance -> UnsupportedCoinError (ditangani pemanggil)
+  const pair = coin === COIN_WATCHLIST ? null : resolvePair(coin);
+  if (pair) {
+    // Forex: TF yang tidak didukung ditolak (USDIDR mulai 1H); data Yahoo dicek dulu (gagal -> FOREX_DATA, ditangani pemanggil).
+    if (!allowedTfs(pair).includes(tf)) return say(sock, jid, msg, t(lang, "farley.fx.tfNotAllowed", { pair }));
+    await require("../forex/forexMarket").loadTicker(pair);
+  } else if (coin !== COIN_WATCHLIST) await fetchTicker(coin); // koin tidak ada di Binance -> UnsupportedCoinError (ditangani pemanggil)
 
   const entry = store.addFarleyAlert(senderId, { chat: jid, coin, tf, dirs });
   if (entry === "exists") return say(sock, jid, msg, t(lang, "farleyalert.exists"));
@@ -43,6 +52,7 @@ async function runCreate(sock, msg, { jid, lang, senderId }, args) {
   if (entry === "chatFull") return say(sock, jid, msg, t(lang, "farleyalert.chatFull", { max: store.MAX_FARLEY_ALERTS_PER_CHAT }));
 
   let note = "";
+  if (pair) note = "\n" + t(lang, "farleyalert.created.fx");
   if (coin === COIN_WATCHLIST) {
     const n = store.getWatch(senderId).length;
     if (n > CFG.MAX_PAIRS) note = "\n" + t(lang, "farleyalert.created.bigWatch", { n, max: CFG.MAX_PAIRS });

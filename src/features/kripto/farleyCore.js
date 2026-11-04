@@ -339,6 +339,22 @@ function computeFarley(candles, opts = {}) {
 }
 
 // =====================================================================
+// 3b. Pasar tutup (forex)
+// =====================================================================
+/**
+ * Pasar tutup (forex akhir pekan / data macet): BUY / SELL diturunkan jadi TUNGGU dengan alasan yang jelas, rencana entry/SL/TP
+ * dibuang karena belum bisa dieksekusi. RANGE / TUNGGU / data kurang tidak diubah. Mengembalikan objek BARU (sc asli utuh).
+ * Tanpa `status` (kripto, 24/7) tidak melakukan apa pun.
+ * @param {object} sc hasil computeFarley
+ * @param {{open:boolean, reason:string|null}|null|undefined} status dari market.status() / marketStatus()
+ */
+function applyMarketClosed(sc, status) {
+  if (!status || status.open !== false || !sc || (sc.status !== "buy" && sc.status !== "sell")) return sc;
+  const { plan, ctxAligned, ...rest } = sc;
+  return { ...rest, status: "wait", why: status.reason === "stale" ? "marketStale" : "marketClosed", heldFrom: sc.status };
+}
+
+// =====================================================================
 // 4. Konteks TF besar untuk pemanggil
 // =====================================================================
 /** Timeframe konteks (null untuk 1D). */
@@ -364,5 +380,6 @@ module.exports = {
   planLevels,
   ctxTfOf,
   closedContext,
+  applyMarketClosed,
   last,
 };

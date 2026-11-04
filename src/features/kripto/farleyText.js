@@ -10,11 +10,15 @@
 
 const { t } = require("../../i18n");
 const { FARLEY_CONFIG: CFG } = require("../../config/indicatorConfig");
-const { fmtLevel } = require("./market");
+const { fmtLevel: fmtLevelCrypto } = require("./market");
 
 const f1 = (v) => (typeof v === "number" && isFinite(v) ? v.toFixed(1) : "-");
 const f2 = (v) => (typeof v === "number" && isFinite(v) ? v.toFixed(2) : "-");
 const pct = (v) => (typeof v === "number" && isFinite(v) ? `${v.toFixed(2)}%` : "-");
+const fmtPips = (v) => (v == null ? null : v.toFixed(1).replace(/\.0$/, ""));
+
+/** Pemformat level: forex = presisi tetap pair (adapter pasar), kripto = market.js seperti sebelumnya. */
+const fmtOf = (market) => (market && market.fmtLevel ? market.fmtLevel : fmtLevelCrypto);
 
 function statusLine(lang, sc) {
   switch (sc.status) {
@@ -34,15 +38,23 @@ function reasonParams(lang, sc) {
   return { dir: t(lang, `farley.dir.${sc.dir === "buy" ? "buy" : "sell"}`) };
 }
 
-function planLines(lang, sc) {
+function planLines(lang, sc, market) {
   const p = sc.plan;
   if (!p) return [];
+  const fmtLevel = fmtOf(market);
+  // Forex: jarak SL/TP juga dalam pip (pair tanpa pip, mis. USDIDR, tampil seperti biasa).
+  const pipOf = (distance) => (market && market.pips ? fmtPips(market.pips(distance)) : null);
+  const slPips = pipOf(p.risk);
+  const tp1Pips = pipOf(Math.abs(p.tp1 - p.entry));
+  const tp2Pips = pipOf(Math.abs(p.tp2 - p.entry));
   const label = t(lang, `farley.plan.${sc.status}`, { entry: fmtLevel(p.entry) });
   const out = [
     label,
-    t(lang, "farley.plan.sl", { sl: fmtLevel(p.sl), riskPct: f2((p.risk / p.entry) * 100), riskAtr: f2(p.riskAtr) }),
-    t(lang, "farley.plan.tp1", { tp: fmtLevel(p.tp1), rr: p.rr1 }),
-    t(lang, "farley.plan.tp2", { tp: fmtLevel(p.tp2), rr: p.rr2 }),
+    slPips != null
+      ? t(lang, "farley.plan.sl.fx", { sl: fmtLevel(p.sl), pips: slPips, riskPct: f2((p.risk / p.entry) * 100), riskAtr: f2(p.riskAtr) })
+      : t(lang, "farley.plan.sl", { sl: fmtLevel(p.sl), riskPct: f2((p.risk / p.entry) * 100), riskAtr: f2(p.riskAtr) }),
+    tp1Pips != null ? t(lang, "farley.plan.tp1.fx", { tp: fmtLevel(p.tp1), rr: p.rr1, pips: tp1Pips }) : t(lang, "farley.plan.tp1", { tp: fmtLevel(p.tp1), rr: p.rr1 }),
+    tp2Pips != null ? t(lang, "farley.plan.tp2.fx", { tp: fmtLevel(p.tp2), rr: p.rr2, pips: tp2Pips }) : t(lang, "farley.plan.tp2", { tp: fmtLevel(p.tp2), rr: p.rr2 }),
   ];
   if (p.widened) out.push(t(lang, "farley.plan.widened", { atr: CFG.MIN_RISK_ATR }));
   if (p.level?.cutsTp1) out.push(t(lang, "farley.plan.levelCuts", { level: fmtLevel(p.level.price), room: f2(p.level.room), which: "TP1" }));
@@ -50,7 +62,8 @@ function planLines(lang, sc) {
   return out;
 }
 
-function blockedLines(lang, sc) {
+function blockedLines(lang, sc, market) {
+  const fmtLevel = fmtOf(market);
   const b = sc.blocked;
   if (!b) return [];
   if (sc.why === "risk") return [t(lang, "farley.blocked.risk", { atr: f2(b.riskAtr), max: CFG.MAX_RISK_ATR })];
@@ -71,13 +84,18 @@ function contextLine(lang, ctx) {
 
 /** Satu blok analisis Farley. @param {{coin:string, tf:string, tfLabel:string, price:string, sc:object, short?:boolean}} ev */
 function buildFarleyBlock(lang, ev) {
-  const { sc } = ev;
-  const lines = [t(lang, "farley.head", { coin: ev.coin, tf: ev.tfLabel, price: ev.price }), statusLine(lang, sc)];
+  const { sc, market } = ev;
+  const fmtLevel = fmtOf(market);
+  // Forex: judul tanpa "/USDT" (label pair, emas diberi tanda futures GC=F).
+  const head = market
+    ? t(lang, "farley.head.fx", { pair: `${market.label}${market.proxy === "futures" ? " (GC=F)" : ""}`, tf: ev.tfLabel, price: ev.price })
+    : t(lang, "farley.head", { coin: ev.coin, tf: ev.tfLabel, price: ev.price });
+  const lines = [head, statusLine(lang, sc)];
   if (sc.status === "nodata") return lines.join("\n");
 
-  const plan = planLines(lang, sc);
+  const plan = planLines(lang, sc, market);
   if (plan.length) lines.push("", ...plan);
-  const blocked = blockedLines(lang, sc);
+  const blocked = blockedLines(lang, sc, market);
   if (blocked.length) lines.push(...blocked);
 
   const r = sc.ribbon;
@@ -127,12 +145,25 @@ function buildFarleyBlock(lang, ev) {
   return lines.join("\n");
 }
 
-/** Catatan parameter + disclaimer (di bawah pesan). */
-function buildFarleyFooter(lang, { ctxTf }) {
-  return [
+/**
+ * Catatan parameter + disclaimer (di bawah pesan).
+ * Forex (market diisi): ditambah catatan pasar tutup / data macet, emas (futures), gap pembukaan, dan sumber data;
+ * disclaimer menyebut forex, bukan kripto.
+ * @param {{ctxTf:string|null, market?:object|null, status?:{open:boolean,reason:string|null}|null, gap?:boolean}} o
+ */
+function buildFarleyFooter(lang, { ctxTf, market = null, status = null, gap = false }) {
+  const out = [];
+  if (market) {
+    if (status && status.open === false) out.push(t(lang, status.reason === "stale" ? "farley.fx.stale" : "farley.fx.closed"));
+    if (market.proxy === "futures") out.push(t(lang, "farley.fx.gold"));
+    if (gap) out.push(t(lang, "farley.fx.gap"));
+    out.push(t(lang, "farley.fx.note"));
+  }
+  out.push(
     t(lang, "farley.params", { sm: CFG.STOCH_SMOOTH, d: CFG.STOCH_D, ctx: ctxTf || t(lang, "farley.ctxSelfName"), tp1: CFG.TP1_R, tp2: CFG.TP2_R }),
-    t(lang, "farley.disclaimer"),
-  ].join("\n");
+    t(lang, market ? "farley.disclaimer.fx" : "farley.disclaimer"),
+  );
+  return out.join("\n");
 }
 
 /**

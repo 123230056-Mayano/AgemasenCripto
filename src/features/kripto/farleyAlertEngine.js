@@ -10,20 +10,29 @@
  * Tiap pasangan koin+TF diambil ulang paling cepat tiap CFG.INTERVAL_MS (beserta candle TF konteks), lalu candle closed
  * TERAKHIR dinilai (setelah FINAL_DELAY_MS) dan dibandingkan dengan skenario candle sebelumnya. Kejadian dianggap
  * TERKIRIM (kunci dedupe dicatat) hanya setelah pesan berhasil. Hanya candle yang closed SETELAH alarm dibuat yang diumumkan.
+ *
+ * FOREX: simbol pair (EURUSD, XAUUSD, ...) dikenali otomatis. Level S/R memakai toleransi forex (adapter pasar), dan saat pasar
+ * tutup menurut kalender (akhir pekan) skenario BUY / SELL sekarang diturunkan jadi TUNGGU (applyMarketClosed), jadi tidak ada
+ * kiriman di akhir pekan. Skenario sebelumnya dipakai apa adanya sebagai pembanding. Pengambilan candle: fetchCandles yang
+ * disuntik (alertMonitor memakai fetchCandlesAny: forex lewat Yahoo, kripto lewat Binance).
  */
 
 const { FARLEY_ALERT_CONFIG: CFG } = require("../../config/indicatorConfig");
 const { TF_MS, COIN_WATCHLIST, ChatRateLimiter } = require("./divAlertCore");
 const { selectLivePairs } = require("./advAlertCore");
 const { runPool } = require("./advAlertEngine");
-const { ctxTfOf } = require("./farleyCore");
+const { ctxTfOf, applyMarketClosed } = require("./farleyCore");
+const { pairInfo } = require("../forex/forexPairs");
 const { detectNewFarley, farleyKey, chunk, sortEvents, buildFarleyAlertText } = require("./farleyAlertCore");
 
 const defaultSleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/** Skenario Farley dari candle mentah + candle konteks (default = analyze() di farley.js). */
-function defaultAnalyze(candles, ctxRaw, tf) {
-  return require("./farley").analyze(candles, ctxRaw, tf).sc;
+/** Adapter pasar forex untuk satu simbol (null = kripto). */
+const marketOf = (coin) => (pairInfo(String(coin || "").toUpperCase()) ? require("../forex/forexMarket").createForexMarket(coin) : null);
+
+/** Skenario Farley dari candle mentah + candle konteks (default = analyze() di farley.js; forex: level dengan toleransi forex). */
+function defaultAnalyze(candles, ctxRaw, tf, coin) {
+  return require("./farley").analyze(candles, ctxRaw, tf, marketOf(coin)).sc;
 }
 
 /**
@@ -36,7 +45,7 @@ function defaultAnalyze(candles, ctxRaw, tf) {
  *   notifyImage?: (chat:string, userJid:string, png:Buffer, caption:string) => Promise<boolean>,
  *   renderChart?: (ev:object, lang:string) => Buffer|Promise<Buffer>,   // ev.closed = candle closed, ev.sc = skenario
  *   langFor: (chat:string, userJid:string) => string,
- *   analyze?: (candles:object[], ctxRaw:object[]|null, tf:string) => object,
+ *   analyze?: (candles:object[], ctxRaw:object[]|null, tf:string, coin:string) => object,
  *   isUnsupported?: (err:Error) => boolean,
  *   limiter?: ChatRateLimiter, sleep?: Function, log?: Function
  * }} deps
@@ -61,7 +70,7 @@ function createFarleyEngine(deps) {
     const k = `${coin}|${tf}`;
     const hit = cache.get(k);
     if (hit && hit.t === X.t) return hit;
-    const entry = { t: X.t, cur: analyze(closed, ctxRaw, tf), prev: analyze(closed.slice(0, -1), ctxRaw, tf) };
+    const entry = { t: X.t, cur: analyze(closed, ctxRaw, tf, coin), prev: analyze(closed.slice(0, -1), ctxRaw, tf, coin) };
     cache.set(k, entry);
     return entry;
   }
@@ -81,7 +90,11 @@ function createFarleyEngine(deps) {
     if (!finalReady || X.t + tfMs <= sub.createdAt) return out;
 
     const sc = scenariosFor(coin, tf, closed, ctxRaw);
-    const hit = detectNewFarley(sc.cur, sc.prev, sub);
+    // Forex: pasar tutup (akhir pekan) menurunkan BUY / SELL sekarang jadi TUNGGU. applyMarketClosed membuat objek baru,
+    // jadi skenario di cache tidak berubah (skenario sebelumnya tetap apa adanya sebagai pembanding).
+    const mkt = marketOf(coin);
+    const cur = mkt ? applyMarketClosed(sc.cur, require("../forex/forexMarket").marketStatus(now)) : sc.cur;
+    const hit = detectNewFarley(cur, sc.prev, sub);
     if (!hit) return out;
 
     const key = farleyKey(sub.chat, userJid, coin, tf, hit.dir, X.t);
@@ -101,7 +114,9 @@ function createFarleyEngine(deps) {
       price: X.c,
       candleT: X.t,
       closeMs: X.t + tfMs,
-      sc: sc.cur,
+      sc: cur,
+      market: mkt, // forex: format harga/pip sesuai pair; kripto null
+      gap: !!mkt && closed.slice(-15).some((k) => k.gap === true),
       closed,
       key,
       commit: () => store.markSent([key]),

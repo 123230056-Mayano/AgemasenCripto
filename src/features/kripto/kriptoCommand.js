@@ -14,7 +14,7 @@
  *   !trenstate <koin> [tf|semua] -> lanjut tren / pullback sehat / waspada reversal / reversal terkonfirmasi / range + alasan + level batal (trenState.js). Alias: !ts, !pullback
  *   !pola <koin> [tf|semua] [detail] -> pola candlestick (engulfing, pin bar, doji, star, inside bar, tweezer, harami, piercing/dark cloud, marubozu, three soldiers/crows, three methods) di ekstrem swing / zona SNR, bukti bersyarat dengan level konfirmasi + batal (candlePatterns.js, patternCommand.js). Alias: !pattern. FOREX: pair dikenali otomatis (!pola eurusd 4h, !pola eur/usd, !pola xauusd semua; alias !fxpola), chart + teks seperti kripto; tanpa volume, ada catatan pasar tutup dan gap pembukaan
  *   !hhll <koin> [tf]    -> market structure Higher High / Higher Low / Lower High / Lower Low + status tren + chart (hhll.js). Alias: !struktur
- *   !farley <koin> [tf]  -> pendekatan Alan S. Farley: ribbon SMA 5-8-13 + Bollinger 13,2 + Stochastic + MACD TF besar -> BUY / SELL / TUNGGU / RANGE + entry, SL, TP1, TP2 + alasan (farley.js, farleyCore.js)
+ *   !farley <koin|pair> [tf]  -> pendekatan Alan S. Farley: ribbon SMA 5-8-13 + Bollinger 13,2 + Stochastic + MACD TF besar -> BUY / SELL / TUNGGU / RANGE + entry, SL, TP1, TP2 + alasan (farley.js, farleyCore.js). FOREX: pair dikenali otomatis (!farley eurusd 4h, !farley eur/usd, !farley xauusd; alias !fxfarley), SL/TP juga dalam pip, tanpa volume, pasar tutup = BUY/SELL jadi TUNGGU
  *   !ema <koin> [tf]     -> EMA 20/50/200 + posisi harga (di atas / di bawah)
  *   !movave <koin> [tf] [sma|ema] -> Moving Average SMA & EMA 20/50/200 + posisi harga + golden/death cross (movave.js). Alias: !ma, !movingaverage
  *   !tren <koin> [tf]    -> bullish / bearish / sideways (+ golden/death cross baru)
@@ -34,7 +34,7 @@
  *   !alertsnr <koin|watchlist> [tf] [reject|tembus|wick|sweep] [kuat] | list | off | hapus <id|semua>  (alarm titik balik S/R, snrAlertCommand.js)
  *   !alertsignal <koin|watchlist> [tf] [long|short] [tunggu] | list | off | hapus <id|semua>  (alarm skenario sinyal seperti !signal, signalAlertCommand.js). Alias: !alertsinyal
  *   !alertamd <koin|watchlist> [tf] [naik|turun] [dini|konfirmasi] [rr<tp1>:<tp2>] [sl <harga>] [tp <harga>] | list | off | hapus <id|semua>  (alarm AMD, amdAlertCommand.js)
- *   !alertfarley <koin|watchlist> [tf] [buy|sell] | list | off | hapus <id|semua>  (alarm skenario Farley BUY / SELL baru, farleyAlertCommand.js)
+ *   !alertfarley <koin|pair|watchlist> [tf] [buy|sell] | list | off | hapus <id|semua>  (alarm skenario Farley BUY / SELL baru, farleyAlertCommand.js). FOREX: !alertfarley eurusd 1h (alias !alertfxfarley); watchlist tetap kripto saja
  *   !alerthhll <koin|watchlist> [tf] [naik|turun] [dini|konfirmasi] [balik] | list | off | hapus <id|semua>  (alarm Higher High / Lower Low, hhllAlertCommand.js)
  *   !alertpola <koin|watchlist> [tf] [naik|turun] [dini|konfirmasi] [kuat] | list | off | hapus <id|semua>  (alarm pola baru / terkonfirmasi, patternAlertCommand.js). Alias: !alertpattern
  *   !alertdivergent (!alertdiv) <koin|semua|watchlist> [tf] [rsi|macd] | list | hapus <id|semua>
@@ -110,7 +110,7 @@ const COMMANDS = {
   snr: { re: /^!(?:snr|sr)(?:\s+([\s\S]*))?$/i, useTf: true, allTf: true },
   fib: { re: /^!(?:fib|fibo|fibonacci)(?:\s+([\s\S]*))?$/i, useTf: true, allTf: true },
   hhll: { re: /^!(?:hhll|struktur|structure)(?:\s+([\s\S]*))?$/i, useTf: true },
-  farley: { re: /^!farley(?:\s+([\s\S]*))?$/i, useTf: true },
+  farley: { re: /^!(?:farley|fxfarley)(?:\s+([\s\S]*))?$/i, useTf: true },
   trenstate: { re: /^!(?:trenstate|ts|pullback)(?:\s+([\s\S]*))?$/i, useTf: true, allTf: true, allWords: ["ALL", "SEMUA"] },
   pola: { re: /^!(?:pola|pattern|fxpola|fxpattern)(?:\s+([\s\S]*))?$/i, useTf: true, allTf: true, allWords: ["ALL", "SEMUA"], types: ["DETAIL", "DETIL"] },
   ema: { re: /^!ema(?:\s+([\s\S]*))?$/i, useTf: true },
@@ -675,7 +675,7 @@ async function handleKriptoCommand(sock, msg, { jid, text, lang }) {
   else if (isDusdtAlert) args = parseDusdtAlertArgs(name, match[1] || "", getDefaultTf(senderId));
   else if (isDusdt) args = parseDusdtArgs(name, match[1] || "", getDefaultTf(senderId));
   else if (name === "list") args = { coin: null, coin2: null, tf: null, keyword: match[1] || "" };
-  else args = parseArgs(name === "pola" ? normalizePairText(match[1] || "") : match[1] || "", COMMANDS[name]); // "eur/usd" -> "eurusd" (pair forex; parser koin menolak "/")
+  else args = parseArgs(name === "pola" || name === "farley" ? normalizePairText(match[1] || "") : match[1] || "", COMMANDS[name]); // "eur/usd" -> "eurusd" (pair forex; parser koin menolak "/")
   if (!args) {
     await sendCommandDetail(sock, jid, name, lang);
     return true;
