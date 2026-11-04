@@ -20,7 +20,8 @@
  *                      (b) BREAKOUT  - close X di atas high tertinggi BREAKOUT_BARS candle sebelumnya, bandwidth Bollinger
  *                                       tidak menyempit (tembusan saat volatilitas rendah rawan palsu).
  *   Penahan          : struktur TF besar berlawanan (counter-trend), risiko SL terlalu lebar, atau level lawan terlalu dekat
- *                      -> status TUNGGU, bukan BUY/SELL.
+ *                      -> status TUNGGU, bukan BUY/SELL. Breakout juga ditahan bila sudah melar (%B di luar pita, jauh dari SMA 8,
+ *                      atau Stochastic baru berbalik), kecuali pullback valid.
  *   SL               : di luar low (BUY) / high (SELL) SL_SWING_BARS candle terakhir atau SMA 13 (yang lebih jauh) + buffer ATR,
  *                      jarak dijepit minimal MIN_RISK_ATR x ATR (stop satu candle sangat bergantung volatilitas).
  *   TP               : TP1 = TP1_R x risiko, TP2 = TP2_R x risiko. Level S/R lawan terdekat dilaporkan; kalau ia memotong TP1 diberi catatan.
@@ -306,15 +307,26 @@ function computeFarley(candles, opts = {}) {
   const priorHigh = Math.max(...prior.map((x) => x.h));
   const priorLow = Math.min(...prior.map((x) => x.l));
   const bwOk = boll.state !== "squeeze" && boll.trend !== "narrowing";
-  const breakout = isBuy ? price > priorHigh && price > s13[i] && bwOk : price < priorLow && price < s13[i] && bwOk;
+  const breakoutRaw = isBuy ? price > priorHigh && price > s13[i] && bwOk : price < priorLow && price < s13[i] && bwOk;
+  // Anti-chasing: harga yang sudah melar (close di luar Bollinger atau jauh dari SMA 8) tidak dijadikan entry, baik untuk
+  // pemicu breakout maupun pullback (candle breakout besar bisa kebetulan memenuhi syarat pullback). Stochastic yang baru
+  // berbalik melawan arah hanya menahan pemicu breakout.
+  const pctB = boll.pctB;
+  const stretchAtr = Math.abs(price - s8[i]) / a;
+  const overBand = pctB != null && (isBuy ? pctB > CFG.CHASE_PCTB_MAX : pctB < 1 - CFG.CHASE_PCTB_MAX);
+  const extChase = overBand || stretchAtr > CFG.CHASE_SMA8_ATR ? { why: "extended", pctB, stretchAtr } : null;
+  const stochChase = CFG.BREAKOUT_BLOCK_STOCH_CROSS && stoch && (isBuy ? stoch.crossDown : stoch.crossUp) ? { why: "stochFade", pctB, stretchAtr } : null;
+  const breakout = breakoutRaw && !extChase && !stochChase;
   const pullbackSeen = isBuy ? ribbon.pullbackBull : ribbon.pullbackBear;
   const stochTurn = stoch && (isBuy ? stoch.turnUp && stoch.zone !== "overbought" : stoch.turnDown && stoch.zone !== "oversold");
   const pullback = pullbackSeen && !!stochTurn;
-  const trigger = breakout ? "breakout" : pullback ? "pullback" : null;
+  const trigger = breakout ? "breakout" : pullback && !extChase ? "pullback" : null;
+  // Alasan penahan hanya dilaporkan bila memang ada pemicu yang dibatalkan olehnya.
+  const chase = breakoutRaw ? extChase || stochChase : pullback ? extChase : null;
   const breakoutLevel = isBuy ? priorHigh : priorLow;
 
   const common = { ...base, dir, trigger, pullbackSeen, breakoutLevel, invalidation: s13[i] };
-  if (!trigger) return { ...common, status: "wait", why: "noTrigger" };
+  if (!trigger) return chase ? { ...common, status: "wait", why: chase.why, blocked: chase } : { ...common, status: "wait", why: "noTrigger" };
 
   // Penahan: konteks TF besar berlawanan.
   const counter = (isBuy && ctx.trend === "down") || (!isBuy && ctx.trend === "up");

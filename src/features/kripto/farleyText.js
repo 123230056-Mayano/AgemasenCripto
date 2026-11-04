@@ -54,6 +54,8 @@ function blockedLines(lang, sc) {
   const b = sc.blocked;
   if (!b) return [];
   if (sc.why === "risk") return [t(lang, "farley.blocked.risk", { atr: f2(b.riskAtr), max: CFG.MAX_RISK_ATR })];
+  if (sc.why === "extended") return [t(lang, "farley.blocked.extended", { pctB: f2(b.pctB), atr: f2(b.stretchAtr), max: CFG.CHASE_SMA8_ATR })];
+  if (sc.why === "stochFade") return [t(lang, "farley.blocked.stochFade")];
   if (sc.why === "levelNear") return [t(lang, "farley.blocked.levelNear", { level: fmtLevel(b.level), room: f2(b.room), min: CFG.MIN_RR_TO_LEVEL })];
   return [];
 }

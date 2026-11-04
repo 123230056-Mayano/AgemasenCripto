@@ -690,7 +690,11 @@ const FARLEY_CONFIG = Object.freeze({
   MAX_RISK_ATR: _num(process.env.FARLEY_MAX_RISK_ATR, 3), // jarak SL maksimal (x ATR); lebih lebar = skenario TUNGGU (risiko terlalu besar)
   TP1_R: _num(process.env.FARLEY_TP1_R, 1.5),
   TP2_R: _num(process.env.FARLEY_TP2_R, 2.5),
-  MIN_RR_TO_LEVEL: 1, // level lawan terdekat harus memberi ruang >= ini x risiko, kalau tidak = TUNGGU
+  MIN_RR_TO_LEVEL: _num(process.env.FARLEY_MIN_RR_TO_LEVEL, 1.5), // level lawan terdekat harus memberi ruang >= ini x risiko, kalau tidak = TUNGGU (sebelumnya 1; 1.5 = sama dengan TP1_R, jadi TP1 tidak pernah terpotong level)
+  // --- filter anti-chasing untuk pemicu BREAKOUT (DEFAULT SISTEM, belum di-backtest). Pullback tidak terkena filter ini. ---
+  CHASE_PCTB_MAX: _num(process.env.FARLEY_CHASE_PCTB_MAX, 1.2), // BUY: entry ditolak bila %B > ini (jauh di luar pita atas; 1.0 = tepat di pita, terlalu ketat karena breakout wajar sering menutup di luar pita); SELL: bila %B < 1 - ini
+  CHASE_SMA8_ATR: _num(process.env.FARLEY_CHASE_SMA8_ATR, 1.2), // breakout ditolak bila |close - SMA8| > N x ATR (harga sudah terlalu jauh dari rata-rata)
+  BREAKOUT_BLOCK_STOCH_CROSS: process.env.FARLEY_BREAKOUT_BLOCK_STOCH_CROSS !== "0", // BUY: tolak breakout bila Stochastic baru menyilang turun (SELL: menyilang naik)
   VOL_LOOKBACK: 20, // volume X dibanding rata-rata N candle sebelumnya (informasi saja)
   VOL_MULT: 1.5,
   MIN_CANDLES: 60,
