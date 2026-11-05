@@ -67,8 +67,9 @@ const BIAS_TF_WEIGHTS = CFG.TF_WEIGHTS; // bobot TF untuk bias keseluruhan
 /** Snapshot semua koin (mood pasar + tren BTC) hanya perlu diambil kalau salah satu komponennya aktif (bobot > 0). */
 const needsMarketSnapshot = () => (BIAS_WEIGHTS.mood ?? 0) > 0 || (BIAS_WEIGHTS.btc ?? 0) > 0;
 
-const BIAS_TFS = ["15M", "1H", "4H", "1D"]; // urutan tampilan (sama dengan !mtf)
-const TF_LABEL = { "15M": "15m", "1H": "1H", "4H": "4H", "1D": "1D" };
+const BIAS_TFS = ["15M", "1H", "4H", "1D"]; // urutan tampilan default (sama dengan !mtf)
+const BIAS_PARSE_TFS = ["1M", "5M", ...BIAS_TFS]; // TF yang boleh dipilih eksplisit (!bias btc 5m)
+const TF_LABEL = { "1M": "1m", "5M": "5m", "15M": "15m", "1H": "1H", "4H": "4H", "1D": "1D" };
 const COMPONENT_ORDER = ["trend", "cross", "rsi", "macd", "mood", "btc", "oiFunding"];
 
 const clamp = (v, lo = -1, hi = 1) => Math.max(lo, Math.min(hi, v));
@@ -546,7 +547,7 @@ function parseBiasArgs(name, raw) {
   let all = false;
   for (const tok of tokens) {
     const up = tok.toUpperCase();
-    if (BIAS_TFS.includes(up)) {
+    if (BIAS_PARSE_TFS.includes(up)) {
       if (tf || all) return null;
       tf = up;
     } else if (up === "SEMUA" || up === "ALL") {
@@ -569,6 +570,7 @@ module.exports = {
   BIAS_BEAR,
   BIAS_TF_WEIGHTS,
   BIAS_TFS,
+  BIAS_PARSE_TFS,
   BIAS_COMMANDS,
   BIAS_RUNNERS,
   parseBiasArgs,

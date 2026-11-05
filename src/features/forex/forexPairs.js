@@ -31,7 +31,7 @@ const PAIRS = Object.freeze({
   USDIDR: { base: "USD", quote: "IDR", cat: "exotic", digits: 0, pip: null, yahoo: "USDIDR=X", minTf: "1H" },
 });
 
-const TF_ORDER = ["15M", "1H", "4H", "1D"];
+const TF_ORDER = ["1M", "5M", "15M", "1H", "4H", "1D"];
 
 /** Pair dengan USD sebagai quote: arah komponen "kekuatan USD" dibalik (dipakai fase lanjut). */
 const USD_QUOTE = Object.freeze(["EURUSD", "GBPUSD", "AUDUSD", "NZDUSD", "XAUUSD"]);

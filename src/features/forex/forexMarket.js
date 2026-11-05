@@ -32,13 +32,13 @@ const MARKET_CLOSE = { day: 5, hour: 22 }; // Jumat 22:00 UTC
 const MARKET_OPEN = { day: 0, hour: 22 }; // Minggu 22:00 UTC (perkiraan; bergeser 1 jam mengikuti DST AS)
 const STALE_MS = 3 * 3600_000;
 
-const TF_STEP = { "15M": 900_000, "1H": 3_600_000, "4H": 14_400_000, "1D": 86_400_000 };
-// interval + range Yahoo per TF (4H dibentuk dari 1H). 15m maksimum 60 hari di Yahoo; dipakai 30 hari.
-const YAHOO_REQ = { "15M": { interval: "15m", range: "30d" }, "1H": { interval: "60m", range: "180d" }, "4H": { interval: "60m", range: "180d" }, "1D": { interval: "1d", range: "2y" } };
+const TF_STEP = { "1M": 60_000, "5M": 300_000, "15M": 900_000, "1H": 3_600_000, "4H": 14_400_000, "1D": 86_400_000 };
+// interval + range Yahoo per TF (4H dibentuk dari 1H). 5m/15m maksimum 60 hari di Yahoo (dipakai 30 hari); 1m maksimum 7 hari (dipakai 5 hari).
+const YAHOO_REQ = { "1M": { interval: "1m", range: "5d" }, "5M": { interval: "5m", range: "30d" }, "15M": { interval: "15m", range: "30d" }, "1H": { interval: "60m", range: "180d" }, "4H": { interval: "60m", range: "180d" }, "1D": { interval: "1d", range: "2y" } };
 
 // Riwayat panjang untuk estimasi sebaran (Gaussian butuh WINDOW 800 + HORIZON 6 candle). Yahoo membatasi 60m sampai 730 hari
 // dan 15m sampai 60 hari, jadi 1H/4H memakai 1y (aman di bawah batas), 1D memakai 5y (2y hanya ~520 candle, kurang).
-const HIST_REQ = { "15M": { interval: "15m", range: "60d" }, "1H": { interval: "60m", range: "1y" }, "4H": { interval: "60m", range: "1y" }, "1D": { interval: "1d", range: "5y" } };
+const HIST_REQ = { "1M": { interval: "1m", range: "7d" }, "5M": { interval: "5m", range: "60d" }, "15M": { interval: "15m", range: "60d" }, "1H": { interval: "60m", range: "1y" }, "4H": { interval: "60m", range: "1y" }, "1D": { interval: "1d", range: "5y" } };
 const HIST_CACHE_MS = 300_000; // riwayat berat dan jarang berubah: cache 5 menit
 
 class ForexDataError extends Error {

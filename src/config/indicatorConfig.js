@@ -69,7 +69,7 @@ const BIAS_CONFIG = Object.freeze({
   REASON_MAX: 5,
   // Bias keseluruhan lintas TF (v2): TF lebih tinggi lebih berbobot. Total 1.00.
   // TF yang gagal diambil dilewati dan bobotnya dinormalisasi ulang.
-  TF_WEIGHTS: Object.freeze({ "15M": 0.1, "1H": 0.2, "4H": 0.3, "1D": 0.4 }),
+  TF_WEIGHTS: Object.freeze({ "1M": 0.02, "5M": 0.05, "15M": 0.1, "1H": 0.2, "4H": 0.3, "1D": 0.4 }), // 1M/5M tidak ikut tampilan default (BIAS_TFS), hanya bila dipilih eksplisit
 });
 
 /**
@@ -281,7 +281,7 @@ const SIGNAL_ALERT_CONFIG = Object.freeze({
 // setel per timeframe lewat ...BY_TF kalau backtest (scripts/backtest-hhll.js) menunjukkan satu angka global tidak cocok.
 const HHLL_CONTEXT_CONFIG = Object.freeze({
   VERSION: 1,
-  HTF: Object.freeze({ "15M": "1H", "1H": "4H", "4H": "1D", "1D": null }), // timeframe konteks untuk tiap TF
+  HTF: Object.freeze({ "1M": "5M", "5M": "15M", "15M": "1H", "1H": "4H", "4H": "1D", "1D": null }), // timeframe konteks untuk tiap TF
   VOL_LOOKBACK: 20, // pembanding volume: rata-rata sekian candle sebelum candle X
   VOL_MULT: _num(process.env.HHLL_VOL_MULT, 1.5), // volume X >= ini x rata-rata = ok
   CLOSE_BEYOND_ATR: _num(process.env.HHLL_CLOSE_BEYOND_ATR, 0.2), // close harus melewati level >= ini x ATR
@@ -668,7 +668,7 @@ const FARLEY_CONFIG = Object.freeze({
   MACD_FAST: 12,
   MACD_SLOW: 26,
   MACD_SIGNAL: 9,
-  HTF: Object.freeze({ "15M": "1H", "1H": "4H", "4H": "1D", "1D": null }), // konteks: 60 menit untuk 5 menit (peran Farley), digeser ke TF yang dipakai bot
+  HTF: Object.freeze({ "1M": "5M", "5M": "15M", "15M": "1H", "1H": "4H", "4H": "1D", "1D": null }), // konteks: 60 menit untuk 5 menit (peran Farley), digeser ke TF yang dipakai bot
   // --- DEFAULT SISTEM (bukan setelan Farley) ---
   STOCH_SMOOTH: 3, // %K lambat = SMA(%K mentah, 3)
   STOCH_D: 3, // %D = SMA(%K lambat, 3)

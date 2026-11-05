@@ -6,7 +6,7 @@
  * Data pasar langsung dari Binance (tanpa lewat web KriptoPredict, jadi
  * !harga / !chart / !level tetap jalan walau ANALYST_URL kosong):
  *   - ticker 24 jam (harga live + % perubahan)
- *   - candle closed (15m / 1H / 4H / 1D)
+ *   - candle closed (1m / 5m / 15m / 1H / 4H / 1D)
  *   - kurs USD -> IDR
  *   - level support / resistance (swing high/low, sama dengan web)
  *
@@ -19,8 +19,8 @@ const { fmtPrice, fmtUsdExact, fmtTiered, fmtPercent } = require("../../utils/pr
 
 const BINANCE = (process.env.BINANCE_BASE || "https://data-api.binance.vision").replace(/\/+$/, "");
 
-const TIMEFRAMES = { "15M": "15m", "1H": "1h", "4H": "4h", "1D": "1d" };
-const TF_LABEL = { "15M": "15m", "1H": "1H", "4H": "4H", "1D": "1D" };
+const TIMEFRAMES = { "1M": "1m", "5M": "5m", "15M": "15m", "1H": "1h", "4H": "4h", "1D": "1d" };
+const TF_LABEL = { "1M": "1m", "5M": "5m", "15M": "15m", "1H": "1H", "4H": "4H", "1D": "1D" };
 const FETCH_LIMIT = 320;
 
 class UnsupportedCoinError extends Error {
@@ -82,7 +82,7 @@ async function fetchCandles(coin, tf, { includeOpen = false } = {}) {
  * Candle closed historis berhalaman (Binance membatasi 1000 candle per permintaan), urut lama -> baru.
  * Dipakai backtest (scripts/backtest-sudden.js); fetchCandles biasa hanya 320 candle terakhir.
  * @param {string} coin
- * @param {string} tf "15M"|"1H"|"4H"|"1D"
+ * @param {string} tf "1M"|"5M"|"15M"|"1H"|"4H"|"1D"
  * @param {{bars?:number, endTime?:number, pageSize?:number, get?:Function}} [opts]
  *   get = pengganti axios.get (untuk uji tanpa jaringan)
  */

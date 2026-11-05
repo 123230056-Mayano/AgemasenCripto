@@ -28,7 +28,7 @@ const { estimateGaussian } = require("./gaussian");
 const { STATUS, DIR } = core;
 
 const ALL_TFS = ["15M", "1H", "4H", "1D"];
-const TF_LABEL = { "15M": "15m", "1H": "1H", "4H": "4H", "1D": "1D" };
+const TF_LABEL = { "1M": "1m", "5M": "5m", "15M": "15m", "1H": "1H", "4H": "4H", "1D": "1D" };
 const ICON = { bullish: "🟢", bearish: "🔴", netral: "⚪" };
 const GRADE_KEY = { kuat: "hhllalert.grade.strong", sedang: "hhllalert.grade.medium", lemah: "hhllalert.grade.weak" };
 const SEP = "━━━━━━━━━━━━━━━"; // pemisah blok perkiraan gerak
@@ -202,7 +202,7 @@ function trendlineBlock(lang, res, detail = true) {
 }
 
 /** Lama horizon dalam teks ("24 jam", "6 hari"), dari jumlah candle x lama satu TF. */
-const TF_MIN = { "15M": 15, "1H": 60, "4H": 240, "1D": 1440 };
+const TF_MIN = { "1M": 1, "5M": 5, "15M": 15, "1H": 60, "4H": 240, "1D": 1440 };
 function spanText(lang, tf, h) {
   const mins = (TF_MIN[tf] || 0) * h;
   if (!mins) return String(h);

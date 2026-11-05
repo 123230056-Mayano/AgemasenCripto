@@ -37,7 +37,7 @@
 const { t } = require("../../i18n");
 const { SIGNAL_CONFIG: CFG } = require("../../config/indicatorConfig");
 const { computeEmas, atr: atrSeries } = require("./indicators");
-const { computeOverallBias, collectBias, confidenceLevel, parseBiasArgs, needsMarketSnapshot, BIAS_TFS } = require("./bias");
+const { computeOverallBias, collectBias, confidenceLevel, parseBiasArgs, needsMarketSnapshot, BIAS_TFS, BIAS_PARSE_TFS } = require("./bias");
 const { computeProbability, formatProbLine, formatProbBasis, PROB_VERSION } = require("./probability");
 const sudden = require("./suddenMove");
 const { reasonText } = require("./suddenMoveText");
@@ -47,7 +47,7 @@ const { createCryptoMarket, resolveMarket } = require("./marketAdapter");
 const { normalizePairText } = require("../forex/forexPairs");
 
 const SIGNAL_VERSION = CFG.VERSION;
-const TF_LABEL = { "15M": "15m", "1H": "1H", "4H": "4H", "1D": "1D" };
+const TF_LABEL = { "1M": "1m", "5M": "5m", "15M": "15m", "1H": "1H", "4H": "4H", "1D": "1D" };
 const ENTRY_STYLES = ["trend", "retest", "breakout"];
 const SL_MODES = ["atr", "sr"];
 
@@ -613,10 +613,10 @@ function parseSignalArgs(name, raw) {
   const withOnly = (o) => (only ? { ...o, only } : o);
 
   // Filter status tanpa kata "all" hanya sah kalau tidak ada koin (token sisanya timeframe saja).
-  const allCoinsMode = hasAll || (only && rest.every((x) => BIAS_TFS.includes(x)));
+  const allCoinsMode = hasAll || (only && rest.every((x) => BIAS_PARSE_TFS.includes(x)));
 
-  if (allCoinsMode && rest.length && rest.every((x) => BIAS_TFS.includes(x))) {
-    const tfs = BIAS_TFS.filter((x) => rest.includes(x)); // urutan tampil tetap 15m, 1H, 4H, 1D
+  if (allCoinsMode && rest.length && rest.every((x) => BIAS_PARSE_TFS.includes(x))) {
+    const tfs = BIAS_PARSE_TFS.filter((x) => rest.includes(x)); // urutan tampil tetap 1m, 5m, 15m, 1H, 4H, 1D
     return withOnly({ allCoins: true, tfs });
   }
   if (allCoinsMode && !rest.length && rest0.filter((x) => x === "ALL" || x === "SEMUA").length <= 1) {

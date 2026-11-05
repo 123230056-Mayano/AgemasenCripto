@@ -100,7 +100,7 @@ function parseDusdtAlertArgs(raw, defaultTf) {
   }
   if (tokens.length !== 1) return null;
   const tf = tokens[0].toUpperCase();
-  return TF_MS[tf] ? { action: "create", tf } : null;
+  return TF_MS[tf] && tf !== "1M" ? { action: "create", tf } : null; // 1M: data USDT.D minimal 5m
 }
 
 // =====================================================================

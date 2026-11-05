@@ -28,7 +28,7 @@ const { pairInfo } = require("../forex/forexPairs");
 const DIRS = ["up", "down"]; // pola netral (doji, rectangle, dst) = dir "neutral", hanya cocok kalau arah tidak dibatasi
 const STAGES = ["early", "confirm"];
 const DEFAULT_STAGES = [...STAGES];
-const TF_ORDER = ["1D", "4H", "1H", "15M"];
+const TF_ORDER = ["1D", "4H", "1H", "15M", "5M", "1M"];
 const STAGE_RANK = { confirm: 0, early: 1 };
 const GRADE_RANK = { kuat: 0, sedang: 1, lemah: 2 };
 const GRADE_KEY = { kuat: "hhllalert.grade.strong", sedang: "hhllalert.grade.medium", lemah: "hhllalert.grade.weak" };

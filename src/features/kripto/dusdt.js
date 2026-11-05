@@ -61,6 +61,7 @@ const HOUR = 3_600_000;
  * Ambang adalah heuristik; sesuaikan di sini bila perlu.
  */
 const TF = {
+  "5M": { label: "5m", ms: 5 * MIN, sideways: 0.005, btcFlat: 0.08, cgDays: 1, cmcInterval: "5m", cmcMs: 5 * MIN },
   "15M": { label: "15m", ms: 15 * MIN, sideways: 0.01, btcFlat: 0.15, cgDays: 1, cmcInterval: "15m", cmcMs: 15 * MIN },
   "1H": { label: "1H", ms: HOUR, sideways: 0.03, btcFlat: 0.3, cgDays: 2, cmcInterval: "15m", cmcMs: 15 * MIN },
   "4H": { label: "4H", ms: 4 * HOUR, sideways: 0.06, btcFlat: 0.6, cgDays: 2, cmcInterval: "1h", cmcMs: HOUR },
@@ -75,6 +76,7 @@ const TF = {
  */
 const DAY = 24 * HOUR;
 const SERIES = {
+  "5M": { bucketMs: 5 * MIN, cmcInterval: "5m", cmcMs: 5 * MIN, spanMs: 12 * HOUR, cgDays: 1 },
   "15M": { bucketMs: 15 * MIN, cmcInterval: "15m", cmcMs: 15 * MIN, spanMs: DAY, cgDays: 1 },
   "1H": { bucketMs: HOUR, cmcInterval: "15m", cmcMs: 15 * MIN, spanMs: 5 * DAY, cgDays: 7 },
   "4H": { bucketMs: 4 * HOUR, cmcInterval: "1h", cmcMs: HOUR, spanMs: 30 * DAY, cgDays: 30 },

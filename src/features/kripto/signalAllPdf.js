@@ -17,7 +17,7 @@ const { PDFDocument, StandardFonts, rgb } = require("pdf-lib");
 const { fmtLevel } = require("./market");
 const { reasonText } = require("./suddenMoveText");
 
-const TF_LABEL = { "15M": "15m", "1H": "1H", "4H": "4H", "1D": "1D" };
+const TF_LABEL = { "1M": "1m", "5M": "5m", "15M": "15m", "1H": "1H", "4H": "4H", "1D": "1D" };
 const PAGE_W = 595.28;
 const PAGE_H = 841.89;
 const MARGIN = 42;

@@ -18,7 +18,7 @@ const axios = require("axios");
 
 const CG = (process.env.COINGECKO_BASE || "https://api.coingecko.com").replace(/\/+$/, "");
 const CMC = (process.env.CMC_DATA_BASE || "https://api.coinmarketcap.com").replace(/\/+$/, "");
-const CMC_INTERVAL = { "15M": "15m", "1H": "1h", "4H": "4h", "1D": "1d" };
+const CMC_INTERVAL = { "5M": "5m", "15M": "15m", "1H": "1h", "4H": "4h", "1D": "1d" };
 const CACHE_MS = 5 * 60 * 1000;
 const cache = new Map(); // key -> { at, value }
 

@@ -250,7 +250,7 @@ async function ensureSnapshot(sock, msg, { jid, lang }, tf) {
 }
 
 // ---------- !ringkasan & !stat: banyak TF (item 03) ----------
-const ALL_TFS = Object.keys(TIMEFRAMES); // 15M, 1H, 4H, 1D (urutan tampil)
+const ALL_TFS = ["15M", "1H", "4H", "1D"]; // tabel ringkas tanpa argumen; 1M/5M hanya lewat argumen eksplisit (terlalu berat untuk semua koin)
 
 /**
  * Ambil snapshot beberapa TF berurutan (konkurensi tetap 8, tidak dikali jumlah TF).

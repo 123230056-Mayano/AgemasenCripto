@@ -30,7 +30,7 @@ const axios = require("axios");
 const { createCanvas } = require("@napi-rs/canvas");
 
 const BINANCE = (process.env.BINANCE_BASE || "https://data-api.binance.vision").replace(/\/+$/, "");
-const INTERVAL = { "15M": "15m", "1H": "1h", "4H": "4h", "1D": "1d" };
+const INTERVAL = { "1M": "1m", "5M": "5m", "15M": "15m", "1H": "1h", "4H": "4h", "1D": "1d" };
 const FETCH_LIMIT = 320; // cukup supaya EMA200 sudah terisi di seluruh candle yang digambar
 const VISIBLE = 110; // jumlah candle yang digambar
 

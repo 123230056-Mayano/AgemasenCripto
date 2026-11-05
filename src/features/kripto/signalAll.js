@@ -34,7 +34,7 @@ const { fetchTicker } = require("./market");
 const CONCURRENCY = 6; // koin diproses paralel; tiap koin menarik semua TF terpilih sekaligus
 const TTL_MS = 3 * 60_000;
 const MIN_SUCCESS_RATIO = 0.5;
-const TF_LABEL = { "15M": "15m", "1H": "1H", "4H": "4H", "1D": "1D" };
+const TF_LABEL = { "1M": "1m", "5M": "5m", "15M": "15m", "1H": "1H", "4H": "4H", "1D": "1D" };
 
 const cache = new Map(); // key -> { at, data }
 const building = new Map(); // key -> Promise

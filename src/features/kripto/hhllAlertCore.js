@@ -37,7 +37,7 @@ const DIRS = ["up", "down"];
 const STAGES = ["early", "confirm", "failed"];
 const DEFAULT_STAGES = ["early", "confirm"]; // default langganan baru = sama seperti sebelum tahap "failed" ada (opt-in)
 const STAGE_RANK = { confirm: 0, failed: 1, early: 2 };
-const TF_ORDER = ["1D", "4H", "1H", "15M"];
+const TF_ORDER = ["1D", "4H", "1H", "15M", "5M", "1M"];
 
 // =====================================================================
 // 1. Deteksi kejadian

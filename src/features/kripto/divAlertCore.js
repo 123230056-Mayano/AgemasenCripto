@@ -29,9 +29,9 @@ const { DIV } = require("./divergence");
 // ---------- konstanta (satu tempat) ----------
 const posInt = (v, d) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Math.floor(Number(v)) : d);
 
-const TF_MS = { "15M": 15 * 60_000, "1H": 3_600_000, "4H": 4 * 3_600_000, "1D": 86_400_000 };
-const TF_ORDER = ["1D", "4H", "1H", "15M"]; // diproses dari TF besar ke kecil saat jatuh tempo bersamaan
-const TF_LABEL = { "15M": "15m", "1H": "1H", "4H": "4H", "1D": "1D" };
+const TF_MS = { "1M": 60_000, "5M": 5 * 60_000, "15M": 15 * 60_000, "1H": 3_600_000, "4H": 4 * 3_600_000, "1D": 86_400_000 };
+const TF_ORDER = ["1D", "4H", "1H", "15M", "5M", "1M"]; // diproses dari TF besar ke kecil saat jatuh tempo bersamaan
+const TF_LABEL = { "1M": "1m", "5M": "5m", "15M": "15m", "1H": "1H", "4H": "4H", "1D": "1D" };
 
 const ALERT_DIV = {
   CHECK_MS: Math.max(5_000, posInt(process.env.DIV_CHECK_MS, 15_000)), // pemeriksaan ringan (PDF 5.4: 15-30 dtk)
@@ -63,7 +63,7 @@ const DAILY_TZ_LABEL = process.env.DAILY_TZ_LABEL || (DAILY_TZ === "Asia/Jakarta
 // =====================================================================
 /**
  * Waktu (ms, UTC) saat candle terakhir yang sudah tutup berakhir = awal candle yang sedang berjalan.
- * Binance menyelaraskan candle 15m/1H/4H/1D ke epoch UTC, jadi cukup pembulatan ke bawah.
+ * Binance menyelaraskan candle 1m/5m/15m/1H/4H/1D ke epoch UTC, jadi cukup pembulatan ke bawah.
  */
 const lastClosedBoundary = (tf, now) => Math.floor(now / TF_MS[tf]) * TF_MS[tf];
 
