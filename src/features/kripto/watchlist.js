@@ -412,7 +412,7 @@ async function runAlerts(sock, msg, { jid, lang, senderId }) {
   await say(sock, jid, msg, t(lang, "alert.list.body", { n: alerts.length, max: store.MAX_ALERTS, table: "```\n" + table + "\n```" }));
 }
 
-const ALERT_KINDS = ["price", "div", "adv", "snr", "signal", "farley", "hhll", "pattern", "amd", "dusdt"];
+const ALERT_KINDS = ["price", "div", "adv", "snr", "signal", "farley", "fibb", "hhll", "pattern", "amd", "dusdt"];
 
 async function runHapusAlert(sock, msg, { jid, lang, senderId }, { id, all }) {
   if (all) {

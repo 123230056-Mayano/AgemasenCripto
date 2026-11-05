@@ -85,12 +85,16 @@ function retraceDepth(fib, price) {
 
 // ---------- chart ----------
 const RETR_COLOR = { 0: "#8b93a1", 0.236: "#60a5fa", 0.382: "#4ade80", 0.5: "#facc15", 0.618: "#fb923c", 0.786: "#f472b6", 1: "#8b93a1" };
+const BB_COLOR = "#38bdf8";
+const BB_MID_COLOR = "#94a3b8";
 const EXT_COLOR = { 1.272: "#a78bfa", 1.618: "#c084fc", 2: "#e879f9", 2.618: "#f0abfc" };
 
 /**
+ * @param {{ bb?: {upper:(number|null)[], mid:(number|null)[], lower:(number|null)[]}, title?: string, subtitle?: string }} [opts]
+ *   bb = Bollinger sejajar indeks `candles` (dipakai !fibb); title / subtitle menggantikan teks bawaan. Tanpa opsi = chart !fib biasa.
  * @returns {Buffer} PNG
  */
-function renderFibChart({ candles, coin, tf, fib }) {
+function renderFibChart({ candles, coin, tf, fib, bb = null, title: titleOverride = null, subtitle: subtitleOverride = null }) {
   if (!candles || candles.length < 10) throw new Error("CANDLES_TOO_FEW");
   const family = fontFamily();
   const n = candles.length;
@@ -189,6 +193,41 @@ function renderFibChart({ candles, coin, tf, fib }) {
     g.restore();
   }
 
+  // ----- Bollinger Bands (opsional; di bawah garis level & candle, dipotong di panel harga) -----
+  if (bb) {
+    g.save();
+    g.beginPath();
+    g.rect(pPrice.x, pPrice.y, pPrice.w, pPrice.h);
+    g.clip();
+    const series = (arr) => bars.map((_, k) => ({ x: X(from + k), v: arr[from + k] })).filter((p) => p.v != null);
+    const up = series(bb.upper);
+    const lo = series(bb.lower);
+    const mi = series(bb.mid);
+    if (up.length > 1 && lo.length === up.length) {
+      g.globalAlpha = 0.07;
+      g.fillStyle = BB_COLOR;
+      g.beginPath();
+      up.forEach((p, i) => (i ? g.lineTo(p.x, Yp(p.v)) : g.moveTo(p.x, Yp(p.v))));
+      for (let i = lo.length - 1; i >= 0; i--) g.lineTo(lo[i].x, Yp(lo[i].v));
+      g.closePath();
+      g.fill();
+    }
+    g.globalAlpha = 0.95;
+    const line = (pts, color, width, dash) => {
+      if (pts.length < 2) return;
+      g.strokeStyle = color;
+      g.lineWidth = width;
+      g.setLineDash(dash);
+      g.beginPath();
+      pts.forEach((p, i) => (i ? g.lineTo(p.x, Yp(p.v)) : g.moveTo(p.x, Yp(p.v))));
+      g.stroke();
+    };
+    line(up, BB_COLOR, 1.8, []);
+    line(lo, BB_COLOR, 1.8, []);
+    line(mi, BB_MID_COLOR, 1.4, [6, 5]);
+    g.restore();
+  }
+
   // ----- garis level (dari awal swing sampai tepi kanan) -----
   const x0 = Math.max(pPrice.x, X(Math.max(fib.startIdx, from)));
   for (const l of drawn) {
@@ -281,7 +320,7 @@ function renderFibChart({ candles, coin, tf, fib }) {
   g.textBaseline = "middle";
   g.font = `bold 28px ${family}`;
   g.fillStyle = C.title;
-  const title = `${coin}/USDT  ${tf}  Fibonacci`;
+  const title = titleOverride || `${coin}/USDT  ${tf}  Fibonacci`;
   g.fillText(title, Lm, 26);
   const titleW = g.measureText(title).width;
   const prev = candles[Math.max(0, n - 2)];
@@ -291,7 +330,7 @@ function renderFibChart({ candles, coin, tf, fib }) {
   g.fillText(`${fmtPrice(last.c)}  (${chgLast >= 0 ? "+" : ""}${chgLast.toFixed(2)}%)`, Lm + titleW + 20, 27);
   g.font = `19px ${family}`;
   g.fillStyle = C.axis;
-  g.fillText(`Close candle only · swing = highest high / lowest low of last ${LOOKBACK} candles · ${up ? "Uptrend (low → high)" : "Downtrend (high → low)"}`, Lm, 56);
+  g.fillText(subtitleOverride || `Close candle only · swing = highest high / lowest low of last ${LOOKBACK} candles · ${up ? "Uptrend (low → high)" : "Downtrend (high → low)"}`, Lm, 56);
 
   return canvas.toBuffer("image/png");
 }
@@ -389,4 +428,4 @@ async function runFib(sock, msg, { jid, lang }, { coin, tf }) {
   }
 }
 
-module.exports = { runFib, computeFib, retraceDepth, renderFibChart, LOOKBACK };
+module.exports = { runFib, computeFib, retraceDepth, renderFibChart, buildRows, ratioLabel, LOOKBACK, RETR };

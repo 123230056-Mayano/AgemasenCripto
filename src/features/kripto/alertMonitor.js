@@ -12,6 +12,7 @@
  *   - ringkasan harian (!harian): dikirim sekali per hari pada jam pilihan user.
  *   - alarm skenario sinyal (!alertsignal): skenario LONG / SHORT baru seperti !signal, hanya konfirmasi (candle closed). Mesinnya di signalAlertEngine.js.
  *   - alarm titik balik S/R (!alertsnr): reject / tembus (default), wick / sweep (opt-in), hanya konfirmasi (candle closed). Mesinnya di snrAlertEngine.js.
+ *   - alarm Fibo + Bollinger (!alertfibb): BUY / SELL area baru dari candle closed (zona retracement fib + sentuhan pita Bollinger); tiap kejadian dikirim sebagai gambar chart + caption. Mesinnya di fibbAlertEngine.js.
  *   - alarm Farley (!alertfarley, kripto + forex): skenario BUY / SELL baru dari candle closed; tiap kejadian dikirim sebagai gambar chart + caption (teks saja kalau chart gagal). Mesinnya di farleyAlertEngine.js.
  *   - peringatan posisi (!posisi): WASPADA / CUT / time stop / saran break-even. Mesinnya di positionEngine.js.
  *   - alarm Higher High / Lower Low (!alerthhll): swing baru (dini) + close menembus swing (konfirmasi), dari candle closed.
@@ -70,6 +71,8 @@ const { createSnrEngine } = require("./snrAlertEngine");
 const { createSignalEngine } = require("./signalAlertEngine");
 const { createFarleyEngine } = require("./farleyAlertEngine");
 const { renderFarleyPng } = require("./farley");
+const { createFibbEngine } = require("./fibbAlertEngine");
+const { renderFibbPng } = require("./fibb");
 const { createPositionEngine } = require("./positionEngine");
 const { createHhllEngine } = require("./hhllAlertEngine");
 const { createPatternEngine } = require("./patternAlertEngine");
@@ -80,7 +83,7 @@ const { createAmdEngine } = require("./amdAlertEngine");
 const { renderAmdChart } = require("./amd");
 const { createDusdtEngine } = require("./dusdtAlertEngine");
 const { getDusdt, renderDusdtChart } = require("./dusdt");
-const { ADV_ALERT_CONFIG: ADV, SNR_ALERT_CONFIG: SNR, SIGNAL_ALERT_CONFIG: SIGCFG, FARLEY_ALERT_CONFIG: FARCFG, HHLL_ALERT_CONFIG: HHLL, PATTERN_ALERT_CONFIG: PATCFG, AMD_ALERT_CONFIG: AMDCFG, DUSDT_ALERT_CONFIG: DUSDTCFG, POSITION_CONFIG: POSCFG } = require("../../config/indicatorConfig");
+const { ADV_ALERT_CONFIG: ADV, SNR_ALERT_CONFIG: SNR, SIGNAL_ALERT_CONFIG: SIGCFG, FARLEY_ALERT_CONFIG: FARCFG, FIBB_ALERT_CONFIG: FIBBCFG, HHLL_ALERT_CONFIG: HHLL, PATTERN_ALERT_CONFIG: PATCFG, AMD_ALERT_CONFIG: AMDCFG, DUSDT_ALERT_CONFIG: DUSDTCFG, POSITION_CONFIG: POSCFG } = require("../../config/indicatorConfig");
 
 const BINANCE = (process.env.BINANCE_BASE || "https://data-api.binance.vision").replace(/\/+$/, "");
 const POLL_MS = Math.max(10_000, Number(process.env.ALERT_POLL_MS) || 30_000);
@@ -106,6 +109,7 @@ let advBusy = false;
 let snrBusy = false;
 let signalBusy = false;
 let farleyBusy = false;
+let fibbBusy = false;
 let posBusy = false;
 let hhllBusy = false;
 let patBusy = false;
@@ -656,6 +660,21 @@ const farleyEngine = createFarleyEngine({
 /** Pemeriksaan alarm Farley (konfirmasi). Dipanggil timer; aman dipanggil manual untuk uji. */
 const checkFarleyAlerts = (now) => (sockRef ? farleyEngine.tick(now) : undefined);
 
+// ---------- alarm Fibo + Bollinger (!alertfibb) ----------
+// Kripto saja (candle Binance). Tiap kejadian dikirim sebagai gambar chart (candle + level fib + pita Bollinger) + caption; chart gagal -> teks saja.
+const fibbEngine = createFibbEngine({
+  store,
+  fetchCandles,
+  notify,
+  notifyImage,
+  renderChart: (ev, lang) => renderFibbPng(lang, { closed: ev.closed, coin: ev.coin, tf: ev.tf, analysis: ev.analysis }),
+  langFor,
+  isUnsupported: (err) => err instanceof UnsupportedCoinError,
+});
+
+/** Pemeriksaan alarm Fibo + Bollinger (konfirmasi). Dipanggil timer; aman dipanggil manual untuk uji. */
+const checkFibbAlerts = (now) => (sockRef ? fibbEngine.tick(now) : undefined);
+
 // ---------- peringatan posisi (!posisi) ----------
 const positionEngine = createPositionEngine({
   store,
@@ -814,6 +833,18 @@ function setAlertSocket(sock) {
   }, FARCFG.CHECK_MS).unref?.();
 
   setInterval(async () => {
+    if (fibbBusy) return;
+    fibbBusy = true;
+    try {
+      await checkFibbAlerts();
+    } catch (err) {
+      console.log("[fibbalert] pengecekan gagal:", err.message);
+    } finally {
+      fibbBusy = false;
+    }
+  }, FIBBCFG.CHECK_MS).unref?.();
+
+  setInterval(async () => {
     if (posBusy) return;
     posBusy = true;
     try {
@@ -874,4 +905,4 @@ function setAlertSocket(sock) {
   }, DUSDTCFG.CHECK_MS).unref?.();
 }
 
-module.exports = { setAlertSocket, notifyImage, checkPriceAlerts, checkDaily, checkDivergence, checkAdvAlerts, checkSnrAlerts, checkSignalAlerts, checkFarleyAlerts, checkPositions, checkHhllAlerts, checkPatternAlerts, checkAmdAlerts, checkDusdtAlerts, localNow, fetchPrices };
+module.exports = { setAlertSocket, notifyImage, checkPriceAlerts, checkDaily, checkDivergence, checkAdvAlerts, checkSnrAlerts, checkSignalAlerts, checkFarleyAlerts, checkFibbAlerts, checkPositions, checkHhllAlerts, checkPatternAlerts, checkAmdAlerts, checkDusdtAlerts, localNow, fetchPrices };

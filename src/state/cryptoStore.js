@@ -74,7 +74,7 @@ const posInt = (v, d) => (Number.isInteger(Number(v)) && Number(v) > 0 ? Number(
 const MAX_DIV_ALERTS = posInt(process.env.DIV_ALERT_MAX_PER_USER, 10);
 const MAX_DIV_ALERTS_PER_CHAT = posInt(process.env.DIV_ALERT_MAX_PER_CHAT, 20);
 // Batas alarm indikator lanjutan (!alertind, item 10); angka sama dengan ADV_ALERT_CONFIG.
-const { ADV_ALERT_CONFIG, SNR_ALERT_CONFIG, SIGNAL_ALERT_CONFIG, HHLL_ALERT_CONFIG, AMD_ALERT_CONFIG, DUSDT_ALERT_CONFIG, POSITION_CONFIG, PATTERN_ALERT_CONFIG, FARLEY_ALERT_CONFIG } = require("../config/indicatorConfig");
+const { ADV_ALERT_CONFIG, SNR_ALERT_CONFIG, SIGNAL_ALERT_CONFIG, HHLL_ALERT_CONFIG, AMD_ALERT_CONFIG, DUSDT_ALERT_CONFIG, POSITION_CONFIG, PATTERN_ALERT_CONFIG, FARLEY_ALERT_CONFIG, FIBB_ALERT_CONFIG } = require("../config/indicatorConfig");
 const MAX_ADV_ALERTS = ADV_ALERT_CONFIG.MAX_PER_USER;
 const MAX_ADV_ALERTS_PER_CHAT = ADV_ALERT_CONFIG.MAX_PER_CHAT;
 // Batas alarm titik balik S/R (!alertsnr); angka sama dengan SNR_ALERT_CONFIG.
@@ -86,6 +86,9 @@ const MAX_SIGNAL_ALERTS_PER_CHAT = SIGNAL_ALERT_CONFIG.MAX_PER_CHAT;
 // Batas alarm Farley (!alertfarley); angka sama dengan FARLEY_ALERT_CONFIG.
 const MAX_FARLEY_ALERTS = FARLEY_ALERT_CONFIG.MAX_PER_USER;
 const MAX_FARLEY_ALERTS_PER_CHAT = FARLEY_ALERT_CONFIG.MAX_PER_CHAT;
+// Batas alarm Fibo+Bollinger (!alertfibb); angka sama dengan FIBB_ALERT_CONFIG.
+const MAX_FIBB_ALERTS = FIBB_ALERT_CONFIG.MAX_PER_USER;
+const MAX_FIBB_ALERTS_PER_CHAT = FIBB_ALERT_CONFIG.MAX_PER_CHAT;
 
 // Batas posisi (!posisi); angka sama dengan POSITION_CONFIG.
 const MAX_POSITIONS = POSITION_CONFIG.MAX_PER_USER;
@@ -143,7 +146,7 @@ let failures = 0;
 let started = false;
 
 // ---------- helper ----------
-const isEmpty = (u) => !u || (!u.watch?.length && !u.alerts?.length && !u.divAlerts?.length && !u.advAlerts?.length && !u.snrAlerts?.length && !u.signalAlerts?.length && !u.farleyAlerts?.length && !u.hhllAlerts?.length && !u.patternAlerts?.length && !u.amdAlerts?.length && !u.dusdtAlerts?.length && !u.positions?.length && !u.daily && !u.tf);
+const isEmpty = (u) => !u || (!u.watch?.length && !u.alerts?.length && !u.divAlerts?.length && !u.advAlerts?.length && !u.snrAlerts?.length && !u.signalAlerts?.length && !u.farleyAlerts?.length && !u.fibbAlerts?.length && !u.hhllAlerts?.length && !u.patternAlerts?.length && !u.amdAlerts?.length && !u.dusdtAlerts?.length && !u.positions?.length && !u.daily && !u.tf);
 const snap = (jid) => (isEmpty(users[jid]) ? null : JSON.stringify(users[jid]));
 const hasPending = () => dirtyUsers.size > 0 || dirtyClosed.size > 0 || dirtySent.size > 0 || pruneBefore != null;
 
@@ -456,6 +459,8 @@ function user(jid) {
   if (!u.nextSignalId) u.nextSignalId = 1;
   if (!Array.isArray(u.farleyAlerts)) u.farleyAlerts = [];
   if (!u.nextFarleyId) u.nextFarleyId = 1;
+  if (!Array.isArray(u.fibbAlerts)) u.fibbAlerts = [];
+  if (!u.nextFibbId) u.nextFibbId = 1;
   if (!Array.isArray(u.hhllAlerts)) u.hhllAlerts = [];
   if (!u.nextHhllId) u.nextHhllId = 1;
   // v2 (konteks HHLL): field baru diberi default "mati" supaya alarm lama berperilaku persis seperti sebelumnya
@@ -586,7 +591,7 @@ function clearAlerts(jid) {
 
 /**
  * Hapus SEMUA alert milik user dari semua jenis: harga/level (!alert, !alertlevel) dan alarm
- * divergence, indikator, S/R, sinyal, Farley, HH/LL, pola, AMD, USDT.D. Posisi (!posisi) dan ringkasan harian TIDAK ikut.
+ * divergence, indikator, S/R, sinyal, Farley, Fibb, HH/LL, pola, AMD, USDT.D. Posisi (!posisi) dan ringkasan harian TIDAK ikut.
  * @returns {Object<string, number>} jumlah terhapus per jenis (hanya jenis yang ada isinya)
  */
 function clearEveryAlert(jid) {
@@ -597,6 +602,7 @@ function clearEveryAlert(jid) {
     snr: clearSnrAlerts,
     signal: clearSignalAlerts,
     farley: clearFarleyAlerts,
+    fibb: clearFibbAlerts,
     hhll: clearHhllAlerts,
     pattern: clearPatternAlerts,
     amd: clearAmdAlerts,
@@ -1003,6 +1009,63 @@ function allFarleyAlerts() {
   return out;
 }
 
+// ---------- alarm Fibo + Bollinger (!alertfibb) ----------
+/**
+ * fibbAlerts: [{ id: "b1", chat, coin: "BTC"|"WATCHLIST", tf, dirs: ["buy","sell"], zone: "wide"|"golden", strong: bool, createdAt, active: true }]
+ * Hanya candle closed. Penanda kejadian terkirim memakai wasSent / markSent.
+ */
+const getFibbAlerts = (jid) => [...user(jid).fibbAlerts];
+
+/** @returns {object|"full"|"chatFull"|"exists"} */
+function addFibbAlert(jid, sub) {
+  const u = user(jid);
+  if (u.fibbAlerts.some((a) => a.chat === sub.chat && a.coin === sub.coin && a.tf === sub.tf && sameList(a.dirs, sub.dirs) && a.zone === sub.zone && !!a.strong === !!sub.strong)) return "exists";
+  if (u.fibbAlerts.length >= MAX_FIBB_ALERTS) return "full";
+  if (countFibbAlertsInChat(sub.chat) >= MAX_FIBB_ALERTS_PER_CHAT) return "chatFull";
+  const entry = { ...sub, id: `b${u.nextFibbId++}`, createdAt: Date.now(), active: true };
+  u.fibbAlerts.push(entry);
+  save(jid);
+  return entry;
+}
+
+function countFibbAlertsInChat(chat) {
+  let n = 0;
+  for (const u of Object.values(users)) for (const a of u.fibbAlerts || []) if (a.chat === chat) n++;
+  return n;
+}
+
+/** id boleh "b3" / "B3" / "3". @returns {boolean} */
+function removeFibbAlert(jid, id) {
+  const u = user(jid);
+  const want = /^\d+$/.test(String(id)) ? `b${id}` : String(id).toLowerCase();
+  const i = u.fibbAlerts.findIndex((a) => a.id === want);
+  if (i < 0) return false;
+  u.fibbAlerts.splice(i, 1);
+  prune(jid);
+  save(jid);
+  return true;
+}
+
+/** @returns {number} jumlah alarm yang dihapus */
+function clearFibbAlerts(jid) {
+  const u = user(jid);
+  const n = u.fibbAlerts.length;
+  if (!n) return 0;
+  u.fibbAlerts = [];
+  prune(jid);
+  save(jid);
+  return n;
+}
+
+/** Semua alarm Fibb aktif semua user (untuk monitor). */
+function allFibbAlerts() {
+  const out = [];
+  for (const [jid, u] of Object.entries(users)) {
+    for (const a of u.fibbAlerts || []) if (a.active !== false) out.push({ userJid: jid, sub: a });
+  }
+  return out;
+}
+
 // ---------- posisi pengguna (!posisi) ----------
 /**
  * positions: [{ id: "p1", chat, coin, tf, dir: "long"|"short", entry, sl, sl0, tp1, openedAt, active: true,
@@ -1353,6 +1416,8 @@ module.exports = {
   MAX_SIGNAL_ALERTS_PER_CHAT,
   MAX_FARLEY_ALERTS,
   MAX_FARLEY_ALERTS_PER_CHAT,
+  MAX_FIBB_ALERTS,
+  MAX_FIBB_ALERTS_PER_CHAT,
   MAX_POSITIONS,
   MAX_POSITIONS_PER_CHAT,
   MAX_HHLL_ALERTS,
@@ -1409,6 +1474,12 @@ module.exports = {
   clearFarleyAlerts,
   allFarleyAlerts,
   countFarleyAlertsInChat,
+  getFibbAlerts,
+  addFibbAlert,
+  removeFibbAlert,
+  clearFibbAlerts,
+  allFibbAlerts,
+  countFibbAlertsInChat,
   getPositions,
   addPosition,
   updatePosition,

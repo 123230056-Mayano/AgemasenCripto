@@ -722,4 +722,43 @@ const FARLEY_ALERT_CONFIG = Object.freeze({
   CONCURRENCY: _posInt(process.env.FARLEY_ALERT_CONCURRENCY, 8),
 });
 
-module.exports = { PATTERN_ALERT_CONFIG, INDICATOR_CONFIG, BIAS_CONFIG, SIGNAL_CONFIG, PROB_CONFIG, SUDDEN_CONFIG, POSITION_CONFIG, ADV_ALERT_CONFIG, SNR_ALERT_CONFIG, SIGNAL_ALERT_CONFIG, HHLL_CONFIG, HHLL_CONTEXT_CONFIG, HHLL_BACKTEST_CONFIG, HHLL_ALERT_CONFIG, TRENSTATE_CONFIG, STRENGTH_CONFIG, GAUSSIAN_CONFIG, PATTERN_CONFIG, AMD_CONFIG, AMD_ALERT_CONFIG, DUSDT_ALERT_CONFIG, FARLEY_CONFIG, FARLEY_ALERT_CONFIG };
+// =====================================================================
+// Fibo + Bollinger (!fibb / !alertfibb): konfluens zona retracement Fibonacci (swing sama dengan !fib) dengan Bollinger Bands.
+// BUY area  = tren naik (swing low -> high), close di zona retracement, low menyentuh pita BAWAH lalu close kembali di dalam pita.
+// SELL area = tren turun (swing high -> low), close di zona retracement, high menyentuh pita ATAS lalu close kembali di dalam pita.
+// Semua angka = DEFAULT SISTEM (Bollinger 20,2 standar), belum di-backtest. Naikkan VERSION kalau aturan diubah.
+// =====================================================================
+const FIBB_CONFIG = Object.freeze({
+  VERSION: 1,
+  BB_PERIOD: _posInt(process.env.FIBB_BB_PERIOD, 20),
+  BB_K: _num(process.env.FIBB_BB_K, 2),
+  ZONE_MIN: _num(process.env.FIBB_ZONE_MIN, 0.382), // zona retracement default: 0.382 - 0.786 (kedalaman retrace dari ujung swing)
+  ZONE_MAX: _num(process.env.FIBB_ZONE_MAX, 0.786),
+  GOLDEN_MIN: 0.5, // opsi `golden` = hanya golden zone 0.5 - 0.618
+  GOLDEN_MAX: 0.618,
+  TOUCH_ATR: _num(process.env.FIBB_TOUCH_ATR, 0.1), // toleransi \"menyentuh\" pita (x ATR)
+  CONFLUENCE_ATR: _num(process.env.FIBB_CONFLUENCE_ATR, 0.5), // level fib dianggap berimpit dengan pita bila selisih <= N x ATR
+  CONFLUENCE_RATIOS: Object.freeze([0.236, 0.382, 0.5, 0.618, 0.786]),
+  BW_LOOKBACK: 50, // pembanding bandwidth (squeeze / ekspansi)
+  BW_SQUEEZE_PCT: 20,
+  BW_EXPAND_PCT: 80,
+  MIN_CANDLES: 60,
+});
+
+const FIBB_ALERT_CONFIG = Object.freeze({
+  VERSION: 1,
+  CHECK_MS: Math.max(5_000, _posInt(process.env.FIBB_ALERT_CHECK_MS, 15_000)),
+  INTERVAL_MS: Math.max(30_000, _posInt(process.env.FIBB_ALERT_INTERVAL_MS, 60_000)),
+  MAX_PAIRS: _posInt(process.env.FIBB_ALERT_MAX_PAIRS, 60),
+  FINAL_DELAY_MS: _posInt(process.env.FIBB_ALERT_FINAL_DELAY_MS, 10_000),
+  COOLDOWN_CANDLES: Math.max(0, Math.floor(_num(process.env.FIBB_ALERT_COOLDOWN_CANDLES, 3))),
+  MIN_CANDLES: 61, // FIBB_CONFIG.MIN_CANDLES + 1 untuk pembanding candle sebelumnya
+  MAX_MSG_PER_CHAT_HOUR: _posInt(process.env.FIBB_ALERT_MAX_MSG_PER_CHAT_HOUR, 20),
+  BLOCKS_PER_MSG: _posInt(process.env.FIBB_ALERT_BLOCKS_PER_MSG, 3),
+  SEND_GAP_MS: _posInt(process.env.FIBB_ALERT_SEND_GAP_MS, 1_000),
+  MAX_PER_USER: _posInt(process.env.FIBB_ALERT_MAX_PER_USER, 10),
+  MAX_PER_CHAT: _posInt(process.env.FIBB_ALERT_MAX_PER_CHAT, 20),
+  CONCURRENCY: _posInt(process.env.FIBB_ALERT_CONCURRENCY, 8),
+});
+
+module.exports = { PATTERN_ALERT_CONFIG, INDICATOR_CONFIG, BIAS_CONFIG, SIGNAL_CONFIG, PROB_CONFIG, SUDDEN_CONFIG, POSITION_CONFIG, ADV_ALERT_CONFIG, SNR_ALERT_CONFIG, SIGNAL_ALERT_CONFIG, HHLL_CONFIG, HHLL_CONTEXT_CONFIG, HHLL_BACKTEST_CONFIG, HHLL_ALERT_CONFIG, TRENSTATE_CONFIG, STRENGTH_CONFIG, GAUSSIAN_CONFIG, PATTERN_CONFIG, AMD_CONFIG, AMD_ALERT_CONFIG, DUSDT_ALERT_CONFIG, FARLEY_CONFIG, FARLEY_ALERT_CONFIG, FIBB_CONFIG, FIBB_ALERT_CONFIG };
