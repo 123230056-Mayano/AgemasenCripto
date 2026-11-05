@@ -6,6 +6,11 @@
  * !hhll <koin> [tf]: market structure Higher High / Higher Low / Lower High / Lower Low.
  * Swing terakhir berlabel + status struktur (naik / turun / belum searah) + dua level kunci
  * (swing high & swing low terakhir) + chart zigzag berlabel. Data langsung dari Binance (market.js).
+ *
+ * FOREX: pair dikenali otomatis lewat adapter pasar (marketAdapter.js -> forex/forexMarket.js): !hhll eurusd 4h, !hhll eur/usd,
+ * !hhll xauusd (alias !fxhhll). Logika swing SAMA persis dengan kripto; yang berbeda hanya data (Yahoo, tanpa volume), format harga
+ * (digits pair, tanpa "$"), jarak level dalam pip, TF 15m ditolak untuk USDIDR, dan statistik backtest tidak dipakai (hasilnya dari
+ * data kripto, tidak sebanding untuk forex). Kripto tidak berubah.
  * Logika swing ada di hhllCore.js (sama persis dengan yang dipakai alarm !alerthhll).
  * Blok skenario (status menunggu/terkonfirmasi/gagal, lanjut jika, batal jika, konteks TF besar + grade, statistik historis)
  * dinilai oleh hhllContext.js; statistik dibaca dari data/hhll-stats.json hasil scripts/backtest-hhll.js (disembunyikan kalau N kecil
@@ -16,8 +21,9 @@ const fs = require("fs");
 const path = require("path");
 const { createCanvas } = require("@napi-rs/canvas");
 const { t } = require("../../i18n");
-const { C, fontFamily, fmtPrice, niceStep, tickLabel } = require("./chartKit");
-const { TF_LABEL, fetchCandles, fetchTicker, fmtUsd, fmtLevel, fmtPct, pctFrom } = require("./market");
+const { C, fontFamily, fmtPrice: fmtPriceKit, niceStep, tickLabel } = require("./chartKit");
+const { TF_LABEL, fmtLevel, fmtPct, pctFrom } = require("./market");
+const { resolveMarket } = require("./marketAdapter");
 const { DAILY_TZ } = require("./divAlertCore");
 const { computeStructure, CFG } = require("./hhllCore");
 const { htfOf, assessEvent, scanStatus, CX } = require("./hhllContext");
@@ -39,8 +45,9 @@ function fmtWhen(lang, ms, tf) {
 
 // ---------- chart ----------
 /** @returns {Buffer} PNG */
-function renderHhllChart({ candles, coin, tf, st, title: titleOverride = null, minPct = CFG.MIN_SWING_PCT, scenario = null }) {
+function renderHhllChart({ candles, coin, tf, st, title: titleOverride = null, minPct = CFG.MIN_SWING_PCT, scenario = null, digits = null }) {
   if (!candles || candles.length < 10) throw new Error("CANDLES_TOO_FEW");
+  const fmtPrice = (p) => fmtPriceKit(p, digits); // digits = presisi tetap pair forex; null = format bertingkat kripto (perilaku lama)
   const family = fontFamily();
   const n = candles.length;
   const last = candles[n - 1];
@@ -277,21 +284,29 @@ function renderHhllChart({ candles, coin, tf, st, title: titleOverride = null, m
 }
 
 // ---------- teks ----------
-function buildSwingLines(lang, st, tf) {
+function buildSwingLines(lang, st, tf, mk = null) {
+  const fl = mk ? mk.fmtLevel : fmtLevel;
   const recent = st.swings.slice(-CFG.SHOW_SWINGS);
   return recent
     .map((s) => {
       const label = s.label || (s.type === "H" ? "high" : "low");
       const icon = (s.label && LABEL_ICON[s.label]) || "▫️";
-      return t(lang, "hhll.swing.line", { icon, label, price: fmtLevel(s.price), when: fmtWhen(lang, s.t, tf) });
+      return t(lang, "hhll.swing.line", { icon, label, price: fl(s.price), when: fmtWhen(lang, s.t, tf) });
     })
     .join("\n");
 }
 
-function buildLevels(lang, st, price) {
+function buildLevels(lang, st, price, mk = null) {
+  const fl = mk ? mk.fmtLevel : fmtLevel;
+  const fp = mk ? mk.fmtPct : fmtPct;
+  // forex: jarak ke level ditambah dalam pip (pair tanpa pip, mis. USDIDR, tidak diberi)
+  const pipTxt = (level) => {
+    const pips = mk && mk.pips ? mk.pips(price - level) : null;
+    return pips != null ? ` · ${pips} pip` : "";
+  };
   const rows = [];
-  if (st.lastHigh) rows.push(t(lang, "hhll.levels.high", { price: fmtLevel(st.lastHigh.price), pct: fmtPct(pctFrom(price, st.lastHigh.price)) }));
-  if (st.lastLow) rows.push(t(lang, "hhll.levels.low", { price: fmtLevel(st.lastLow.price), pct: fmtPct(pctFrom(price, st.lastLow.price)) }));
+  if (st.lastHigh) rows.push(t(lang, "hhll.levels.high", { price: fl(st.lastHigh.price), pct: fp(pctFrom(price, st.lastHigh.price)) }) + pipTxt(st.lastHigh.price));
+  if (st.lastLow) rows.push(t(lang, "hhll.levels.low", { price: fl(st.lastLow.price), pct: fp(pctFrom(price, st.lastLow.price)) }) + pipTxt(st.lastLow.price));
   return rows.join("\n");
 }
 
@@ -315,7 +330,8 @@ const fmtNum = (lang, v, d = 1) => (lang === "id" ? v.toFixed(d).replace(".", ",
  * Blok skenario bersyarat. Kosong kalau struktur belum searah (range) atau data tidak cukup.
  * @returns {{text:string, chart:{invalidation:number|null, target:number|null}|null}}
  */
-function buildScenario(lang, { coin, tf, st, candles, htf = null, stats = null }) {
+function buildScenario(lang, { coin, tf, st, candles, htf = null, stats = null, mk = null }) {
+  const fl = mk ? mk.fmtLevel : fmtLevel; // forex: digits pair; kripto: format lama
   const dir = st.trend === "up" ? "up" : st.trend === "down" ? "down" : null;
   const empty = { text: "", chart: null };
   if (!dir) return empty;
@@ -336,15 +352,15 @@ function buildScenario(lang, { coin, tf, st, candles, htf = null, stats = null }
   }
 
   const lines = [t(lang, "hhll.scn.title")];
-  const lvl = fmtLevel(status.level ?? broken.price);
+  const lvl = fl(status.level ?? broken.price);
   if (status.status === "waiting") lines.push(t(lang, "hhll.scn.status.waiting", { level: lvl }));
   else if (status.status === "failed") lines.push(t(lang, "hhll.scn.status.failed", { level: lvl }));
   else lines.push(status.barsAgo === 0 ? t(lang, "hhll.scn.status.confirmed.now", { level: lvl }) : t(lang, "hhll.scn.status.confirmed.ago", { level: lvl, n: status.barsAgo }));
 
   if (status.status !== "failed") {
     lines.push(t(lang, `hhll.scn.go.${status.status}.${dir}`, { level: lvl }));
-    if (ctx?.target != null) lines.push(t(lang, "hhll.scn.target", { target: fmtLevel(ctx.target), rr: ctx.rr != null ? t(lang, "hhll.scn.rr", { rr: fmtNum(lang, ctx.rr) }) : "" }));
-    if (ctx?.invalidation != null) lines.push(t(lang, `hhll.scn.cancel.${dir}`, { level: fmtLevel(ctx.invalidation) }));
+    if (ctx?.target != null) lines.push(t(lang, "hhll.scn.target", { target: fl(ctx.target), rr: ctx.rr != null ? t(lang, "hhll.scn.rr", { rr: fmtNum(lang, ctx.rr) }) : "" }));
+    if (ctx?.invalidation != null) lines.push(t(lang, `hhll.scn.cancel.${dir}`, { level: fl(ctx.invalidation) }));
   }
 
   if (ctx) {
@@ -373,39 +389,62 @@ function buildScenario(lang, { coin, tf, st, candles, htf = null, stats = null }
 const trendKey = (trend) => (trend === "up" ? "hhll.trend.up" : trend === "down" ? "hhll.trend.down" : "hhll.trend.range");
 
 async function runHhll(sock, msg, { jid, lang }, { coin, tf }) {
-  const htfTf = htfOf(tf);
-  const [candles, tick, htf] = await Promise.all([fetchCandles(coin, tf), fetchTicker(coin), htfTf ? fetchCandles(coin, htfTf).catch(() => null) : null]);
-  const st = candles.length >= CFG.MIN_CANDLES ? computeStructure(candles) : null;
-  if (!st || !st.lastHigh || !st.lastLow || !st.trend) {
-    await sock.sendMessage(jid, { text: t(lang, "hhll.none", { coin, tf: TF_LABEL[tf] }) }, { quoted: msg });
+  // Adapter pasar: pair forex dikenali lebih dulu (eurusd, eur/usd, xauusd), selain itu kripto persis seperti sebelumnya.
+  const mk = resolveMarket(coin);
+  const isFx = mk.id === "forex";
+
+  // TF yang tidak boleh dipakai pair ini (USDIDR: mulai 1H). Ditolak tanpa mengambil data.
+  if (isFx && !mk.allowedTfs([tf]).length) {
+    await sock.sendMessage(jid, { text: t(lang, "hhll.fx.tfNotAllowed", { pair: mk.symbol }) }, { quoted: msg });
     return;
   }
 
-  // blok skenario: kalau penilaian gagal, !hhll tetap jalan seperti biasa tanpa blok itu
+  const htfTf = htfOf(tf);
+  const htfOk = htfTf && (!isFx || mk.allowedTfs([htfTf]).length);
+  const [candles, tick, htf] = await Promise.all([mk.fetchCandles(tf), mk.fetchTicker(), htfOk ? mk.fetchCandles(htfTf).catch(() => null) : null]);
+  const st = candles.length >= CFG.MIN_CANDLES ? computeStructure(candles) : null;
+  if (!st || !st.lastHigh || !st.lastLow || !st.trend) {
+    await sock.sendMessage(jid, { text: t(lang, "hhll.none", { coin: mk.symbol, tf: TF_LABEL[tf] }) }, { quoted: msg });
+    return;
+  }
+
+  // blok skenario: kalau penilaian gagal, !hhll tetap jalan seperti biasa tanpa blok itu.
+  // Statistik backtest hanya untuk kripto (dihitung dari data kripto; tidak sebanding untuk forex).
+  const fx = isFx ? mk : null;
   let scn = { text: "", chart: null };
   try {
-    scn = buildScenario(lang, { coin, tf, st, candles, htf, stats: loadStats() });
+    scn = buildScenario(lang, { coin, tf, st, candles, htf, stats: isFx ? null : loadStats(), mk: fx });
   } catch (err) {
     console.log("[kripto] !hhll skenario gagal, lanjut tanpa blok skenario:", err.message);
   }
 
-  const caption = t(lang, "hhll.body", {
-    coin,
+  let caption = t(lang, "hhll.body", {
+    coin: isFx ? mk.symbol : `${coin}/USDT`,
     tf: TF_LABEL[tf],
-    price: fmtUsd(tick.price),
-    change: fmtPct(tick.changePct),
+    price: mk.fmtPrice(tick.price),
+    change: mk.fmtPct(tick.changePct),
     trend: t(lang, trendKey(st.trend), { h: st.lastHighLabel || "-", l: st.lastLowLabel || "-" }),
-    swings: t(lang, "hhll.swings.title") + "\n" + buildSwingLines(lang, st, tf),
-    levels: buildLevels(lang, st, tick.price) + (scn.text ? "\n\n" + scn.text : ""),
-    note: t(lang, `hhll.note.${st.trend}`, { high: fmtLevel(st.lastHigh.price), low: fmtLevel(st.lastLow.price) }),
+    swings: t(lang, "hhll.swings.title") + "\n" + buildSwingLines(lang, st, tf, fx),
+    levels: buildLevels(lang, st, tick.price, fx) + (scn.text ? "\n\n" + scn.text : ""),
+    note: t(lang, `hhll.note.${st.trend}`, { high: mk.fmtLevel(st.lastHigh.price), low: mk.fmtLevel(st.lastLow.price) }),
     win: CFG.PIVOT_WIN,
     minPct: CFG.MIN_SWING_PCT,
   });
 
+  // Forex: catatan sumber data + status pasar (tutup / data macet) + emas futures + gap pembukaan.
+  if (isFx) {
+    const notes = [t(lang, "hhll.fx.note")];
+    const status = await mk.status();
+    if (!status.open) notes.unshift(t(lang, status.reason === "stale" ? "hhll.fx.stale" : "hhll.fx.closed"));
+    if (mk.proxy === "futures") notes.push(t(lang, "hhll.fx.gold"));
+    if (candles.slice(-15).some((k) => k.gap === true)) notes.push(t(lang, "hhll.fx.gap"));
+    caption += "\n\n" + notes.join("\n");
+  }
+
   // Kalau render gagal (mis. font/canvas bermasalah) tetap kirim versi teks supaya fitur tidak mati total.
   let png = null;
   try {
-    png = renderHhllChart({ candles, coin, tf: TF_LABEL[tf], st, scenario: scn.chart });
+    png = renderHhllChart({ candles, coin, tf: TF_LABEL[tf], st, scenario: scn.chart, title: isFx ? `${mk.symbol}  ${TF_LABEL[tf]}  Higher High / Lower Low` : null, digits: isFx ? mk.digits : null });
   } catch (err) {
     console.log("[kripto] !hhll chart gagal, kirim teks saja:", err.message);
   }

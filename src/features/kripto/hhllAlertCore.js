@@ -32,6 +32,8 @@ const { t } = require("../../i18n");
 const { HHLL_ALERT_CONFIG: HA, HHLL_CONTEXT_CONFIG: CX } = require("../../config/indicatorConfig");
 const { computeStructure, CFG } = require("./hhllCore");
 const { COIN_WATCHLIST, TF_MS, TF_LABEL, DAILY_TZ_LABEL, fmtCandleTime } = require("./divAlertCore");
+const { resolveCategory, categoryTarget } = require("../forex/forexPairs");
+const { hhllFormatters } = require("./hhllFmt");
 
 const DIRS = ["up", "down"];
 const STAGES = ["early", "confirm", "failed"];
@@ -146,7 +148,7 @@ const OFF_TOKENS = new Set(["off", "mati", "matikan"]);
 const ALL_TOKENS = new Set(["semua", "all"]);
 
 /**
- * !alerthhll <koin|watchlist> [tf] [naik|turun] [dini|konfirmasi|gagal] [balik] [kuat] [searah]
+ * !alerthhll <koin|pair|kategori forex|watchlist> [tf] [naik|turun] [dini|konfirmasi|gagal] [balik] [kuat] [searah]
  * !alerthhll list | off | hapus <id|semua>
  * Tanpa naik/turun = hanya naik (sesuai tujuan "kabari kalau mau terbang"); tulis keduanya untuk dua arah.
  * Tanpa dini/konfirmasi/gagal = dini + konfirmasi (gagal hanya kalau ditulis).
@@ -185,8 +187,9 @@ function parseHhllArgs(raw, defaultTf) {
     else if (ALIGNED_TOKENS.has(low)) alignedOnly = true;
     else if (coin == null) {
       if (WATCH_TOKENS.has(low)) coin = COIN_WATCHLIST;
+      else if (resolveCategory(low)) coin = categoryTarget(resolveCategory(low)); // major / cross / exotic / logam / forex -> semua pair kategori itu
       else if (ALL_TOKENS.has(low)) return { action: "noAll" }; // semua koin terlalu berat; pakai watchlist
-      else if (COIN_RE.test(up)) coin = up;
+      else if (COIN_RE.test(up)) coin = up; // koin kripto atau pair forex tanpa pemisah (EURUSD); "eur/usd" dinormalkan lebih dulu oleh pemanggil
       else return null;
     } else return null;
   }
@@ -198,16 +201,14 @@ function parseHhllArgs(raw, defaultTf) {
 // =====================================================================
 // 4. Teks pesan
 // =====================================================================
-const fmt = () => require("./market");
-
-/** Satu baris per kejadian. */
+/** Satu baris per kejadian. Harga mengikuti jenis pasar: kripto seperti biasa, forex memakai digits pair (tanpa "$"). */
 function buildLine(lang, ev) {
-  const { fmtLevel, fmtUsd } = fmt();
+  const { fmtLevel, fmtPx } = hhllFormatters(ev.coin);
   const vars = {
     coin: ev.coin,
     tf: TF_LABEL[ev.tf] || ev.tf,
     level: fmtLevel(ev.level),
-    now: fmtUsd(ev.now),
+    now: fmtPx(ev.now),
     ref: ev.ref != null ? fmtLevel(ev.ref) : "-",
   };
   const key =
@@ -226,7 +227,7 @@ function buildLine(lang, ev) {
 function ctxSuffix(lang, ev) {
   const c = ev.ctx;
   if (!c) return "";
-  const { fmtLevel } = fmt();
+  const { fmtLevel } = hhllFormatters(ev.coin);
   const num = (v) => (lang === "id" ? String(v).replace(".", ",") : String(v));
   const head = [];
   if (c.grade) head.push(t(lang, `hhllalert.grade.${c.grade}`));

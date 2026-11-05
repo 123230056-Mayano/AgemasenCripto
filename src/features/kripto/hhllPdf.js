@@ -9,7 +9,7 @@
  */
 
 const { PDFDocument, StandardFonts, rgb } = require("pdf-lib");
-const { fmtUsd, fmtLevel } = require("./market");
+const { hhllFormatters } = require("./hhllFmt");
 const { makeCleaner, PDF_STYLE } = require("./watchPdf");
 const { fmtCandleTime, TF_LABEL } = require("./divAlertCore");
 const { TF_ORDER, sortEvents } = require("./hhllAlertCore");
@@ -138,8 +138,9 @@ async function buildHhllPdf({ events, lang = "id", ms }) {
       put(page, tx.dir[r.dir], cols[3], y, bold, 8.5, dirColor);
       const gr = r.ctx?.grade;
       put(page, gr ? clean(tx.grade[gr]) : "-", cols[4], y, gr === "strong" ? bold : font, 8.5, gr === "strong" ? C.up : gr === "weak" ? C.down : C.ink);
-      put(page, clean(fmtLevel(r.level)), cols[5], y, font, 8.5, C.ink);
-      put(page, clean(fmtUsd(r.now)), cols[6], y, font, 8.5, C.ink);
+      const f = hhllFormatters(r.coin); // kripto: format lama; forex: digits pair tanpa "$"
+      put(page, clean(f.fmtLevel(r.level)), cols[5], y, font, 8.5, C.ink);
+      put(page, clean(f.fmtPx(r.now)), cols[6], y, font, 8.5, C.ink);
       y -= ROW_H;
     });
     y -= 14;

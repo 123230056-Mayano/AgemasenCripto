@@ -14,6 +14,10 @@
  *   !alerthhll btc 4h gagal            -> tambah kabar "tembusan gagal" (close kembali ke dalam level)
  *   !alerthhll list | off | hapus <id|semua>
  *
+ * FOREX: pair dikenali otomatis (!alerthhll eurusd 1h, !alerthhll eur/usd 4h naik turun, !alerthhll xauusd 4h; alias !alertfxhhll), dan
+ * satu kategori sekaligus (!alerthhll major 1h; juga cross, exotic, logam/emas, forex = semua pair). Data Yahoo, tanpa volume
+ * (penilaian volume dilewati). TF 15m ditolak untuk USDIDR. Watchlist hanya kripto.
+ *
  * Hanya membuat/melihat/menghapus langganan (state/cryptoStore.js). Pemeriksaan dan pengiriman ada di
  * hhllAlertEngine.js (dijalankan alertMonitor.js); aturan murninya di hhllAlertCore.js.
  */
@@ -22,24 +26,44 @@ const { t } = require("../../i18n");
 const store = require("../../state/cryptoStore");
 const { withSyncNotice } = require("./syncNotice");
 const { fetchTicker } = require("./market");
+const { resolvePair, normalizePairText, allowedTfs, isCategoryTarget, categoryOfTarget, pairsOfTarget } = require("../forex/forexPairs");
 const { COIN_WATCHLIST, TF_LABEL, DAILY_TZ_LABEL } = require("./divAlertCore");
 const { parseHhllArgs, describeHhll } = require("./hhllAlertCore");
 const { HHLL_ALERT_CONFIG: HA } = require("../../config/indicatorConfig");
 
 const HHLLALERT_COMMANDS = {
-  alerthhll: { re: /^!alerthhll(?:\s+([\s\S]*))?$/i },
+  alerthhll: { re: /^!(?:alerthhll|alertfxhhll)(?:\s+([\s\S]*))?$/i },
 };
 
-const parseHhllAlertArgs = (name, raw, defaultTf) => parseHhllArgs(raw, defaultTf);
+// "eur/usd" -> "eurusd" (pair forex; parser koin menolak karakter "/")
+const parseHhllAlertArgs = (name, raw, defaultTf) => parseHhllArgs(normalizePairText(raw), defaultTf);
 
 const pad = (s, n) => String(s).padEnd(n, " ");
 const say = (sock, jid, msg, text) => sock.sendMessage(jid, { text }, { quoted: msg });
 const isGroup = (chat) => String(chat).endsWith("@g.us");
-const targetLabel = (lang, coin) => (coin === COIN_WATCHLIST ? t(lang, "divalert.target.watch") : coin);
+/** Label target: koin/pair apa adanya, watchlist, atau kategori forex ("Forex Mayor (7 pair)"; n menyesuaikan TF bila diberikan). */
+function targetLabel(lang, coin, tf = null) {
+  if (coin === COIN_WATCHLIST) return t(lang, "divalert.target.watch");
+  if (!isCategoryTarget(coin)) return coin;
+  const cat = categoryOfTarget(coin);
+  const n = pairsOfTarget(coin, tf).length;
+  return cat === "all" ? t(lang, "hhllalert.target.all", { n }) : t(lang, "hhllalert.target.cat", { cat: t(lang, `forex.list.cat.${cat}`), n });
+}
 
 async function runCreate(sock, msg, { jid, lang, senderId }, args) {
   const { coin, tf, dirs, stages, flipOnly, strongOnly = false, alignedOnly = false } = args;
-  if (coin !== COIN_WATCHLIST) await fetchTicker(coin); // koin tidak ada di Binance -> UnsupportedCoinError (ditangani pemanggil)
+  const isCat = isCategoryTarget(coin);
+  const pair = coin === COIN_WATCHLIST || isCat ? null : resolvePair(coin);
+  const catPairs = isCat ? pairsOfTarget(coin, tf) : [];
+  if (isCat) {
+    // Kategori forex: pair yang tidak mendukung TF ini dilewati (USDIDR di 15m); data Yahoo dicek lewat satu pair (gagal -> FOREX_DATA, ditangani pemanggil).
+    if (!catPairs.length) return say(sock, jid, msg, t(lang, "hhll.fx.tfNotAllowed", { pair: t(lang, `forex.list.cat.${categoryOfTarget(coin)}`) }));
+    await require("../forex/forexMarket").loadTicker(catPairs[0]);
+  } else if (pair) {
+    // Forex: TF yang tidak didukung ditolak (USDIDR mulai 1H); data Yahoo dicek dulu (gagal -> FOREX_DATA, ditangani pemanggil).
+    if (!allowedTfs(pair).includes(tf)) return say(sock, jid, msg, t(lang, "hhll.fx.tfNotAllowed", { pair }));
+    await require("../forex/forexMarket").loadTicker(pair);
+  } else if (coin !== COIN_WATCHLIST) await fetchTicker(coin); // koin tidak ada di Binance -> UnsupportedCoinError (ditangani pemanggil)
 
   const entry = store.addHhllAlert(senderId, { chat: jid, coin, tf, dirs, stages, flipOnly, strongOnly, alignedOnly });
   if (entry === "exists") return say(sock, jid, msg, t(lang, "hhllalert.exists"));
@@ -47,6 +71,12 @@ async function runCreate(sock, msg, { jid, lang, senderId }, args) {
   if (entry === "chatFull") return say(sock, jid, msg, t(lang, "hhllalert.chatFull", { max: store.MAX_HHLL_ALERTS_PER_CHAT }));
 
   let note = "";
+  if (pair) note = "\n" + t(lang, "hhllalert.created.fx");
+  if (isCat) {
+    note = "\n" + t(lang, "hhllalert.created.fx") + "\n" + t(lang, "hhllalert.created.cat", { pairs: catPairs.join(", ") });
+    const skipped = pairsOfTarget(coin).filter((p) => !catPairs.includes(p));
+    if (skipped.length) note += "\n" + t(lang, "hhllalert.created.catSkip", { skipped: skipped.join(", "), tf: TF_LABEL[tf] });
+  }
   if (coin === COIN_WATCHLIST) {
     const n = store.getWatch(senderId).length;
     if (n > HA.MAX_PAIRS) note = "\n" + t(lang, "hhllalert.created.bigWatch", { n, max: HA.MAX_PAIRS });
@@ -57,7 +87,7 @@ async function runCreate(sock, msg, { jid, lang, senderId }, args) {
     msg,
     t(lang, "hhllalert.created", {
       id: entry.id,
-      target: targetLabel(lang, coin),
+      target: targetLabel(lang, coin, tf),
       tf: TF_LABEL[tf],
       what: describeHhll(lang, entry),
       dest: t(lang, isGroup(jid) ? "divalert.dest.group" : "divalert.dest.private"),
@@ -69,7 +99,7 @@ async function runCreate(sock, msg, { jid, lang, senderId }, args) {
 async function runList(sock, msg, { jid, lang, senderId }) {
   const subs = store.getHhllAlerts(senderId);
   if (!subs.length) return say(sock, jid, msg, t(lang, "hhllalert.list.empty"));
-  const rows = subs.map((a) => [a.id, targetLabel(lang, a.coin), TF_LABEL[a.tf] || a.tf, describeHhll(lang, a), t(lang, isGroup(a.chat) ? "divalert.where.group" : "divalert.where.private")]);
+  const rows = subs.map((a) => [a.id, targetLabel(lang, a.coin, a.tf), TF_LABEL[a.tf] || a.tf, describeHhll(lang, a), t(lang, isGroup(a.chat) ? "divalert.where.group" : "divalert.where.private")]);
   const w = [0, 1, 2, 3].map((i) => Math.max(...rows.map((r) => String(r[i]).length)));
   const table = rows.map((r) => `${pad(r[0], w[0])} | ${pad(r[1], w[1])} | ${pad(r[2], w[2])} | ${pad(r[3], w[3])} | ${r[4]}`).join("\n");
   await say(sock, jid, msg, t(lang, "hhllalert.list.body", { n: subs.length, max: store.MAX_HHLL_ALERTS, table: "```\n" + table + "\n```" }));

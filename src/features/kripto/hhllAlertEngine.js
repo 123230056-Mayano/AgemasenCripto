@@ -9,6 +9,10 @@
  * jadi seluruh alur bisa diuji dengan data palsu tanpa jaringan. alertMonitor.js membuat satu engine dan
  * memanggil tick() tiap HHLL.CHECK_MS.
  *
+ * FOREX: pair (eurusd, xauusd, ...) dan kategori (major/cross/exotic/logam/forex) ikut jalur yang sama; candle Yahoo datang dari
+ * fetchCandles yang disuntik (alertMonitor.js: fetchCandlesAny). HHLL hanya membaca struktur harga dari candle closed (bukan rencana
+ * entry), jadi tidak ada penurunan status saat pasar tutup: tanpa candle baru di akhir pekan, kejadian yang sama tidak dikirim ulang.
+ *
  * Tiap pasangan koin+TF diambil ulang paling cepat tiap HHLL.INTERVAL_MS, lalu candle closed TERAKHIR dinilai
  * terhadap swing dari candle sebelumnya (setelah FINAL_DELAY_MS agar data Binance final). Dinilai ulang tiap
  * putaran selama masih candle closed terakhir; kunci dedupe mencegah kiriman ganda, dan kiriman yang ditunda
@@ -32,6 +36,7 @@ const { selectLivePairs } = require("./advAlertCore");
 const { runPool } = require("./advAlertEngine");
 const { detectEvents, detectFailures, matchSub, hhllKey, chunk, sortEvents, buildHhllText, buildHhllPdfIntro } = require("./hhllAlertCore");
 const { assessAlertEvent, htfOf } = require("./hhllContext");
+const { isCategoryTarget, pairsOfTarget } = require("../forex/forexPairs");
 
 const defaultSleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -76,7 +81,13 @@ function createHhllEngine(deps) {
     htfCache.set(k, { at: now, promise });
     return promise;
   }
-  const resolveCoins = ({ userJid, sub }) => (sub.coin === COIN_WATCHLIST ? store.getWatch(userJid) : [sub.coin]);
+  // watchlist = koin kripto milik user; kategori forex (@MAJOR, @CROSS, @METAL, @EXOTIC, @FOREX) = pair kategori itu yang mendukung TF ini
+  // (daftar diambil dari PAIRS saat dipakai, jadi pair baru otomatis ikut); selain itu satu koin / pair.
+  const resolveCoins = ({ userJid, sub }) => {
+    if (sub.coin === COIN_WATCHLIST) return store.getWatch(userJid);
+    if (isCategoryTarget(sub.coin)) return pairsOfTarget(sub.coin, sub.tf);
+    return [sub.coin];
+  };
 
   /**
    * Evaluasi satu langganan untuk satu koin. Tidak mengirim apa pun.

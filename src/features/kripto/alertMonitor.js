@@ -92,7 +92,7 @@ const REARM_PCT = 1.5; // jarak yang membuat alert level aktif lagi
 const SYMBOL_CHUNK = 100;
 
 /**
- * Candle closed untuk alarm pola (!alertpola) dan sinyal (!alertsignal): pair forex (eurusd, xauusd, ...) diambil dari
+ * Candle closed untuk alarm pola (!alertpola), sinyal (!alertsignal), Farley (!alertfarley), dan HH/LL (!alerthhll): pair forex (eurusd, xauusd, ...) diambil dari
  * Yahoo lewat forex/forexMarket.js, selain itu kripto dari Binance seperti biasa. Alarm lain tetap kripto saja.
  */
 const fetchCandlesAny = (coin, tf, opts) => (resolvePair(coin) ? createForexMarket(coin).fetchCandles(tf) : fetchCandles(coin, tf, opts));
@@ -672,7 +672,7 @@ const checkPositions = (now) => (sockRef ? positionEngine.tick(now) : undefined)
 // ---------- alarm Higher High / Lower Low (!alerthhll) ----------
 const hhllEngine = createHhllEngine({
   store,
-  fetchCandles,
+  fetchCandles: fetchCandlesAny, // kripto (Binance) + pair forex (Yahoo)
   notify,
   notifyDocument,
   buildPdf: buildHhllPdf,
