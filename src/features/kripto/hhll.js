@@ -278,7 +278,7 @@ function renderHhllChart({ candles, coin, tf, st, title: titleOverride = null, m
   g.font = `19px ${family}`;
   g.fillStyle = C.axis;
   const trendTxt = st.trend === "up" ? "Uptrend (HH + HL)" : st.trend === "down" ? "Downtrend (LH + LL)" : "No clear direction";
-  g.fillText(`Close candle only · swing = pivot ±${CFG.PIVOT_WIN} candles, min move ${minPct}% · ${trendTxt}`, Lm, 56);
+  g.fillText(`Close candle only · swing = pivot ±${CFG.PIVOT_WIN} candles, min move ${minPct}%${CFG.RANGE_FILTER ? ", sideways filtered" : ""} · ${trendTxt}`, Lm, 56);
 
   return canvas.toBuffer("image/png");
 }
@@ -402,7 +402,7 @@ async function runHhll(sock, msg, { jid, lang }, { coin, tf }) {
   const htfTf = htfOf(tf);
   const htfOk = htfTf && (!isFx || mk.allowedTfs([htfTf]).length);
   const [candles, tick, htf] = await Promise.all([mk.fetchCandles(tf), mk.fetchTicker(), htfOk ? mk.fetchCandles(htfTf).catch(() => null) : null]);
-  const st = candles.length >= CFG.MIN_CANDLES ? computeStructure(candles) : null;
+  const st = candles.length >= CFG.MIN_CANDLES ? computeStructure(candles, { rangeFilter: CFG.RANGE_FILTER }) : null;
   if (!st || !st.lastHigh || !st.lastLow || !st.trend) {
     await sock.sendMessage(jid, { text: t(lang, "hhll.none", { coin: mk.symbol, tf: TF_LABEL[tf] }) }, { quoted: msg });
     return;

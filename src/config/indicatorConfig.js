@@ -145,6 +145,7 @@ const PROB_CONFIG = Object.freeze({
  * Semua angka bisa diubah lewat env tanpa ubah kode; naikkan VERSION kalau aturan diubah.
  */
 const _posInt = (v, d) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Math.floor(Number(v)) : d);
+const _bool = (v, d) => (v === undefined || v === "" ? d : !/^(0|false|off|no)$/i.test(String(v).trim()));
 const _num = (v, d) => (v !== undefined && v !== "" && Number.isFinite(Number(v)) ? Number(v) : d);
 const ADV_ALERT_CONFIG = Object.freeze({
   VERSION: 1,
@@ -421,6 +422,7 @@ const HHLL_CONFIG = Object.freeze({
   PIVOT_WIN: Math.max(1, _posInt(process.env.HHLL_PIVOT_WIN, 3)),
   MIN_SWING_PCT: _num(process.env.HHLL_MIN_SWING_PCT, 0.5), // gerak minimal antar swing (persen); lebih kecil = noise, dilewati
   EQUAL_PCT: _num(process.env.HHLL_EQUAL_PCT, 0.05), // selisih <= ini dianggap sama (bukan HH/LH atau HL/LL)
+  RANGE_FILTER: _bool(process.env.HHLL_RANGE_FILTER, true), // !hhll: swing sideways di dalam range tidak digambar, kecuali menembus swing high tertinggi / low terendah
   MIN_CANDLES: 30, // data closed minimal supaya struktur layak dihitung
   SHOW_SWINGS: 6, // jumlah swing terakhir yang ditulis di !hhll
   CHART_BARS: 120, // jumlah candle yang digambar di chart !hhll

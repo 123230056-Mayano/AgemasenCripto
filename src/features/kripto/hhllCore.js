@@ -13,6 +13,8 @@
  *                   tidak pernah memunculkan atau mengubah swing.
  *   2. buildSwings: pivot disusun selang-seling high-low-high-low. Dua pivot sejenis berurutan -> ambil yang lebih
  *                   ekstrem. Pivot yang gerak dari swing sebelumnya < MIN_SWING_PCT dibuang (noise).
+ *   2b. filterSideways (opsional, opts.rangeFilter): swing yang masih di dalam range dianggap sideways dan dibuang.
+ *                   Swing baru hanya masuk kalau menembus swing high tertinggi / swing low terendah range (lihat fungsinya).
  *   3. labelSwings: tiap swing high dibanding swing high sebelumnya (HH / LH / EH sama), tiap swing low
  *                   dibanding swing low sebelumnya (HL / LL / EL sama).
  *   4. trend      : swing high terakhir HH + swing low terakhir HL = "up"; LH + LL = "down"; selain itu "range".
@@ -75,6 +77,60 @@ function buildSwings(pivots, minPct = CFG.MIN_SWING_PCT) {
 }
 
 /**
+ * Filter sideways: buang swing yang masih di DALAM range, simpan hanya yang menembus ujung range.
+ *
+ * Aturan (H = swing high, L = swing low; "menembus" = lewat dari EQUAL_PCT, sama dengan syarat label HH/LL):
+ *   - Swing pertama selalu masuk.
+ *   - Setelah satu swing ekstrem masuk (mis. HH), swing berlawanan pertama (pullback: HL) ikut masuk supaya struktur
+ *     tren tetap terlihat. Pullback yang sendiri melewati swing sejenis sebelumnya dihitung ekstrem baru juga. Ukuran gerak minimalnya tetap dijaga buildSwings (MIN_SWING_PCT).
+ *   - Sesudah itu semua swing dianggap sideways dan DIABAIKAN, kecuali:
+ *       * high baru menembus swing high tertinggi range (HH)  -> masuk, atau
+ *       * low baru menembus swing low terendah range. Ujung bawah range = low paling ekstrem antara low awal leg
+ *         dan low pullback. Low ini menggantikan pullback (garis langsung dari ekstrem ke breakout).
+ *   - Setelah breakout, ujung range diperbarui dan siklus mulai lagi.
+ *
+ * Input harus sudah selang-seling (keluaran buildSwings); keluarannya juga selang-seling.
+ */
+function filterSideways(swings, equalPct = CFG.EQUAL_PCT) {
+  const eq = equalPct / 100;
+  const beyond = (type, a, b) => (type === "H" ? a > b * (1 + eq) : a < b * (1 - eq));
+  const extreme = (type, a, b) => (type === "H" ? Math.max(a, b) : Math.min(a, b));
+  const out = [];
+  let pullbackOpen = true; // swing berlawanan berikutnya = pullback, boleh masuk tanpa syarat
+  for (const p of swings) {
+    const n = out.length;
+    if (n === 0) {
+      out.push({ ...p });
+      pullbackOpen = true;
+      continue;
+    }
+    const last = out[n - 1];
+    if (last.type !== p.type) {
+      if (pullbackOpen) {
+        // pullback ikut masuk. Kalau ia sendiri melewati swing sejenis sebelumnya (atau belum ada pembandingnya),
+        // ia juga ekstrem baru -> pullback berikutnya tetap boleh masuk (tangga HH-HL-HH-HL di tren tidak terpotong).
+        const prevSame = out[n - 2];
+        out.push({ ...p });
+        pullbackOpen = !prevSame || beyond(p.type, p.price, prevSame.price);
+      } else if (beyond(p.type, p.price, out[n - 2].price)) {
+        // menembus swing ekstrem sejenis (mis. high baru > HH) -> breakout
+        out.push({ ...p });
+        pullbackOpen = true;
+      }
+      continue; // selain itu: sideways, abaikan
+    }
+    // sejenis dengan swing terakhir (= pullback): hanya masuk kalau menembus ujung range di sisi itu
+    const start = out[n - 3];
+    const ref = start ? extreme(p.type, start.price, last.price) : last.price;
+    if (beyond(p.type, p.price, ref)) {
+      out[n - 1] = { ...p };
+      pullbackOpen = true;
+    }
+  }
+  return out;
+}
+
+/**
  * Beri label tiap swing terhadap swing sejenis sebelumnya.
  * label: "HH" | "LH" | "EH" (high) / "HL" | "LL" | "EL" (low); swing sejenis pertama label-nya null.
  * @returns {{i:number,t:number,type:"H"|"L",price:number,label:string|null}[]}
@@ -118,7 +174,11 @@ function trendOf(labeled) {
  */
 function computeStructure(candles, opts = {}) {
   const win = opts.win || CFG.PIVOT_WIN;
-  const swings = labelSwings(buildSwings(findPivots(candles, win), opts.minPct ?? CFG.MIN_SWING_PCT), opts.equalPct ?? CFG.EQUAL_PCT);
+  const equalPct = opts.equalPct ?? CFG.EQUAL_PCT;
+  let raw = buildSwings(findPivots(candles, win), opts.minPct ?? CFG.MIN_SWING_PCT);
+  // Opsional (default mati, supaya alarm/pola lain tidak berubah): buang swing sideways di dalam range.
+  if (opts.rangeFilter) raw = filterSideways(raw, equalPct);
+  const swings = labelSwings(raw, equalPct);
   const lastHigh = [...swings].reverse().find((s) => s.type === "H") || null;
   const lastLow = [...swings].reverse().find((s) => s.type === "L") || null;
   return {
@@ -131,4 +191,4 @@ function computeStructure(candles, opts = {}) {
   };
 }
 
-module.exports = { CFG, findPivots, buildSwings, labelSwings, trendOf, computeStructure };
+module.exports = { CFG, findPivots, buildSwings, filterSideways, labelSwings, trendOf, computeStructure };
