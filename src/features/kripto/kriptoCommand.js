@@ -15,6 +15,7 @@
  *   !pola <koin> [tf|semua] [detail] -> pola candlestick (engulfing, pin bar, doji, star, inside bar, tweezer, harami, piercing/dark cloud, marubozu, three soldiers/crows, three methods) di ekstrem swing / zona SNR, bukti bersyarat dengan level konfirmasi + batal (candlePatterns.js, patternCommand.js). Alias: !pattern. FOREX: pair dikenali otomatis (!pola eurusd 4h, !pola eur/usd, !pola xauusd semua; alias !fxpola), chart + teks seperti kripto; tanpa volume, ada catatan pasar tutup dan gap pembukaan
  *   !fibb <koin> [tf]    -> Fibonacci + Bollinger Bands (20,2): level fib, pita BB, konfluens keduanya, status BUY / SELL area + chart (fibb.js, fibbCore.js)
  *   !hhll <koin|pair> [tf] -> market structure Higher High / Higher Low / Lower High / Lower Low + status tren + chart (hhll.js). Alias: !struktur. Forex: !hhll eurusd 4h (alias !fxhhll)
+ *   !mstrut <koin|pair> [M15|H1|H4|D1] -> Market Structure SMC/ICT: tren HH/HL/LH/LL, swing, BSL/SSL/EQH/EQL, liquidity sweep, BOS, CHoCH, MSS + status Unconfirmed untuk candle berjalan + chart (mstrut.js, mstrutCore.js, mstrutChart.js). Alias: !mstruct, !marketstructure. Boleh ditulis BTCUSDT (!mstrut BTCUSDT H1); forex ikut: !mstrut eurusd 4h
  *   !farley <koin|pair> [tf]  -> pendekatan Alan S. Farley: ribbon SMA 5-8-13 + Bollinger 13,2 + Stochastic + MACD TF besar -> BUY / SELL / TUNGGU / RANGE + entry, SL, TP1, TP2 + alasan (farley.js, farleyCore.js). FOREX: pair dikenali otomatis (!farley eurusd 4h, !farley eur/usd, !farley xauusd; alias !fxfarley), SL/TP juga dalam pip, tanpa volume, pasar tutup = BUY/SELL jadi TUNGGU
  *   !ema <koin> [tf]     -> EMA 20/50/200 + posisi harga (di atas / di bawah)
  *   !movave <koin> [tf] [sma|ema] -> Moving Average SMA & EMA 20/50/200 + posisi harga + golden/death cross (movave.js). Alias: !ma, !movingaverage
@@ -63,6 +64,7 @@ const { runFib, computeFib } = require("./fib");
 const { runFibb } = require("./fibb");
 const { buildChartInsight } = require("./chartInsight");
 const { runHhll } = require("./hhll");
+const { runMstrut, parseMstrutArgs } = require("./mstrut");
 const { runFarley } = require("./farley");
 const { runTrenState } = require("./trenStateCommand");
 const { runPola } = require("./patternCommand");
@@ -115,6 +117,7 @@ const COMMANDS = {
   fib: { re: /^!(?:fib|fibo|fibonacci)(?:\s+([\s\S]*))?$/i, useTf: true, allTf: true },
   fibb: { re: /^!fibb(?:\s+([\s\S]*))?$/i, useTf: true },
   hhll: { re: /^!(?:hhll|struktur|structure|fxhhll|fxstruktur)(?:\s+([\s\S]*))?$/i, useTf: true },
+  mstrut: { re: /^!(?:mstrut|mstruct|mstuct|marketstructure)(?:\s+([\s\S]*))?$/i, useTf: true },
   farley: { re: /^!(?:farley|fxfarley)(?:\s+([\s\S]*))?$/i, useTf: true },
   trenstate: { re: /^!(?:trenstate|ts|pullback)(?:\s+([\s\S]*))?$/i, useTf: true, allTf: true, allWords: ["ALL", "SEMUA"] },
   pola: { re: /^!(?:pola|pattern|fxpola|fxpattern)(?:\s+([\s\S]*))?$/i, useTf: true, allTf: true, allWords: ["ALL", "SEMUA"], types: ["DETAIL", "DETIL"] },
@@ -394,7 +397,7 @@ async function runBandingkan(sock, msg, { jid, lang, senderId }, { coin, coin2 }
   );
 }
 
-const RUNNERS = { chart: runChart, harga: runHarga, level: runLevel, snr: runSnr, fib: runFib, fibb: runFibb, hhll: runHhll, farley: runFarley, trenstate: runTrenState, pola: runPola, ema: runEma, movave: runMovave, tren: runTren, mtf: runMtf, bandingkan: runBandingkan };
+const RUNNERS = { chart: runChart, harga: runHarga, level: runLevel, snr: runSnr, fib: runFib, fibb: runFibb, hhll: runHhll, mstrut: runMstrut, farley: runFarley, trenstate: runTrenState, pola: runPola, ema: runEma, movave: runMovave, tren: runTren, mtf: runMtf, bandingkan: runBandingkan };
 
 async function runList(sock, msg, { jid, lang }, keyword) {
   const all = await getAvailableCoins(lang);
@@ -694,6 +697,7 @@ async function handleKriptoCommand(sock, msg, { jid, text, lang }) {
   else if (isDusdtAlert) args = parseDusdtAlertArgs(name, match[1] || "", getDefaultTf(senderId));
   else if (isDusdt) args = parseDusdtArgs(name, match[1] || "", getDefaultTf(senderId));
   else if (name === "list") args = { coin: null, coin2: null, tf: null, keyword: match[1] || "" };
+  else if (name === "mstrut") args = parseMstrutArgs(match[1] || ""); // terima "BTCUSDT H1" / "M15" / "BTC/USDT"
   else args = parseArgs(name === "pola" || name === "farley" || name === "hhll" ? normalizePairText(match[1] || "") : match[1] || "", COMMANDS[name]); // "eur/usd" -> "eurusd" (pair forex; parser koin menolak "/")
   if (!args) {
     await sendCommandDetail(sock, jid, name, lang);

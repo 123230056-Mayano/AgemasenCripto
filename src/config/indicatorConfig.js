@@ -428,6 +428,24 @@ const HHLL_CONFIG = Object.freeze({
   CHART_BARS: 120, // jumlah candle yang digambar di chart !hhll
 });
 
+// Market Structure lengkap (!mstrut): swing, HH/HL/LH/LL, BSL/SSL, EQH/EQL, sweep, BOS, CHoCH, MSS.
+// Swing memakai pivot yang SAMA dengan !hhll (hhllCore.js) supaya label HH/HL/LH/LL kedua command cocok, tetapi
+// tanpa filter sideways (swing di dalam range tetap dihitung karena di situlah likuiditas BSL/SSL berada).
+const MSTRUT_CONFIG = Object.freeze({
+  PIVOT_WIN: Math.max(1, _posInt(process.env.MSTRUT_PIVOT_WIN, HHLL_CONFIG.PIVOT_WIN)),
+  MIN_SWING_PCT: _num(process.env.MSTRUT_MIN_SWING_PCT, HHLL_CONFIG.MIN_SWING_PCT), // gerak minimal antar swing (persen)
+  EQUAL_PCT: HHLL_CONFIG.EQUAL_PCT, // selisih <= ini dianggap sama saat melabeli HH/LH/HL/LL
+  MIN_CANDLES: _posInt(process.env.MSTRUT_MIN_CANDLES, 60), // candle closed minimal
+  LIQ_SWINGS: _posInt(process.env.MSTRUT_LIQ_SWINGS, 14), // swing terakhir yang dipakai untuk daftar likuiditas (BSL/SSL/EQH/EQL)
+  EQ_ATR_MULT: _num(process.env.MSTRUT_EQ_ATR_MULT, 0.15), // toleransi EQH/EQL = max(EQ_MIN_PCT% harga, EQ_ATR_MULT x ATR)
+  EQ_MIN_PCT: _num(process.env.MSTRUT_EQ_MIN_PCT, 0.05),
+  EVENT_LOOKBACK: _posInt(process.env.MSTRUT_EVENT_LOOKBACK, 20), // BOS / CHoCH / MSS dianggap "terdeteksi" kalau terjadi dalam N candle closed terakhir
+  SWEEP_LOOKBACK: _posInt(process.env.MSTRUT_SWEEP_LOOKBACK, 12), // sama untuk liquidity sweep
+  DISPLACEMENT_ATR: _num(process.env.MSTRUT_DISPLACEMENT_ATR, 1.0), // MSS: badan candle penembus >= N x ATR
+  MSS_SWEEP_MAX_BARS: _posInt(process.env.MSTRUT_MSS_SWEEP_MAX_BARS, 20), // MSS: sweep harus terjadi <= N candle sebelum candle penembus
+  CHART_BARS: _posInt(process.env.MSTRUT_CHART_BARS, 100),
+});
+
 const HHLL_ALERT_CONFIG = Object.freeze({
   VERSION: 2, // v2: grade konteks, opsi kuat/searah, tahap gagal. Kunci dedupe hhllKey sengaja tetap "v1" (lihat hhllAlertCore.js)
   CHECK_MS: Math.max(5_000, _posInt(process.env.HHLL_CHECK_MS, 15_000)),
@@ -761,4 +779,4 @@ const FIBB_ALERT_CONFIG = Object.freeze({
   CONCURRENCY: _posInt(process.env.FIBB_ALERT_CONCURRENCY, 8),
 });
 
-module.exports = { PATTERN_ALERT_CONFIG, INDICATOR_CONFIG, BIAS_CONFIG, SIGNAL_CONFIG, PROB_CONFIG, SUDDEN_CONFIG, POSITION_CONFIG, ADV_ALERT_CONFIG, SNR_ALERT_CONFIG, SIGNAL_ALERT_CONFIG, HHLL_CONFIG, HHLL_CONTEXT_CONFIG, HHLL_BACKTEST_CONFIG, HHLL_ALERT_CONFIG, TRENSTATE_CONFIG, STRENGTH_CONFIG, GAUSSIAN_CONFIG, PATTERN_CONFIG, AMD_CONFIG, AMD_ALERT_CONFIG, DUSDT_ALERT_CONFIG, FARLEY_CONFIG, FARLEY_ALERT_CONFIG, FIBB_CONFIG, FIBB_ALERT_CONFIG };
+module.exports = { PATTERN_ALERT_CONFIG, INDICATOR_CONFIG, BIAS_CONFIG, SIGNAL_CONFIG, PROB_CONFIG, SUDDEN_CONFIG, POSITION_CONFIG, ADV_ALERT_CONFIG, SNR_ALERT_CONFIG, SIGNAL_ALERT_CONFIG, HHLL_CONFIG, MSTRUT_CONFIG, HHLL_CONTEXT_CONFIG, HHLL_BACKTEST_CONFIG, HHLL_ALERT_CONFIG, TRENSTATE_CONFIG, STRENGTH_CONFIG, GAUSSIAN_CONFIG, PATTERN_CONFIG, AMD_CONFIG, AMD_ALERT_CONFIG, DUSDT_ALERT_CONFIG, FARLEY_CONFIG, FARLEY_ALERT_CONFIG, FIBB_CONFIG, FIBB_ALERT_CONFIG };
