@@ -7,6 +7,8 @@
  * Laporan: Trend Structure, Swing Points, Liquidity (BSL/SSL/EQH/EQL), Structure Events (BOS/CHoCH/MSS),
  * Liquidity Event (sweep), Market Assessment, ditambah blok "candle berjalan" (Unconfirmed) bila ada, dan chart.
  *
+ * Bagian 6 (skenario 24 jam: Entry Zone, SL, TP1/TP2, BSL/SSL) dibuat mstrutPlan.js, juga aturan tetap.
+ *
  * Alur: command -> ambil OHLCV Binance (market.js; candle berjalan ikut diambil tetapi hanya untuk status
  * Unconfirmed) -> mstrutCore.analyzeStructure (aturan tetap, bukan AI) -> teks laporan (i18n id/en) + chart.
  * Gemini / LLM TIDAK dipakai untuk menghitung level maupun menentukan hasil.
@@ -22,6 +24,7 @@ const { resolveMarket } = require("./marketAdapter");
 const { resolvePair } = require("../forex/forexPairs");
 const { DAILY_TZ, DAILY_TZ_LABEL } = require("./divAlertCore");
 const { analyzeStructure } = require("./mstrutCore");
+const { buildPlan } = require("./mstrutPlan");
 
 const CAPTION_MAX = 1000; // batas aman caption gambar WhatsApp (1024)
 
@@ -86,10 +89,47 @@ const ageTxt = (lang, age) => (age === 0 ? t(lang, "mstrut.age.now") : t(lang, "
 const fmtX = (lang, v) => (lang === "id" ? v.toFixed(1).replace(".", ",") : v.toFixed(1));
 
 /**
- * Teks laporan lengkap (tanpa jaringan, bisa diuji).
- * @param {object} p { res, pair, tf (kunci internal), price, changePct, mk (adapter pasar) }
+ * Bagian "6. Skenario N Jam ke Depan" (tanpa jaringan, bisa diuji). plan = hasil buildPlan; null -> tidak ada bagian.
+ * @returns {string[]} baris teks
  */
-function buildReport(lang, { res, pair, tf, price, changePct, mk }) {
+function buildPlanLines(lang, { plan, price, mk }) {
+  if (!plan) return [];
+  const fl = (v) => mk.fmtLevel(v);
+  const pct = (level) => mk.fmtPct(pctFrom(price, level));
+  const out = ["", t(lang, "mstrut.plan.s6", { h: plan.horizonHours })];
+  if (plan.dir === "wait") {
+    out.push(t(lang, "mstrut.plan.wait", { why: t(lang, `mstrut.plan.why.${plan.reason}`) }));
+    return out;
+  }
+  out.push(t(lang, `mstrut.plan.dir.${plan.dir}`, { conf: t(lang, `mstrut.plan.conf.${plan.grade}`) }));
+  const ev = { lo: fl(plan.entry.lo), hi: fl(plan.entry.hi) };
+  out.push(plan.state === "inzone" ? t(lang, "mstrut.plan.entry.inzone", ev) : t(lang, `mstrut.plan.entry.pending.${plan.dir}`, ev));
+  out.push(t(lang, "mstrut.plan.sl", { sl: fl(plan.sl), pct: pct(plan.sl), side: plan.sideStop }));
+  const src = (liq, projected) => (projected || !liq ? t(lang, "mstrut.plan.src.atr") : t(lang, "mstrut.plan.src.liq", { side: plan.sideTarget, level: fl(liq.level) }));
+  out.push(t(lang, "mstrut.plan.tp1", { tp: fl(plan.tp1), pct: pct(plan.tp1), rr: fmtX(lang, plan.rr1), src: src(plan.targetMinor, plan.tp1Projected) }));
+  out.push(t(lang, "mstrut.plan.tp2", { tp: fl(plan.tp2), pct: pct(plan.tp2), rr: fmtX(lang, plan.rr2), src: src(plan.pool, plan.tp2Projected) }));
+  out.push(t(lang, "mstrut.plan.liq", { side: plan.sideStop, major: fl(plan.major.level), minor: plan.minor ? t(lang, "mstrut.plan.liq.minor", { level: fl(plan.minor.level) }) : "" }));
+  const far = [!plan.reach.tp1 && "TP1", !plan.reach.tp2 && "TP2"].filter(Boolean);
+  if (far.length) out.push(t(lang, "mstrut.plan.reach.far", { which: far.join(" / "), h: plan.horizonHours, exp: fl(plan.reach.expected) }));
+  if (plan.rr2 < 1) out.push(t(lang, "mstrut.plan.rr.low"));
+  const key = `mstrut.plan.concl.${plan.dir}${plan.state === "inzone" ? ".inzone" : ""}`;
+  out.push("", t(lang, key, { lo: fl(plan.entry.lo), hi: fl(plan.entry.hi), tp1: fl(plan.tp1), tp2: fl(plan.tp2), sl: fl(plan.sl) }));
+  out.push(t(lang, "mstrut.plan.foot"));
+  return out;
+}
+
+/** Caption ringkas gambar: skenario inti (Entry / SL / TP1 / TP2). null kalau tidak ada rencana aktif. */
+function buildPlanCaption(lang, { plan, mk }) {
+  if (!plan || plan.dir === "wait") return null;
+  const fl = (v) => mk.fmtLevel(v);
+  return t(lang, "mstrut.plan.cap", { h: plan.horizonHours, dir: plan.dir.toUpperCase(), lo: fl(plan.entry.lo), hi: fl(plan.entry.hi), sl: fl(plan.sl), tp1: fl(plan.tp1), tp2: fl(plan.tp2) });
+}
+
+/**
+ * Teks laporan lengkap (tanpa jaringan, bisa diuji).
+ * @param {object} p { res, pair, tf (kunci internal), price, changePct, mk (adapter pasar), plan (opsional, hasil buildPlan) }
+ */
+function buildReport(lang, { res, pair, tf, price, changePct, mk, plan = null }) {
   const fl = (v) => mk.fmtLevel(v);
   const pct = (level) => mk.fmtPct(pctFrom(price, level));
   const when = (ms) => fmtWhen(lang, ms, tf);
@@ -140,6 +180,9 @@ function buildReport(lang, { res, pair, tf, price, changePct, mk }) {
   // Market Assessment
   out.push("", t(lang, "mstrut.assess", { bias: BIAS[res.bias.value], why: t(lang, `mstrut.why.${res.bias.why}`) }));
 
+  // 6. Skenario ke depan (Entry Zone / SL / TP)
+  out.push(...buildPlanLines(lang, { plan, price, mk }));
+
   // Candle berjalan (sementara)
   const lv = res.live;
   if (lv && !lv.empty) {
@@ -170,7 +213,13 @@ async function runMstrut(sock, msg, { jid, lang }, { coin, tf }) {
     return;
   }
 
-  let text = buildReport(lang, { res, pair, tf, price: tick.price, changePct: tick.changePct, mk });
+  let plan = null;
+  try {
+    plan = buildPlan(res, candles, { tf, price: tick.price });
+  } catch (err) {
+    console.log("[kripto] !mstrut skenario gagal, laporan struktur tetap dikirim:", err.message);
+  }
+  let text = buildReport(lang, { res, pair, tf, price: tick.price, changePct: tick.changePct, mk, plan });
   if (isFx) {
     const notes = [t(lang, "hhll.fx.note")];
     const status = await mk.status();
@@ -184,7 +233,7 @@ async function runMstrut(sock, msg, { jid, lang }, { coin, tf }) {
   let png = null;
   try {
     const { renderMstrutChart } = require("./mstrutChart");
-    png = renderMstrutChart({ candles, res, title: `${pair}  ${TF_SHORT[tf] || tf}  Market Structure`, tf: TF_LABEL[tf], digits: isFx ? mk.digits : null });
+    png = renderMstrutChart({ candles, res, title: `${pair}  ${TF_SHORT[tf] || tf}  Market Structure`, tf: TF_LABEL[tf], digits: isFx ? mk.digits : null, plan });
   } catch (err) {
     console.log("[kripto] !mstrut chart gagal, kirim teks saja:", err.message);
   }
@@ -193,9 +242,11 @@ async function runMstrut(sock, msg, { jid, lang }, { coin, tf }) {
   else if (text.length <= CAPTION_MAX) await sock.sendMessage(jid, { image: png, caption: text }, { quoted: msg });
   else {
     // Laporan lebih panjang dari batas caption WhatsApp: gambar lebih dulu, laporan lengkap menyusul sebagai teks.
-    await sock.sendMessage(jid, { image: png, caption: `📐 *${pair} · ${TF_SHORT[tf] || tf}* · Market Structure` }, { quoted: msg });
+    const head = `📐 *${pair} · ${TF_SHORT[tf] || tf}* · Market Structure`;
+    const planCap = buildPlanCaption(lang, { plan, mk });
+    await sock.sendMessage(jid, { image: png, caption: planCap ? `${head}\n${planCap}` : head }, { quoted: msg });
     await sock.sendMessage(jid, { text });
   }
 }
 
-module.exports = { runMstrut, buildReport, parseMstrutArgs, fmtWhen, TF_ALIASES, TF_SHORT };
+module.exports = { runMstrut, buildReport, buildPlanLines, buildPlanCaption, parseMstrutArgs, fmtWhen, TF_ALIASES, TF_SHORT };
