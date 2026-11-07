@@ -5,7 +5,9 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "check:i18n": "node scripts/check-i18n.js"
+    "check:i18n": "node scripts/check-i18n.js",
+    "test:mstrut": "node --test src/test/mstrut-prob.test.js",
+    "backtest:mstrut": "node scripts/backtest-mstrut.js --out data/mstrut-stats.json"
   },
   "keywords": [],
   "author": "",

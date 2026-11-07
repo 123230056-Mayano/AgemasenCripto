@@ -8,6 +8,9 @@
  * Liquidity Event (sweep), Market Assessment, ditambah blok "candle berjalan" (Unconfirmed) bila ada, dan chart.
  *
  * Bagian 6 (skenario 24 jam: Entry Zone, SL, TP1/TP2, BSL/SSL) dibuat mstrutPlan.js, juga aturan tetap.
+ * Blok "Probabilitas Market Structure" (Long / Short / Sideways %) dihitung mstrutProb.js dari hasil struktur yang sama;
+ * akurasi historisnya (apakah harga benar bergerak ke arah itu) dibaca dari data/mstrut-stats.json hasil
+ * scripts/backtest-mstrut.js (mstrutBacktest.js), hanya bagian out-of-sample dan hanya bila sampel cukup.
  *
  * Alur: command -> ambil OHLCV Binance (market.js; candle berjalan ikut diambil tetapi hanya untuk status
  * Unconfirmed) -> mstrutCore.analyzeStructure (aturan tetap, bukan AI) -> teks laporan (i18n id/en) + chart.
@@ -25,8 +28,27 @@ const { resolvePair } = require("../forex/forexPairs");
 const { DAILY_TZ, DAILY_TZ_LABEL } = require("./divAlertCore");
 const { analyzeStructure } = require("./mstrutCore");
 const { buildPlan } = require("./mstrutPlan");
+const { computeMstrutProb } = require("./mstrutProb");
+const { lookupMstrutStats } = require("./mstrutBacktest");
+const { MSTRUT_PROB_CONFIG: PCFG } = require("../../config/indicatorConfig");
+const fs = require("fs");
+const path = require("path");
 
 const CAPTION_MAX = 1000; // batas aman caption gambar WhatsApp (1024)
+
+// ---------- statistik historis (data/mstrut-stats.json, hasil scripts/backtest-mstrut.js) ----------
+const STATS_FILE = process.env.MSTRUT_STATS_FILE || path.join(__dirname, "..", "..", "..", "data", "mstrut-stats.json");
+let statsCache = { mtime: -1, data: null };
+/** Baca data/mstrut-stats.json (di-cache menurut waktu ubah). null kalau belum ada / rusak: bot memberi catatan "belum ada data". */
+function loadStats(file = STATS_FILE) {
+  try {
+    const m = fs.statSync(file).mtimeMs;
+    if (m !== statsCache.mtime) statsCache = { mtime: m, data: JSON.parse(fs.readFileSync(file, "utf8")) };
+    return statsCache.data;
+  } catch {
+    return null;
+  }
+}
 
 // ---------- parser ----------
 /** Penulisan timeframe yang diterima -> kunci internal market.js. */
@@ -99,6 +121,41 @@ const ageTxt = (lang, age) => (age === 0 ? t(lang, "mstrut.age.now") : t(lang, "
 const fmtX = (lang, v) => (lang === "id" ? v.toFixed(1).replace(".", ",") : v.toFixed(1));
 
 /**
+ * Blok probabilitas (tanpa jaringan, bisa diuji). prob = hasil computeMstrutProb; stats = isi data/mstrut-stats.json atau null.
+ * @returns {string[]} baris teks (kosong kalau prob null)
+ */
+function buildProbLines(lang, { prob, tf, stats = null }) {
+  if (!prob) return [];
+  const out = ["", t(lang, "mstrut.prob.title", { tf: TF_SHORT[tf] || tf })];
+  out.push(t(lang, "mstrut.prob.line", { long: prob.long, short: prob.short, side: prob.sideways }));
+  const dirName = prob.top ? t(lang, `mstrut.prob.dir.${prob.top}`) : null;
+  if (!prob.top) out.push(t(lang, "mstrut.prob.top.even"));
+  else if (prob.dominant === "sideways") out.push(t(lang, "mstrut.prob.top.side", { side: prob.sideways, dir: dirName, p: prob.pTop }));
+  else out.push(t(lang, "mstrut.prob.top", { dir: dirName, p: prob.pTop }));
+  const sc = prob.basis.score;
+  out.push(t(lang, "mstrut.prob.basis", { score: `${sc >= 0 ? "+" : ""}${sc.toFixed(2)}`, conf: Math.round(prob.basis.confidence * 100) }));
+
+  const hit = prob.top ? lookupMstrutStats(stats, { tf, pDir: prob.pDir }) : null;
+  if (hit) {
+    const vars = { tf: TF_SHORT[tf] || tf, n: hit.nRes, hit: Math.round(hit.hitRate), h: stats.horizon, b: fmtX(lang, stats.barrierAtr), bin: hit.bin || "", lo: Math.round(hit.ciLo), hi: Math.round(hit.ciHi) };
+    out.push(t(lang, hit.scope === "bin" ? "mstrut.prob.stats.bin" : "mstrut.prob.stats.tf", vars));
+    out.push(t(lang, `mstrut.prob.verdict.${hit.verdict}`));
+    // Klaim jauh di atas kenyataan = angka terlalu percaya diri: beri tahu pembaca.
+    if (hit.claim != null && hit.hitRate != null && hit.claim - hit.hitRate >= 10) out.push(t(lang, "mstrut.prob.overconf", { claim: Math.round(hit.claim), hit: Math.round(hit.hitRate) }));
+  } else {
+    out.push(t(lang, "mstrut.prob.stats.none", { tf: TF_SHORT[tf] || tf, min: PCFG.MIN_N_SHOW }));
+  }
+  out.push(t(lang, "mstrut.prob.foot"));
+  return out;
+}
+
+/** Satu baris untuk caption gambar. null kalau tidak ada probabilitas. */
+function buildProbCaption(lang, { prob }) {
+  if (!prob) return null;
+  return t(lang, "mstrut.prob.cap", { long: prob.long, short: prob.short, side: prob.sideways });
+}
+
+/**
  * Bagian "6. Skenario N Jam ke Depan" (tanpa jaringan, bisa diuji). plan = hasil buildPlan; null -> tidak ada bagian.
  * @returns {string[]} baris teks
  */
@@ -141,9 +198,10 @@ function buildPlanCaption(lang, { plan, mk }) {
 
 /**
  * Teks laporan lengkap (tanpa jaringan, bisa diuji).
- * @param {object} p { res, pair, tf (kunci internal), price, changePct, mk (adapter pasar), plan (opsional, hasil buildPlan) }
+ * @param {object} p { res, pair, tf (kunci internal), price, changePct, mk (adapter pasar), plan (opsional, hasil buildPlan),
+ *                    prob (opsional, hasil computeMstrutProb), stats (opsional, isi data/mstrut-stats.json) }
  */
-function buildReport(lang, { res, pair, tf, price, changePct, mk, plan = null }) {
+function buildReport(lang, { res, pair, tf, price, changePct, mk, plan = null, prob = null, stats = null }) {
   const fl = (v) => mk.fmtLevel(v);
   const pct = (level) => mk.fmtPct(pctFrom(price, level));
   const when = (ms) => fmtWhen(lang, ms, tf);
@@ -194,6 +252,9 @@ function buildReport(lang, { res, pair, tf, price, changePct, mk, plan = null })
   // Market Assessment
   out.push("", t(lang, "mstrut.assess", { bias: BIAS[res.bias.value], why: t(lang, `mstrut.why.${res.bias.why}`) }));
 
+  // Probabilitas Long / Short / Sideways + akurasi historis
+  out.push(...buildProbLines(lang, { prob, tf, stats }));
+
   // 6. Skenario ke depan (Entry Zone / SL / TP)
   out.push(...buildPlanLines(lang, { plan, price, mk }));
 
@@ -233,7 +294,13 @@ async function runMstrut(sock, msg, { jid, lang }, { coin, tf, dir = null }) {
   } catch (err) {
     console.log("[kripto] !mstrut skenario gagal, laporan struktur tetap dikirim:", err.message);
   }
-  let text = buildReport(lang, { res, pair, tf, price: tick.price, changePct: tick.changePct, mk, plan });
+  let prob = null;
+  try {
+    prob = computeMstrutProb(res);
+  } catch (err) {
+    console.log("[kripto] !mstrut probabilitas gagal, laporan struktur tetap dikirim:", err.message);
+  }
+  let text = buildReport(lang, { res, pair, tf, price: tick.price, changePct: tick.changePct, mk, plan, prob, stats: loadStats() });
   if (isFx) {
     const notes = [t(lang, "hhll.fx.note")];
     const status = await mk.status();
@@ -258,9 +325,10 @@ async function runMstrut(sock, msg, { jid, lang }, { coin, tf, dir = null }) {
     // Laporan lebih panjang dari batas caption WhatsApp: gambar lebih dulu, laporan lengkap menyusul sebagai teks.
     const head = `📐 *${pair} · ${TF_SHORT[tf] || tf}* · Market Structure`;
     const planCap = buildPlanCaption(lang, { plan, mk });
-    await sock.sendMessage(jid, { image: png, caption: planCap ? `${head}\n${planCap}` : head }, { quoted: msg });
+    const probCap = buildProbCaption(lang, { prob });
+    await sock.sendMessage(jid, { image: png, caption: [head, probCap, planCap].filter(Boolean).join("\n") }, { quoted: msg });
     await sock.sendMessage(jid, { text });
   }
 }
 
-module.exports = { runMstrut, buildReport, buildPlanLines, buildPlanCaption, parseMstrutArgs, fmtWhen, TF_ALIASES, TF_SHORT, DIR_ALIASES };
+module.exports = { runMstrut, buildReport, buildPlanLines, buildPlanCaption, buildProbLines, buildProbCaption, loadStats, parseMstrutArgs, fmtWhen, TF_ALIASES, TF_SHORT, DIR_ALIASES };

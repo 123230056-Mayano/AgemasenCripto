@@ -446,6 +446,40 @@ const MSTRUT_CONFIG = Object.freeze({
   CHART_BARS: _posInt(process.env.MSTRUT_CHART_BARS, 100),
 });
 
+/**
+ * Probabilitas LONG / SHORT / SIDEWAYS dari market structure (!mstrut) + backtest kalibrasinya.
+ *
+ * Skor struktur (-1..+1, + = bullish) = jumlah komponen berbobot (lihat mstrutProb.js), lalu diubah ke tiga persen
+ * oleh computeProbability (probability.js, PROB_CONFIG) sehingga jumlahnya selalu 100%.
+ * Hasil = ESTIMASI berbasis aturan, bukan jaminan. Naikkan VERSION kalau bobot / aturan diubah (file statistik
+ * lama otomatis tidak dipakai lagi).
+ *
+ * Backtest: tiap candle closed -> hitung probabilitas HANYA dari data sampai candle itu (tanpa lookahead), lalu
+ * amati BT_HORIZON candle ke depan: harga lebih dulu menyentuh +BT_BARRIER_ATR x ATR (naik) atau -BT_BARRIER_ATR x ATR (turun).
+ * Pagar simetris, jadi tebakan acak ~50% dari kasus yang selesai. Statistik yang ditampilkan bot hanya dari bagian waktu
+ * TERAKHIR (oos) dan hanya bila N >= MIN_N_SHOW.
+ */
+const MSTRUT_PROB_CONFIG = Object.freeze({
+  VERSION: 1,
+  W_TREND: _num(process.env.MSTRUT_PROB_W_TREND, 0.3), // label swing: HH+HL = +, LH+LL = -
+  W_BREAK: _num(process.env.MSTRUT_PROB_W_BREAK, 0.25), // arah tembusan struktur terakhir (BOS / CHoCH)
+  W_MSS: _num(process.env.MSTRUT_PROB_W_MSS, 0.25), // MSS terbaru (CHoCH + sweep + displacement)
+  W_SWEEP: _num(process.env.MSTRUT_PROB_W_SWEEP, 0.15), // sweep SSL (+) / BSL (-) yang masih baru
+  W_ZONE: _num(process.env.MSTRUT_PROB_W_ZONE, 0.15), // harga di discount (+) / premium (-) terhadap range swing terakhir
+  SWEEP_MAX_AGE: _posInt(process.env.MSTRUT_PROB_SWEEP_MAX_AGE, 12), // sweep lebih tua dari ini (candle) tidak dihitung
+  MSS_MAX_AGE: _posInt(process.env.MSTRUT_PROB_MSS_MAX_AGE, 20), // MSS lebih tua dari ini (candle) tidak dihitung
+  // ---- backtest ----
+  BT_WARMUP: 80,
+  BT_WINDOW: 320, // sama dengan FETCH_LIMIT produksi
+  BT_STEP: _posInt(process.env.MSTRUT_BT_STEP, 3), // sampel tiap N candle (mengurangi tumpang tindih)
+  BT_HORIZON: _posInt(process.env.MSTRUT_BT_HORIZON, 24), // candle ke depan yang diamati
+  BT_BARRIER_ATR: _num(process.env.MSTRUT_BT_BARRIER_ATR, 1), // jarak pagar naik / turun (x ATR)
+  BIN_EDGES: [50, 60, 70, 101], // kelompok kalibrasi menurut persen arah dominan (50-59, 60-69, 70+)
+  MIN_N_SHOW: _posInt(process.env.MSTRUT_BT_MIN_N_SHOW, 30), // statistik disembunyikan kalau N selesai < ini
+  TRAIN_FRAC: 0.6, // 60% waktu awal = stel, 40% akhir = ukur (walk-forward sederhana)
+  MIN_EDGE_PTS: 3, // arah dominan dianggap "terbukti" bila hit-rate >= 50% + ini (poin) DAN batas bawah CI 95% > 50%
+});
+
 const HHLL_ALERT_CONFIG = Object.freeze({
   VERSION: 2, // v2: grade konteks, opsi kuat/searah, tahap gagal. Kunci dedupe hhllKey sengaja tetap "v1" (lihat hhllAlertCore.js)
   CHECK_MS: Math.max(5_000, _posInt(process.env.HHLL_CHECK_MS, 15_000)),
@@ -779,4 +813,4 @@ const FIBB_ALERT_CONFIG = Object.freeze({
   CONCURRENCY: _posInt(process.env.FIBB_ALERT_CONCURRENCY, 8),
 });
 
-module.exports = { PATTERN_ALERT_CONFIG, INDICATOR_CONFIG, BIAS_CONFIG, SIGNAL_CONFIG, PROB_CONFIG, SUDDEN_CONFIG, POSITION_CONFIG, ADV_ALERT_CONFIG, SNR_ALERT_CONFIG, SIGNAL_ALERT_CONFIG, HHLL_CONFIG, MSTRUT_CONFIG, HHLL_CONTEXT_CONFIG, HHLL_BACKTEST_CONFIG, HHLL_ALERT_CONFIG, TRENSTATE_CONFIG, STRENGTH_CONFIG, GAUSSIAN_CONFIG, PATTERN_CONFIG, AMD_CONFIG, AMD_ALERT_CONFIG, DUSDT_ALERT_CONFIG, FARLEY_CONFIG, FARLEY_ALERT_CONFIG, FIBB_CONFIG, FIBB_ALERT_CONFIG };
+module.exports = { PATTERN_ALERT_CONFIG, INDICATOR_CONFIG, BIAS_CONFIG, SIGNAL_CONFIG, PROB_CONFIG, SUDDEN_CONFIG, POSITION_CONFIG, ADV_ALERT_CONFIG, SNR_ALERT_CONFIG, SIGNAL_ALERT_CONFIG, HHLL_CONFIG, MSTRUT_CONFIG, MSTRUT_PROB_CONFIG, HHLL_CONTEXT_CONFIG, HHLL_BACKTEST_CONFIG, HHLL_ALERT_CONFIG, TRENSTATE_CONFIG, STRENGTH_CONFIG, GAUSSIAN_CONFIG, PATTERN_CONFIG, AMD_CONFIG, AMD_ALERT_CONFIG, DUSDT_ALERT_CONFIG, FARLEY_CONFIG, FARLEY_ALERT_CONFIG, FIBB_CONFIG, FIBB_ALERT_CONFIG };
