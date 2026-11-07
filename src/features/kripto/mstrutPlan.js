@@ -10,17 +10,26 @@
  * (mstrutCore.js). Bukan AI, bukan prediksi pasti: ini rencana berbasis struktur + likuiditas.
  *
  * ATURAN:
+ *   Arah manual : opts.dir = "long" | "short" (dari !mstrut btc 1h long). Arah dipaksa, bias tidak dipakai untuk memilih
+ *                 arah dan gerbang "sinyal bertentangan" dilewati (itu pilihan pengguna). Gerbang lain (leg terlalu
+ *                 kecil, zona terlalu jauh, R:R terlalu rendah) tetap berlaku. Kalau arahnya melawan bias / tembusan
+ *                 struktur, hasilnya ditandai counter = true. Keyakinan = "M" (manual), bukan hasil bias bot.
  *   Arah        : bias mstrut (Bullish -> LONG, Bearish -> SHORT). Bias Neutral memakai arah tembusan struktur
  *                 terakhir (smTrend) dengan keyakinan Rendah; tanpa itu -> WAIT.
  *   Leg         : impuls terakhir searah arah (SHORT: swing high -> swing low terakhir; LONG sebaliknya).
  *                 Ujung leg memakai ekstrem candle closed sejak swing itu (low/high baru ikut dihitung).
  *   Entry Zone  : retrace 50% - 79% dari leg (premium untuk SHORT, discount untuk LONG). Kalau harga sudah
  *                 berada di dalam / melewati batas bawah zona, zona dimulai dari harga sekarang.
- *   Stop Loss   : di luar likuiditas sisi stop terdekat di atas zona (SHORT) / di bawah zona (LONG) + 0,5 ATR;
- *                 kalau tidak ada, di luar swing asal leg.
+ *   Stop Loss   : di luar likuiditas sisi stop TERJAUH yang masih dalam jangkauan SL_MAX_ATR dari zona (termasuk
+ *                 EQH/EQL yang berdempetan) dan di luar swing asal leg, + 0,5 ATR. Jadi SL tidak berhenti di
+ *                 tengah kolam likuiditas yang mudah kena stop hunt.
  *   TP1 / TP2   : likuiditas sisi target yang masih utuh (SSL untuk SHORT, BSL untuk LONG), diambil sedikit
  *                 SEBELUM level (0,1 ATR) supaya order terisi. Kalau likuiditasnya kurang, diganti target
  *                 berbasis ATR (ditandai projected).
+ *   R:R         : dihitung dari tepi zona TERBURUK (SHORT: batas bawah zona, LONG: batas atas zona), bukan titik tengah.
+ *   WAIT        : tidak ada skenario bila (1) sinyal terbaru bertentangan dengan arah dan keyakinan Rendah,
+ *                 (2) Entry Zone di luar gerak wajar horizon, atau (3) R:R TP1 terburuk < MIN_RR_TP1.
+ *                 Hasil WAIT membawa `triggers` (swing high / low terakhir) untuk dua level pemicu bias.
  *   Jangkauan   : jarak harga -> TP dibandingkan ATR x akar(jumlah candle horizon) sebagai perkiraan kasar
  *                 gerak wajar dalam horizon; TP yang lebih jauh dari itu ditandai "jauh".
  *
@@ -42,6 +51,10 @@ const PLAN_CONFIG = Object.freeze({
   FALLBACK_TP1_ATR: 1.0,
   FALLBACK_TP2_ATR: 2.0,
   EXT_TP2_ATR: 1.5, // TP2 projected kalau hanya ada satu likuiditas target
+  SL_MAX_ATR: 6, // SL boleh melewati likuiditas sisi stop sejauh ini dari batas atas zona (x ATR)
+  MIN_RR_TP1: 1.0, // R:R TP1 (dari tepi zona terburuk) minimal; di bawah ini -> WAIT
+  CONFLICT_SWEEP_BARS: 12, // sweep berlawanan arah dianggap "baru" bila umurnya <= ini (candle)
+  ENTRY_REACH_FACTOR: 1.0, // tepi dekat zona lebih jauh dari faktor x gerak wajar horizon -> WAIT
 });
 
 const isNum = (v) => typeof v === "number" && isFinite(v);
@@ -67,7 +80,11 @@ function buildPlan(res, candles, opts = {}) {
   const horizonHours = opts.horizonHours || C.HORIZON_HOURS;
   const mins = TF_MINUTES[opts.tf] || 60;
   const horizonBars = Math.max(1, Math.round((horizonHours * 60) / mins));
-  const base = { atr: A, price, horizonHours, horizonBars };
+  const expected = A * Math.sqrt(horizonBars); // perkiraan kasar gerak wajar dalam horizon
+  // Dua level pemicu bias (dipakai saat WAIT): close di atas swing high terakhir = bullish, di bawah swing low terakhir = bearish.
+  const triggers = res.lastHigh && res.lastLow ? { up: res.lastHigh.price, down: res.lastLow.price } : null;
+  const manual = opts.dir === "long" || opts.dir === "short" ? opts.dir : null;
+  const base = { atr: A, price, horizonHours, horizonBars, triggers, forced: !!manual };
 
   // ---- arah ----
   let dir = null;
@@ -81,7 +98,23 @@ function buildPlan(res, candles, opts = {}) {
     grade = res.bias.why === "mss.bear" ? "A" : "B";
   } else if (res.smTrend === "up") dir = "long";
   else if (res.smTrend === "down") dir = "short";
+  if (manual) {
+    dir = manual;
+    grade = "M";
+    why = "manual";
+  }
   if (!dir) return { ...base, dir: "wait", reason: "nodir" };
+  // Arah manual melawan bias / tembusan struktur terakhir?
+  const against = dir === "short" ? "bullish" : "bearish";
+  const counter = !!manual && (res.bias.value === against || (res.bias.value === "neutral" && res.smTrend === (dir === "short" ? "up" : "down")));
+
+  // Keyakinan Rendah + sweep berlawanan yang baru terjadi SETELAH tembusan struktur terakhir = sinyal terbaru
+  // bertentangan dengan arah (SHORT vs sweep SSL, LONG vs sweep BSL) -> tidak ada setup.
+  if (!manual && grade === "C" && res.sweep && res.sweep.side === (dir === "short" ? "SSL" : "BSL") && res.sweep.age <= C.CONFLICT_SWEEP_BARS) {
+    const evs = res.allEvents || [];
+    const lastEv = evs.length ? evs[evs.length - 1] : null;
+    if (!lastEv || res.sweep.k > lastEv.k) return { ...base, dir: "wait", reason: "conflict" };
+  }
 
   // ---- ruang "SHORT" (LONG dibalik) ----
   const m = dir === "short" ? 1 : -1;
@@ -113,7 +146,8 @@ function buildPlan(res, candles, opts = {}) {
   const liq = res.liquidity;
   const items = [...liq.bsl, ...liq.ssl, ...(liq.eqItems || [])].filter((x) => x.status === "intact").map((x) => ({ side: x.side, level: f(x.level), eq: x.kind === "eq" }));
   const tol = C.DEDUPE_ATR * A;
-  const stops = dedupe(items.filter((x) => x.side === sideStop && x.level > P).sort((a, b) => a.level - b.level), tol);
+  const stopsRaw = items.filter((x) => x.side === sideStop && x.level > P).sort((a, b) => a.level - b.level);
+  const stops = dedupe(stopsRaw, tol);
   const targets = dedupe(items.filter((x) => x.side === sideTarget && x.level < P - C.MIN_TARGET_ATR * A).sort((a, b) => b.level - a.level), tol);
 
   // ---- Entry Zone ----
@@ -126,12 +160,17 @@ function buildPlan(res, candles, opts = {}) {
     zHi = Math.max(zHi, P + 0.3 * A);
   }
   const entry = (zLo + zHi) / 2;
+  // Zona terlalu jauh dari harga: hampir pasti tidak tersentuh dalam horizon.
+  if (state === "pending" && zLo - P > C.ENTRY_REACH_FACTOR * expected) return { ...base, dir: "wait", reason: "farEntry", expected };
 
   // ---- sisi stop: mayor, minor, SL ----
   // mayor = likuiditas sisi stop paling tinggi yang masih utuh (kotak di chart); minor = yang terdekat dengan harga
-  const major = stops.length ? stops[stops.length - 1].level : legHigh;
-  const anchorItem = stops.find((x) => x.level >= zHi + 0.3 * A);
-  const anchor = Math.max(anchorItem ? anchorItem.level : Math.min(major, legHigh), zHi + 0.3 * A);
+  const major = stopsRaw.length ? stopsRaw[stopsRaw.length - 1].level : legHigh;
+  // SL di luar likuiditas sisi stop TERJAUH dalam jangkauan (stopsRaw = tanpa dedupe, supaya EQH/EQL di atas swing yang
+  // berdempetan tetap dihitung), dan minimal di luar swing asal leg.
+  const slCap = zHi + C.SL_MAX_ATR * A;
+  const inReach = stopsRaw.filter((x) => x.level >= zHi + 0.3 * A && x.level <= slCap);
+  const anchor = Math.max(zHi + 0.3 * A, legHigh, inReach.length ? inReach[inReach.length - 1].level : -Infinity);
   const sl = anchor + C.SL_BUFFER_ATR * A;
   const minorItem = stops.find((x) => major - x.level >= 0.3 * A);
   const minor = minorItem ? minorItem.level : null;
@@ -150,11 +189,14 @@ function buildPlan(res, candles, opts = {}) {
     tp2Liq = targets[1].level;
     tp2 = tp2Liq + C.TP_BUFFER_ATR * A;
   } else tp2 = (tp1Liq != null ? tp1Liq - C.EXT_TP2_ATR * A : P - C.FALLBACK_TP2_ATR * A);
-  const risk = sl - entry;
-  const rr1 = (entry - tp1) / risk;
-  const rr2 = (entry - tp2) / risk;
+  // R:R dari tepi zona TERBURUK (ruang SHORT: batas bawah zona = entry terendah = reward terkecil, risiko terbesar).
+  const risk = sl - zLo;
+  const rr1 = (zLo - tp1) / risk;
+  const rr2 = (zLo - tp2) / risk;
+  const rrMid1 = (entry - tp1) / (sl - entry);
+  const rrMid2 = (entry - tp2) / (sl - entry);
+  if (!(rr1 >= C.MIN_RR_TP1)) return { ...base, dir: "wait", reason: "lowRR", rr1, minRR: C.MIN_RR_TP1 };
 
-  const expected = A * Math.sqrt(horizonBars);
   const reach = { tp1: Math.abs(P - tp1) <= expected, tp2: Math.abs(P - tp2) <= expected, expected: expected };
 
   // ---- kembali ke harga asli ----
@@ -165,6 +207,7 @@ function buildPlan(res, candles, opts = {}) {
     dir,
     grade,
     why,
+    counter,
     state,
     sideStop,
     sideTarget,
@@ -176,6 +219,8 @@ function buildPlan(res, candles, opts = {}) {
     tp2Projected: tp2Liq == null,
     rr1,
     rr2,
+    rrMid1,
+    rrMid2,
     risk,
     reach,
     leg: { from: f(legHigh), to: f(legLow) },

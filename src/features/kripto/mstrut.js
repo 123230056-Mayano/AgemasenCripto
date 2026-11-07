@@ -40,17 +40,27 @@ const TF_ALIASES = Object.freeze({
 });
 /** Nama timeframe gaya MetaTrader (dipakai di laporan: "Timeframe: H1"). */
 const TF_SHORT = Object.freeze({ "1M": "M1", "5M": "M5", "15M": "M15", "1H": "H1", "4H": "H4", "1D": "D1" });
+/** Pilihan arah skenario manual: !mstrut btc 1h long / short (buy / sell ikut diterima). */
+const DIR_ALIASES = Object.freeze({ LONG: "long", BUY: "long", SHORT: "short", SELL: "short" });
 
 /**
- * "BTCUSDT H1" -> { coin: "BTC", tf: "1H" } | "btc" -> { coin: "BTC", tf: null } | "eur/usd 4h" -> { coin: "EURUSD", tf: "4H" }.
- * null kalau format salah (tidak ada simbol, simbol/timeframe dobel, karakter aneh).
+ * "BTCUSDT H1" -> { coin: "BTC", tf: "1H", dir: null } | "btc" -> { coin: "BTC", tf: null, dir: null }
+ * | "eur/usd 4h" -> { coin: "EURUSD", tf: "4H", dir: null } | "btc 1h long" -> { coin: "BTC", tf: "1H", dir: "long" }.
+ * dir = arah skenario pilihan pengguna (long / short), null = bot menentukan sendiri.
+ * null kalau format salah (tidak ada simbol, simbol/timeframe/arah dobel, karakter aneh).
  */
 function parseMstrutArgs(raw) {
   const tokens = String(raw || "").trim().split(/\s+/).filter(Boolean);
   let coin = null;
   let tf = null;
+  let dir = null;
   for (const tok of tokens) {
     const up = tok.toUpperCase();
+    if (DIR_ALIASES[up]) {
+      if (dir) return null;
+      dir = DIR_ALIASES[up];
+      continue;
+    }
     if (TF_ALIASES[up]) {
       if (tf) return null;
       tf = TF_ALIASES[up];
@@ -67,7 +77,7 @@ function parseMstrutArgs(raw) {
     if (!/^[A-Z0-9]{1,15}$/.test(base)) return null;
     coin = base;
   }
-  return coin ? { coin, tf } : null;
+  return coin ? { coin, tf, dir } : null;
 }
 
 // ---------- format teks ----------
@@ -98,7 +108,9 @@ function buildPlanLines(lang, { plan, price, mk }) {
   const pct = (level) => mk.fmtPct(pctFrom(price, level));
   const out = ["", t(lang, "mstrut.plan.s6", { h: plan.horizonHours })];
   if (plan.dir === "wait") {
-    out.push(t(lang, "mstrut.plan.wait", { why: t(lang, `mstrut.plan.why.${plan.reason}`) }));
+    const whyVars = { rr: plan.rr1 != null ? fmtX(lang, plan.rr1) : "", min: plan.minRR != null ? fmtX(lang, plan.minRR) : "", h: plan.horizonHours, exp: plan.expected != null ? fl(plan.expected) : "" };
+    out.push(t(lang, "mstrut.plan.wait", { why: t(lang, `mstrut.plan.why.${plan.reason}`, whyVars) }));
+    if (plan.triggers) out.push(t(lang, "mstrut.plan.trigger", { up: fl(plan.triggers.up), down: fl(plan.triggers.down) }));
     return out;
   }
   out.push(t(lang, `mstrut.plan.dir.${plan.dir}`, { conf: t(lang, `mstrut.plan.conf.${plan.grade}`) }));
@@ -112,6 +124,7 @@ function buildPlanLines(lang, { plan, price, mk }) {
   const far = [!plan.reach.tp1 && "TP1", !plan.reach.tp2 && "TP2"].filter(Boolean);
   if (far.length) out.push(t(lang, "mstrut.plan.reach.far", { which: far.join(" / "), h: plan.horizonHours, exp: fl(plan.reach.expected) }));
   if (plan.rr2 < 1) out.push(t(lang, "mstrut.plan.rr.low"));
+  if (plan.counter) out.push(t(lang, "mstrut.plan.counter", { dir: plan.dir.toUpperCase() }));
   const key = `mstrut.plan.concl.${plan.dir}${plan.state === "inzone" ? ".inzone" : ""}`;
   out.push("", t(lang, key, { lo: fl(plan.entry.lo), hi: fl(plan.entry.hi), tp1: fl(plan.tp1), tp2: fl(plan.tp2), sl: fl(plan.sl) }));
   out.push(t(lang, "mstrut.plan.foot"));
@@ -196,7 +209,7 @@ function buildReport(lang, { res, pair, tf, price, changePct, mk, plan = null })
 }
 
 // ---------- runner ----------
-async function runMstrut(sock, msg, { jid, lang }, { coin, tf }) {
+async function runMstrut(sock, msg, { jid, lang }, { coin, tf, dir = null }) {
   const mk = resolveMarket(coin);
   const isFx = mk.id === "forex";
   if (isFx && !mk.allowedTfs([tf]).length) {
@@ -215,7 +228,7 @@ async function runMstrut(sock, msg, { jid, lang }, { coin, tf }) {
 
   let plan = null;
   try {
-    plan = buildPlan(res, candles, { tf, price: tick.price });
+    plan = buildPlan(res, candles, { tf, price: tick.price, dir });
   } catch (err) {
     console.log("[kripto] !mstrut skenario gagal, laporan struktur tetap dikirim:", err.message);
   }
@@ -249,4 +262,4 @@ async function runMstrut(sock, msg, { jid, lang }, { coin, tf }) {
   }
 }
 
-module.exports = { runMstrut, buildReport, buildPlanLines, buildPlanCaption, parseMstrutArgs, fmtWhen, TF_ALIASES, TF_SHORT };
+module.exports = { runMstrut, buildReport, buildPlanLines, buildPlanCaption, parseMstrutArgs, fmtWhen, TF_ALIASES, TF_SHORT, DIR_ALIASES };
