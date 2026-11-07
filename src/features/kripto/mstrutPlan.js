@@ -128,19 +128,37 @@ function buildPlan(res, candles, opts = {}) {
   for (let i = swings.length - 1; i >= 0; i--) if (swings[i].type === "L") { lastL = swings[i]; break; }
   let origin = null;
   if (lastL) for (let i = swings.length - 1; i >= 0; i--) if (swings[i].type === "H" && swings[i].i < lastL.i) { origin = swings[i]; break; }
-  if (!lastL || !origin) return { ...base, dir: "wait", reason: "nostruct" };
 
-  // ekstrem leg: low (ruang SHORT) terendah sejak swing low terakhir, dari candle closed
-  const closed = (candles || []).filter((c) => c.closed !== false);
-  let legLow = lastL.price;
-  for (let k = Math.max(0, lastL.i); k < closed.length; k++) {
-    const lo = m === 1 ? closed[k].l : -closed[k].h;
-    if (lo < legLow) legLow = lo;
+  // Arah manual (long/short) TIDAK boleh berakhir tanpa panah: kalau struktur tidak mendukung, pakai leg sintetis
+  // (+-1 ATR dari harga) dan tandai `weak` supaya laporan memberi peringatan. Arah otomatis tetap WAIT.
+  let weak = null;
+  let legHigh;
+  let legLow;
+  if (lastL && origin) {
+    // ekstrem leg: low (ruang SHORT) terendah sejak swing low terakhir, dari candle closed
+    const closed = (candles || []).filter((c) => c.closed !== false);
+    legLow = lastL.price;
+    for (let k = Math.max(0, lastL.i); k < closed.length; k++) {
+      const lo = m === 1 ? closed[k].l : -closed[k].h;
+      if (lo < legLow) legLow = lo;
+    }
+    legHigh = origin.price;
+    if (!(legHigh - legLow >= C.MIN_LEG_ATR * A)) {
+      if (!manual) return { ...base, dir: "wait", reason: "smallLeg" };
+      weak = "smallLeg";
+    } else if (P >= legHigh) {
+      if (!manual) return { ...base, dir: "wait", reason: "invalid" };
+      weak = "invalid";
+    }
+  } else {
+    if (!manual) return { ...base, dir: "wait", reason: "nostruct" };
+    weak = "nostruct";
   }
-  const legHigh = origin.price;
+  if (weak) {
+    legHigh = P + A;
+    legLow = P - A;
+  }
   const leg = legHigh - legLow;
-  if (!(leg >= C.MIN_LEG_ATR * A)) return { ...base, dir: "wait", reason: "smallLeg" };
-  if (P >= legHigh) return { ...base, dir: "wait", reason: "invalid" };
 
   // ---- likuiditas yang masih utuh ----
   const liq = res.liquidity;
@@ -161,7 +179,10 @@ function buildPlan(res, candles, opts = {}) {
   }
   const entry = (zLo + zHi) / 2;
   // Zona terlalu jauh dari harga: hampir pasti tidak tersentuh dalam horizon.
-  if (state === "pending" && zLo - P > C.ENTRY_REACH_FACTOR * expected) return { ...base, dir: "wait", reason: "farEntry", expected };
+  if (state === "pending" && zLo - P > C.ENTRY_REACH_FACTOR * expected) {
+    if (!manual) return { ...base, dir: "wait", reason: "farEntry", expected };
+    weak = weak || "farEntry";
+  }
 
   // ---- sisi stop: mayor, minor, SL ----
   // mayor = likuiditas sisi stop paling tinggi yang masih utuh (kotak di chart); minor = yang terdekat dengan harga
@@ -195,7 +216,10 @@ function buildPlan(res, candles, opts = {}) {
   const rr2 = (zLo - tp2) / risk;
   const rrMid1 = (entry - tp1) / (sl - entry);
   const rrMid2 = (entry - tp2) / (sl - entry);
-  if (!(rr1 >= C.MIN_RR_TP1)) return { ...base, dir: "wait", reason: "lowRR", rr1, minRR: C.MIN_RR_TP1 };
+  if (!(rr1 >= C.MIN_RR_TP1)) {
+    if (!manual) return { ...base, dir: "wait", reason: "lowRR", rr1, minRR: C.MIN_RR_TP1 };
+    weak = weak || "lowRR";
+  }
 
   const reach = { tp1: Math.abs(P - tp1) <= expected, tp2: Math.abs(P - tp2) <= expected, expected: expected };
 
@@ -208,6 +232,7 @@ function buildPlan(res, candles, opts = {}) {
     grade,
     why,
     counter,
+    weak,
     state,
     sideStop,
     sideTarget,

@@ -1089,6 +1089,7 @@ module.exports = {
   "mstrut.plan.trigger": "• Triggers: a candle close above {up} → bullish bias; a close below {down} → bearish bias. Wait for one of them before looking for an entry.",
   "mstrut.plan.conf.M": "Manual (the direction you picked, not the bot's bias)",
   "mstrut.plan.counter": "• Warning: this {dir} goes against the current bias / structure break (counter-trend), higher risk",
+  "mstrut.plan.weak": "• Note: structure does not yet support the {dir} direction ({why}). The arrow path on the chart is only a rough ATR-based scenario, not a valid structure setup. Wait for confirmation before acting",
   "mstrut.plan.foot": "_The scenario uses fixed rules, not AI: Entry Zone = 50–79% retrace of the impulse leg, SL beyond stop-side liquidity, TP at target-side liquidity (BSL/SSL). R:R is measured from the worst edge of the zone; the scenario becomes WAIT when signals conflict, the zone is too far, or R:R is too low. It is a structure-based plan, not a certain forecast and not trading advice._",
   "mstrut.plan.cap": "🎯 Next {h}h scenario: {dir}\nEntry: {lo} – {hi}\nSL: {sl}\nTP1: {tp1}\nTP2: {tp2}",
   "hhllalert.line.confirm.up.flip": "🚀 *{coin}* {tf} CONFIRMED: close {now} broke swing high {level}. *Structure flips up.*",

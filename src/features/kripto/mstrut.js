@@ -125,6 +125,7 @@ function buildPlanLines(lang, { plan, price, mk }) {
   if (far.length) out.push(t(lang, "mstrut.plan.reach.far", { which: far.join(" / "), h: plan.horizonHours, exp: fl(plan.reach.expected) }));
   if (plan.rr2 < 1) out.push(t(lang, "mstrut.plan.rr.low"));
   if (plan.counter) out.push(t(lang, "mstrut.plan.counter", { dir: plan.dir.toUpperCase() }));
+  if (plan.weak) out.push(t(lang, "mstrut.plan.weak", { dir: plan.dir.toUpperCase(), why: t(lang, `mstrut.plan.why.${plan.weak}`, { rr: fmtX(lang, plan.rr1), min: fmtX(lang, 1), h: plan.horizonHours, exp: fl(plan.reach.expected) }) }));
   const key = `mstrut.plan.concl.${plan.dir}${plan.state === "inzone" ? ".inzone" : ""}`;
   out.push("", t(lang, key, { lo: fl(plan.entry.lo), hi: fl(plan.entry.hi), tp1: fl(plan.tp1), tp2: fl(plan.tp2), sl: fl(plan.sl) }));
   out.push(t(lang, "mstrut.plan.foot"));

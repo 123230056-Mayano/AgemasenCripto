@@ -1089,6 +1089,7 @@ module.exports = {
   "mstrut.plan.trigger": "• Pemicu: candle close di atas {up} → bias bullish; close di bawah {down} → bias bearish. Tunggu salah satunya sebelum mencari entry.",
   "mstrut.plan.conf.M": "Manual (arah pilihan kamu, bukan hasil bias bot)",
   "mstrut.plan.counter": "• Peringatan: {dir} ini melawan bias / tembusan struktur saat ini (counter-trend), risiko lebih tinggi",
+  "mstrut.plan.weak": "• Catatan: struktur belum mendukung arah {dir} ({why}). Jalur panah di chart hanyalah skenario kasar berbasis ATR, bukan setup struktur yang valid. Tunggu konfirmasi sebelum bertindak",
   "mstrut.plan.foot": "_Skenario dihitung dengan aturan tetap, bukan AI: Entry Zone = retrace 50–79% dari leg impuls, SL di luar likuiditas sisi stop, TP di likuiditas sisi target (BSL/SSL). R:R dihitung dari tepi zona terburuk; skenario diganti WAIT bila sinyal bertentangan, zona terlalu jauh, atau R:R terlalu rendah. Ini rencana berbasis struktur, bukan prediksi pasti dan bukan saran trading._",
   "mstrut.plan.cap": "🎯 Skenario {h} jam: {dir}\nEntry: {lo} – {hi}\nSL: {sl}\nTP1: {tp1}\nTP2: {tp2}",
   "hhllalert.line.confirm.up.flip": "🚀 *{coin}* {tf} KONFIRMASI: close {now} menembus swing high {level}. *Struktur berbalik naik.*",
