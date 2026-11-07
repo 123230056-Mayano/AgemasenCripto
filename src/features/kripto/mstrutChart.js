@@ -24,7 +24,7 @@ const MAX_EVENTS = 6;
 const PLAN = { bsl: "#ef5350", ssl: "#4f8cff", tp: "#7bd88f", sl: "#ef5350", entry: "#2dd4bf", note: "#facc15", bounce: "#ffe08a" };
 
 /** @returns {Buffer} PNG */
-function renderMstrutChart({ candles, res, title, tf, digits = null, plan = null }) {
+function renderMstrutChart({ candles, res, title, tf, digits = null, plan = null, forecast = null }) {
   const closed = candles.filter((c) => c.closed !== false);
   const live = candles.length && candles[candles.length - 1].closed === false ? candles[candles.length - 1] : null;
   const n = closed.length;
@@ -35,7 +35,9 @@ function renderMstrutChart({ candles, res, title, tf, digits = null, plan = null
   const bars = closed.slice(from);
   const nbBars = bars.length + (live ? 1 : 0);
   const hasPlan = !!(plan && plan.dir && plan.dir !== "wait");
-  const proj = hasPlan ? Math.max(14, Math.round(nbBars * 0.3)) : 0; // slot kosong di kanan untuk jalur proyeksi
+  // Skenario WAIT: perkiraan kasar (mstrutForecast.js) digambar dengan panah PUTUS-PUTUS, tanpa Entry Zone / SL / TP.
+  const hasForecast = !hasPlan && !!(forecast && (forecast.kind === "range" ? isFinite(forecast.lo) && isFinite(forecast.hi) : isFinite(forecast.to)));
+  const proj = hasPlan || hasForecast ? Math.max(14, Math.round(nbBars * 0.3)) : 0; // slot kosong di kanan untuk jalur proyeksi
   const nb = nbBars + proj;
   const last = closed[n - 1];
 
@@ -80,6 +82,13 @@ function renderMstrutChart({ candles, res, title, tf, digits = null, plan = null
         lo = Math.min(lo, p);
         hi = Math.max(hi, p);
       }
+    }
+  }
+  if (hasForecast) {
+    const pts = forecast.kind === "range" ? [forecast.lo, forecast.hi] : [forecast.to];
+    for (const p of pts) {
+      lo = Math.min(lo, p);
+      hi = Math.max(hi, p);
     }
   }
   const pad = (hi - lo) * 0.09 || hi * 0.01;
@@ -444,6 +453,71 @@ function renderMstrutChart({ candles, res, title, tf, digits = null, plan = null
     }
     // penanda horizon di sudut kanan atas area proyeksi
     txt(`Next ${plan.horizonHours}h`, (L0 + rightEdge) / 2, pp.y + 16, C.axis, { align: "center", size: 17 });
+  }
+
+  // ---- perkiraan (skenario WAIT): panah putus-putus, bukan skenario entry ----
+  if (hasForecast) {
+    const txtF = (text, x, y, color, { align = "left", size = 17 } = {}) => {
+      g.save();
+      g.font = `bold ${size}px ${family}`;
+      g.textAlign = align;
+      g.textBaseline = "middle";
+      g.lineJoin = "round";
+      g.lineWidth = 5;
+      g.strokeStyle = "rgba(11,14,20,0.92)";
+      g.strokeText(text, x, y);
+      g.fillStyle = color;
+      g.fillText(text, x, y);
+      g.restore();
+    };
+    // area proyeksi (sama dengan skenario, tapi lebih samar)
+    g.save();
+    g.fillStyle = "rgba(79,140,255,0.03)";
+    g.fillRect(L0, pp.y, rightEdge - L0, pp.h);
+    g.strokeStyle = "rgba(139,147,161,0.35)";
+    g.setLineDash([2, 6]);
+    g.beginPath();
+    g.moveTo(Math.round(L0) + 0.5, pp.y);
+    g.lineTo(Math.round(L0) + 0.5, pp.y + pp.h);
+    g.stroke();
+    g.restore();
+
+    const lastIdx = from + nbBars - 1;
+    const startPrice = live ? live.c : last.c;
+    const p0 = { x: X(lastIdx), y: Y(startPrice) };
+    const xEnd = X(lastIdx + Math.max(5, Math.round(proj * 0.85)));
+    const dashOpt = { color: C.arrow, width: 4, head: 20, dash: [14, 10], alpha: 0.85 };
+    dot(g, p0.x, p0.y);
+    if (forecast.kind === "range") {
+      // sideways: pita range lo..hi + panah mendatar putus-putus
+      const yHi = Y(forecast.hi);
+      const yLo = Y(forecast.lo);
+      g.save();
+      g.fillStyle = "rgba(139,147,161,0.10)";
+      g.fillRect(L0, yHi, rightEdge - L0, yLo - yHi);
+      g.strokeStyle = "rgba(139,147,161,0.55)";
+      g.lineWidth = 2;
+      g.setLineDash([10, 8]);
+      for (const yy of [yHi, yLo]) {
+        g.beginPath();
+        g.moveTo(L0, Math.round(yy) + 0.5);
+        g.lineTo(rightEdge, Math.round(yy) + 0.5);
+        g.stroke();
+      }
+      g.restore();
+      arrow(g, p0.x, p0.y, xEnd, p0.y, dashOpt);
+      txtF("Forecast: sideways", (L0 + rightEdge) / 2, Math.min(yLo - 14, pp.y + pp.h - 14), PLAN.note, { align: "center" });
+      txtF(`≈ ${fmtPrice(forecast.hi)}`, rightEdge - 10, yHi - 14, C.axis, { align: "right", size: 16 });
+      txtF(`≈ ${fmtPrice(forecast.lo)}`, rightEdge - 10, yLo + 14, C.axis, { align: "right", size: 16 });
+    } else {
+      const end = { x: xEnd, y: Y(forecast.to) };
+      arrow(g, p0.x, p0.y, end.x, end.y, dashOpt);
+      const up = forecast.dir === "long";
+      // label di area proyeksi (kanan candle terakhir) supaya tidak menimpa candle
+      txtF(`Forecast (WAIT): ${forecast.dir.toUpperCase()} ${forecast.pTop}%`, L0 + 14, p0.y + (up ? 32 : -32), PLAN.note, { align: "left" });
+      txtF(`≈ ${fmtPrice(forecast.to)}${forecast.clipped ? " (max move)" : ""}`, end.x - 18, end.y + (up ? -20 : 20), C.axis, { align: "right", size: 16 });
+    }
+    txtF(`Next ${forecast.horizonHours}h · estimate`, (L0 + rightEdge) / 2, pp.y + 16, C.axis, { align: "center" });
   }
 
   // tag sumbu kanan

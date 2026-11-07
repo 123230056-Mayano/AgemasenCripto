@@ -9,7 +9,8 @@
  *
  * Bagian 6 (skenario 24 jam: Entry Zone, SL, TP1/TP2, BSL/SSL) dibuat mstrutPlan.js, juga aturan tetap.
  * Blok "Probabilitas Market Structure" (Long / Short / Sideways %) dihitung mstrutProb.js dari hasil struktur yang sama;
- * akurasi historisnya (apakah harga benar bergerak ke arah itu) dibaca dari data/mstrut-stats.json hasil
+ * Saat skenario WAIT, mstrutForecast.js membuat PERKIRAAN arah kasar (panah putus-putus di chart, tanpa Entry/SL/TP).
+ * Akurasi historis probabilitas (apakah harga benar bergerak ke arah itu) dibaca dari data/mstrut-stats.json hasil
  * scripts/backtest-mstrut.js (mstrutBacktest.js), hanya bagian out-of-sample dan hanya bila sampel cukup.
  *
  * Alur: command -> ambil OHLCV Binance (market.js; candle berjalan ikut diambil tetapi hanya untuk status
@@ -29,6 +30,7 @@ const { DAILY_TZ, DAILY_TZ_LABEL } = require("./divAlertCore");
 const { analyzeStructure } = require("./mstrutCore");
 const { buildPlan } = require("./mstrutPlan");
 const { computeMstrutProb } = require("./mstrutProb");
+const { buildForecast } = require("./mstrutForecast");
 const { lookupMstrutStats } = require("./mstrutBacktest");
 const { MSTRUT_PROB_CONFIG: PCFG } = require("../../config/indicatorConfig");
 const fs = require("fs");
@@ -156,6 +158,36 @@ function buildProbCaption(lang, { prob }) {
 }
 
 /**
+ * Blok perkiraan saat skenario WAIT (tanpa jaringan, bisa diuji). forecast = hasil buildForecast; null -> tidak ada baris.
+ * @returns {string[]} baris teks
+ */
+function buildForecastLines(lang, { forecast, price, mk }) {
+  if (!forecast) return [];
+  const fl = (v) => mk.fmtLevel(v);
+  const pct = (level) => mk.fmtPct(pctFrom(price, level));
+  const out = ["", t(lang, "mstrut.fc.title")];
+  const h = forecast.horizonHours;
+  if (forecast.kind === "range") {
+    out.push(t(lang, "mstrut.fc.range", { side: forecast.sideways, lo: fl(forecast.lo), hi: fl(forecast.hi), h }));
+  } else {
+    out.push(t(lang, "mstrut.fc.dir", { dir: t(lang, `mstrut.prob.dir.${forecast.dir}`), p: forecast.pTop, level: fl(forecast.to), pct: pct(forecast.to), h }));
+    out.push(forecast.source === "liq" ? t(lang, "mstrut.fc.src.liq", { side: forecast.sideTarget, level: fl(forecast.targetLevel) }) : t(lang, "mstrut.fc.src.atr", { side: forecast.sideTarget }));
+    if (forecast.clipped) out.push(t(lang, "mstrut.fc.clip", { level: fl(forecast.targetLevel), h, exp: fl(forecast.expected) }));
+    if (forecast.invalidation != null) out.push(t(lang, `mstrut.fc.inv.${forecast.dir}`, { level: fl(forecast.invalidation) }));
+  }
+  out.push(t(lang, "mstrut.fc.foot"));
+  return out;
+}
+
+/** Satu baris perkiraan untuk caption gambar. null kalau tidak ada perkiraan. */
+function buildForecastCaption(lang, { forecast, mk }) {
+  if (!forecast) return null;
+  const fl = (v) => mk.fmtLevel(v);
+  if (forecast.kind === "range") return t(lang, "mstrut.fc.cap.range", { h: forecast.horizonHours, lo: fl(forecast.lo), hi: fl(forecast.hi) });
+  return t(lang, "mstrut.fc.cap", { h: forecast.horizonHours, dir: t(lang, `mstrut.prob.dir.${forecast.dir}`), level: fl(forecast.to) });
+}
+
+/**
  * Bagian "6. Skenario N Jam ke Depan" (tanpa jaringan, bisa diuji). plan = hasil buildPlan; null -> tidak ada bagian.
  * @returns {string[]} baris teks
  */
@@ -199,9 +231,10 @@ function buildPlanCaption(lang, { plan, mk }) {
 /**
  * Teks laporan lengkap (tanpa jaringan, bisa diuji).
  * @param {object} p { res, pair, tf (kunci internal), price, changePct, mk (adapter pasar), plan (opsional, hasil buildPlan),
- *                    prob (opsional, hasil computeMstrutProb), stats (opsional, isi data/mstrut-stats.json) }
+ *                    prob (opsional, hasil computeMstrutProb), stats (opsional, isi data/mstrut-stats.json),
+ *                    forecast (opsional, hasil buildForecast; hanya ada saat skenario WAIT) }
  */
-function buildReport(lang, { res, pair, tf, price, changePct, mk, plan = null, prob = null, stats = null }) {
+function buildReport(lang, { res, pair, tf, price, changePct, mk, plan = null, prob = null, stats = null, forecast = null }) {
   const fl = (v) => mk.fmtLevel(v);
   const pct = (level) => mk.fmtPct(pctFrom(price, level));
   const when = (ms) => fmtWhen(lang, ms, tf);
@@ -257,6 +290,7 @@ function buildReport(lang, { res, pair, tf, price, changePct, mk, plan = null, p
 
   // 6. Skenario ke depan (Entry Zone / SL / TP)
   out.push(...buildPlanLines(lang, { plan, price, mk }));
+  out.push(...buildForecastLines(lang, { forecast, price, mk }));
 
   // Candle berjalan (sementara)
   const lv = res.live;
@@ -300,7 +334,14 @@ async function runMstrut(sock, msg, { jid, lang }, { coin, tf, dir = null }) {
   } catch (err) {
     console.log("[kripto] !mstrut probabilitas gagal, laporan struktur tetap dikirim:", err.message);
   }
-  let text = buildReport(lang, { res, pair, tf, price: tick.price, changePct: tick.changePct, mk, plan, prob, stats: loadStats() });
+  // Skenario WAIT: tetap beri perkiraan kasar (panah putus-putus) dari probabilitas + likuiditas terdekat.
+  let forecast = null;
+  try {
+    forecast = buildForecast(res, prob, plan, { tf, price: tick.price });
+  } catch (err) {
+    console.log("[kripto] !mstrut perkiraan gagal, laporan tetap dikirim:", err.message);
+  }
+  let text = buildReport(lang, { res, pair, tf, price: tick.price, changePct: tick.changePct, mk, plan, prob, stats: loadStats(), forecast });
   if (isFx) {
     const notes = [t(lang, "hhll.fx.note")];
     const status = await mk.status();
@@ -314,7 +355,7 @@ async function runMstrut(sock, msg, { jid, lang }, { coin, tf, dir = null }) {
   let png = null;
   try {
     const { renderMstrutChart } = require("./mstrutChart");
-    png = renderMstrutChart({ candles, res, title: `${pair}  ${TF_SHORT[tf] || tf}  Market Structure`, tf: TF_LABEL[tf], digits: isFx ? mk.digits : null, plan });
+    png = renderMstrutChart({ candles, res, title: `${pair}  ${TF_SHORT[tf] || tf}  Market Structure`, tf: TF_LABEL[tf], digits: isFx ? mk.digits : null, plan, forecast });
   } catch (err) {
     console.log("[kripto] !mstrut chart gagal, kirim teks saja:", err.message);
   }
@@ -326,9 +367,10 @@ async function runMstrut(sock, msg, { jid, lang }, { coin, tf, dir = null }) {
     const head = `📐 *${pair} · ${TF_SHORT[tf] || tf}* · Market Structure`;
     const planCap = buildPlanCaption(lang, { plan, mk });
     const probCap = buildProbCaption(lang, { prob });
-    await sock.sendMessage(jid, { image: png, caption: [head, probCap, planCap].filter(Boolean).join("\n") }, { quoted: msg });
+    const fcCap = buildForecastCaption(lang, { forecast, mk });
+    await sock.sendMessage(jid, { image: png, caption: [head, probCap, planCap, fcCap].filter(Boolean).join("\n") }, { quoted: msg });
     await sock.sendMessage(jid, { text });
   }
 }
 
-module.exports = { runMstrut, buildReport, buildPlanLines, buildPlanCaption, buildProbLines, buildProbCaption, loadStats, parseMstrutArgs, fmtWhen, TF_ALIASES, TF_SHORT, DIR_ALIASES };
+module.exports = { runMstrut, buildReport, buildPlanLines, buildPlanCaption, buildProbLines, buildProbCaption, buildForecastLines, buildForecastCaption, loadStats, parseMstrutArgs, fmtWhen, TF_ALIASES, TF_SHORT, DIR_ALIASES };
