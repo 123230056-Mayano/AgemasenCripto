@@ -9,6 +9,7 @@
     "test:mstrut": "node --test src/test/mstrut-prob.test.js",
     "backtest:mstrut": "node scripts/backtest-mstrut.js --out data/mstrut-stats.json",
     "test:mstrut-plan": "node --test src/test/mstrut-plan-backtest.test.js",
+    "test:mstruct-bt": "node --test src/test/mstruct-bt-command.test.js",
     "backtest:mstrut-plan": "node scripts/backtest-mstrut-plan.js --out data/mstrut-plan-stats.json --csv data/mstrut-plan-trades.csv"
   },
   "keywords": [],
