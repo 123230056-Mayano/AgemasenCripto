@@ -254,6 +254,27 @@ const SNR_ALERT_CONFIG = Object.freeze({
 });
 
 /**
+ * Alarm market structure (!alertmstruct): BOS, CHoCH, MSS, dan liquidity sweep BSL / SSL.
+ * Semua dinilai dari candle CLOSED memakai engine yang sama dengan !mstrut (mstrutCore.js: analyzeStructure), jadi
+ * definisi BOS / CHoCH / MSS / sweep identik dengan !mstrut dan MSTRUT_CONFIG berlaku di sini juga.
+ * Kejadian dikabari hanya bila terjadi di candle closed TERAKHIR dan candle itu closed SETELAH alarm dibuat.
+ * Naikkan VERSION kalau aturan diubah.
+ */
+const MSTRUCT_ALERT_CONFIG = Object.freeze({
+  VERSION: 1,
+  CHECK_MS: Math.max(5_000, _posInt(process.env.MSTRUCT_ALERT_CHECK_MS, 15_000)),
+  INTERVAL_MS: Math.max(30_000, _posInt(process.env.MSTRUCT_ALERT_INTERVAL_MS, 60_000)), // jeda ambil ulang per koin+TF
+  MAX_PAIRS: _posInt(process.env.MSTRUCT_ALERT_MAX_PAIRS, 60), // batas koin+TF per putaran (sisanya bergilir)
+  FINAL_DELAY_MS: _posInt(process.env.MSTRUCT_ALERT_FINAL_DELAY_MS, 10_000), // tunggu setelah candle tutup agar data final
+  MAX_MSG_PER_CHAT_HOUR: _posInt(process.env.MSTRUCT_ALERT_MAX_MSG_PER_CHAT_HOUR, 20),
+  LINES_PER_MSG: _posInt(process.env.MSTRUCT_ALERT_LINES_PER_MSG, 20),
+  SEND_GAP_MS: _posInt(process.env.MSTRUCT_ALERT_SEND_GAP_MS, 1_000),
+  MAX_PER_USER: _posInt(process.env.MSTRUCT_ALERT_MAX_PER_USER, 10),
+  MAX_PER_CHAT: _posInt(process.env.MSTRUCT_ALERT_MAX_PER_CHAT, 20),
+  CONCURRENCY: _posInt(process.env.MSTRUCT_ALERT_CONCURRENCY, 8),
+});
+
+/**
  * Alarm skenario sinyal (!alertsignal): kirim skenario seperti !signal (entry / SL / TP1 / TP2 / RR + status entri)
  * saat skenario LONG / SHORT BARU muncul di candle closed. Dinilai dari candle closed terakhir dan candle
  * sebelumnya (tanpa status tersimpan): "baru" = candle sebelumnya belum punya skenario arah yang sama.
@@ -813,4 +834,4 @@ const FIBB_ALERT_CONFIG = Object.freeze({
   CONCURRENCY: _posInt(process.env.FIBB_ALERT_CONCURRENCY, 8),
 });
 
-module.exports = { PATTERN_ALERT_CONFIG, INDICATOR_CONFIG, BIAS_CONFIG, SIGNAL_CONFIG, PROB_CONFIG, SUDDEN_CONFIG, POSITION_CONFIG, ADV_ALERT_CONFIG, SNR_ALERT_CONFIG, SIGNAL_ALERT_CONFIG, HHLL_CONFIG, MSTRUT_CONFIG, MSTRUT_PROB_CONFIG, HHLL_CONTEXT_CONFIG, HHLL_BACKTEST_CONFIG, HHLL_ALERT_CONFIG, TRENSTATE_CONFIG, STRENGTH_CONFIG, GAUSSIAN_CONFIG, PATTERN_CONFIG, AMD_CONFIG, AMD_ALERT_CONFIG, DUSDT_ALERT_CONFIG, FARLEY_CONFIG, FARLEY_ALERT_CONFIG, FIBB_CONFIG, FIBB_ALERT_CONFIG };
+module.exports = { PATTERN_ALERT_CONFIG, INDICATOR_CONFIG, BIAS_CONFIG, SIGNAL_CONFIG, PROB_CONFIG, SUDDEN_CONFIG, POSITION_CONFIG, ADV_ALERT_CONFIG, SNR_ALERT_CONFIG, MSTRUCT_ALERT_CONFIG, SIGNAL_ALERT_CONFIG, HHLL_CONFIG, MSTRUT_CONFIG, MSTRUT_PROB_CONFIG, HHLL_CONTEXT_CONFIG, HHLL_BACKTEST_CONFIG, HHLL_ALERT_CONFIG, TRENSTATE_CONFIG, STRENGTH_CONFIG, GAUSSIAN_CONFIG, PATTERN_CONFIG, AMD_CONFIG, AMD_ALERT_CONFIG, DUSDT_ALERT_CONFIG, FARLEY_CONFIG, FARLEY_ALERT_CONFIG, FIBB_CONFIG, FIBB_ALERT_CONFIG };

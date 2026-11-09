@@ -74,12 +74,15 @@ const posInt = (v, d) => (Number.isInteger(Number(v)) && Number(v) > 0 ? Number(
 const MAX_DIV_ALERTS = posInt(process.env.DIV_ALERT_MAX_PER_USER, 10);
 const MAX_DIV_ALERTS_PER_CHAT = posInt(process.env.DIV_ALERT_MAX_PER_CHAT, 20);
 // Batas alarm indikator lanjutan (!alertind, item 10); angka sama dengan ADV_ALERT_CONFIG.
-const { ADV_ALERT_CONFIG, SNR_ALERT_CONFIG, SIGNAL_ALERT_CONFIG, HHLL_ALERT_CONFIG, AMD_ALERT_CONFIG, DUSDT_ALERT_CONFIG, POSITION_CONFIG, PATTERN_ALERT_CONFIG, FARLEY_ALERT_CONFIG, FIBB_ALERT_CONFIG } = require("../config/indicatorConfig");
+const { ADV_ALERT_CONFIG, SNR_ALERT_CONFIG, MSTRUCT_ALERT_CONFIG, SIGNAL_ALERT_CONFIG, HHLL_ALERT_CONFIG, AMD_ALERT_CONFIG, DUSDT_ALERT_CONFIG, POSITION_CONFIG, PATTERN_ALERT_CONFIG, FARLEY_ALERT_CONFIG, FIBB_ALERT_CONFIG } = require("../config/indicatorConfig");
 const MAX_ADV_ALERTS = ADV_ALERT_CONFIG.MAX_PER_USER;
 const MAX_ADV_ALERTS_PER_CHAT = ADV_ALERT_CONFIG.MAX_PER_CHAT;
 // Batas alarm titik balik S/R (!alertsnr); angka sama dengan SNR_ALERT_CONFIG.
 const MAX_SNR_ALERTS = SNR_ALERT_CONFIG.MAX_PER_USER;
 const MAX_SNR_ALERTS_PER_CHAT = SNR_ALERT_CONFIG.MAX_PER_CHAT;
+// Batas alarm market structure (!alertmstruct); angka sama dengan MSTRUCT_ALERT_CONFIG.
+const MAX_MSTRUCT_ALERTS = MSTRUCT_ALERT_CONFIG.MAX_PER_USER;
+const MAX_MSTRUCT_ALERTS_PER_CHAT = MSTRUCT_ALERT_CONFIG.MAX_PER_CHAT;
 // Batas alarm skenario sinyal (!alertsignal); angka sama dengan SIGNAL_ALERT_CONFIG.
 const MAX_SIGNAL_ALERTS = SIGNAL_ALERT_CONFIG.MAX_PER_USER;
 const MAX_SIGNAL_ALERTS_PER_CHAT = SIGNAL_ALERT_CONFIG.MAX_PER_CHAT;
@@ -146,7 +149,7 @@ let failures = 0;
 let started = false;
 
 // ---------- helper ----------
-const isEmpty = (u) => !u || (!u.watch?.length && !u.alerts?.length && !u.divAlerts?.length && !u.advAlerts?.length && !u.snrAlerts?.length && !u.signalAlerts?.length && !u.farleyAlerts?.length && !u.fibbAlerts?.length && !u.hhllAlerts?.length && !u.patternAlerts?.length && !u.amdAlerts?.length && !u.dusdtAlerts?.length && !u.positions?.length && !u.daily && !u.tf);
+const isEmpty = (u) => !u || (!u.watch?.length && !u.alerts?.length && !u.divAlerts?.length && !u.advAlerts?.length && !u.snrAlerts?.length && !u.mstructAlerts?.length && !u.signalAlerts?.length && !u.farleyAlerts?.length && !u.fibbAlerts?.length && !u.hhllAlerts?.length && !u.patternAlerts?.length && !u.amdAlerts?.length && !u.dusdtAlerts?.length && !u.positions?.length && !u.daily && !u.tf);
 const snap = (jid) => (isEmpty(users[jid]) ? null : JSON.stringify(users[jid]));
 const hasPending = () => dirtyUsers.size > 0 || dirtyClosed.size > 0 || dirtySent.size > 0 || pruneBefore != null;
 
@@ -455,6 +458,8 @@ function user(jid) {
   if (!u.nextAdvId) u.nextAdvId = 1;
   if (!Array.isArray(u.snrAlerts)) u.snrAlerts = [];
   if (!u.nextSnrId) u.nextSnrId = 1;
+  if (!Array.isArray(u.mstructAlerts)) u.mstructAlerts = [];
+  if (!u.nextMstructId) u.nextMstructId = 1;
   if (!Array.isArray(u.signalAlerts)) u.signalAlerts = [];
   if (!u.nextSignalId) u.nextSignalId = 1;
   if (!Array.isArray(u.farleyAlerts)) u.farleyAlerts = [];
@@ -591,7 +596,7 @@ function clearAlerts(jid) {
 
 /**
  * Hapus SEMUA alert milik user dari semua jenis: harga/level (!alert, !alertlevel) dan alarm
- * divergence, indikator, S/R, sinyal, Farley, Fibb, HH/LL, pola, AMD, USDT.D. Posisi (!posisi) dan ringkasan harian TIDAK ikut.
+ * divergence, indikator, S/R, market structure, sinyal, Farley, Fibb, HH/LL, pola, AMD, USDT.D. Posisi (!posisi) dan ringkasan harian TIDAK ikut.
  * @returns {Object<string, number>} jumlah terhapus per jenis (hanya jenis yang ada isinya)
  */
 function clearEveryAlert(jid) {
@@ -600,6 +605,7 @@ function clearEveryAlert(jid) {
     div: clearDivAlerts,
     adv: clearAdvAlerts,
     snr: clearSnrAlerts,
+    mstruct: clearMstructAlerts,
     signal: clearSignalAlerts,
     farley: clearFarleyAlerts,
     fibb: clearFibbAlerts,
@@ -828,6 +834,64 @@ function allSnrAlerts() {
   const out = [];
   for (const [jid, u] of Object.entries(users)) {
     for (const a of u.snrAlerts || []) if (a.active !== false) out.push({ userJid: jid, sub: a });
+  }
+  return out;
+}
+
+// ---------- alarm market structure (!alertmstruct) ----------
+/**
+ * mstructAlerts: [{ id: "m1", chat, coin: "BTC"|"EURUSD"|"WATCHLIST", tf, kinds: ["bos","choch","mss","bsl","ssl"],
+ *                   createdAt, active: true }]
+ * Hanya konfirmasi (candle closed). Penanda kejadian terkirim memakai kunci dedupe yang sama dengan alarm lain (wasSent / markSent).
+ */
+const getMstructAlerts = (jid) => [...user(jid).mstructAlerts];
+
+/** @returns {object|"full"|"chatFull"|"exists"} */
+function addMstructAlert(jid, sub) {
+  const u = user(jid);
+  if (u.mstructAlerts.some((a) => a.chat === sub.chat && a.coin === sub.coin && a.tf === sub.tf && sameList(a.kinds, sub.kinds))) return "exists";
+  if (u.mstructAlerts.length >= MAX_MSTRUCT_ALERTS) return "full";
+  if (countMstructAlertsInChat(sub.chat) >= MAX_MSTRUCT_ALERTS_PER_CHAT) return "chatFull";
+  const entry = { ...sub, id: `m${u.nextMstructId++}`, createdAt: Date.now(), active: true };
+  u.mstructAlerts.push(entry);
+  save(jid);
+  return entry;
+}
+
+function countMstructAlertsInChat(chat) {
+  let n = 0;
+  for (const u of Object.values(users)) for (const a of u.mstructAlerts || []) if (a.chat === chat) n++;
+  return n;
+}
+
+/** id boleh "m3" / "M3" / "3". @returns {boolean} */
+function removeMstructAlert(jid, id) {
+  const u = user(jid);
+  const want = /^\d+$/.test(String(id)) ? `m${id}` : String(id).toLowerCase();
+  const i = u.mstructAlerts.findIndex((a) => a.id === want);
+  if (i < 0) return false;
+  u.mstructAlerts.splice(i, 1);
+  prune(jid);
+  save(jid);
+  return true;
+}
+
+/** @returns {number} jumlah alarm yang dihapus */
+function clearMstructAlerts(jid) {
+  const u = user(jid);
+  const n = u.mstructAlerts.length;
+  if (!n) return 0;
+  u.mstructAlerts = [];
+  prune(jid);
+  save(jid);
+  return n;
+}
+
+/** Semua alarm market structure aktif semua user (untuk monitor). */
+function allMstructAlerts() {
+  const out = [];
+  for (const [jid, u] of Object.entries(users)) {
+    for (const a of u.mstructAlerts || []) if (a.active !== false) out.push({ userJid: jid, sub: a });
   }
   return out;
 }
@@ -1410,6 +1474,8 @@ module.exports = {
   MAX_ADV_ALERTS_PER_CHAT,
   MAX_SNR_ALERTS,
   MAX_SNR_ALERTS_PER_CHAT,
+  MAX_MSTRUCT_ALERTS,
+  MAX_MSTRUCT_ALERTS_PER_CHAT,
   MAX_DUSDT_ALERTS,
   MAX_DUSDT_ALERTS_PER_CHAT,
   MAX_SIGNAL_ALERTS,
@@ -1462,6 +1528,12 @@ module.exports = {
   clearSnrAlerts,
   allSnrAlerts,
   countSnrAlertsInChat,
+  getMstructAlerts,
+  addMstructAlert,
+  removeMstructAlert,
+  clearMstructAlerts,
+  allMstructAlerts,
+  countMstructAlertsInChat,
   getSignalAlerts,
   addSignalAlert,
   removeSignalAlert,

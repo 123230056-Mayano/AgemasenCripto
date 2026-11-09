@@ -11,6 +11,7 @@
  *     menyentuh level, aktif lagi setelah harga menjauh > 1.5% / level berganti.
  *   - ringkasan harian (!harian): dikirim sekali per hari pada jam pilihan user.
  *   - alarm skenario sinyal (!alertsignal): skenario LONG / SHORT baru seperti !signal, hanya konfirmasi (candle closed). Mesinnya di signalAlertEngine.js.
+ *   - alarm market structure (!alertmstruct): BOS / CHoCH / MSS / sweep BSL-SSL, konfirmasi (candle closed). Mesinnya di mstructAlertEngine.js.
  *   - alarm titik balik S/R (!alertsnr): reject / tembus (default), wick / sweep (opt-in), hanya konfirmasi (candle closed). Mesinnya di snrAlertEngine.js.
  *   - alarm Fibo + Bollinger (!alertfibb): BUY / SELL area baru dari candle closed (zona retracement fib + sentuhan pita Bollinger); tiap kejadian dikirim sebagai gambar chart + caption. Mesinnya di fibbAlertEngine.js.
  *   - alarm Farley (!alertfarley, kripto + forex): skenario BUY / SELL baru dari candle closed; tiap kejadian dikirim sebagai gambar chart + caption (teks saja kalau chart gagal). Mesinnya di farleyAlertEngine.js.
@@ -68,6 +69,7 @@ const {
 
 const { createAdvEngine } = require("./advAlertEngine");
 const { createSnrEngine } = require("./snrAlertEngine");
+const { createMstructEngine } = require("./mstructAlertEngine");
 const { createSignalEngine } = require("./signalAlertEngine");
 const { createFarleyEngine } = require("./farleyAlertEngine");
 const { renderFarleyPng } = require("./farley");
@@ -83,7 +85,7 @@ const { createAmdEngine } = require("./amdAlertEngine");
 const { renderAmdChart } = require("./amd");
 const { createDusdtEngine } = require("./dusdtAlertEngine");
 const { getDusdt, renderDusdtChart } = require("./dusdt");
-const { ADV_ALERT_CONFIG: ADV, SNR_ALERT_CONFIG: SNR, SIGNAL_ALERT_CONFIG: SIGCFG, FARLEY_ALERT_CONFIG: FARCFG, FIBB_ALERT_CONFIG: FIBBCFG, HHLL_ALERT_CONFIG: HHLL, PATTERN_ALERT_CONFIG: PATCFG, AMD_ALERT_CONFIG: AMDCFG, DUSDT_ALERT_CONFIG: DUSDTCFG, POSITION_CONFIG: POSCFG } = require("../../config/indicatorConfig");
+const { ADV_ALERT_CONFIG: ADV, SNR_ALERT_CONFIG: SNR, MSTRUCT_ALERT_CONFIG: MSTRUCTCFG, SIGNAL_ALERT_CONFIG: SIGCFG, FARLEY_ALERT_CONFIG: FARCFG, FIBB_ALERT_CONFIG: FIBBCFG, HHLL_ALERT_CONFIG: HHLL, PATTERN_ALERT_CONFIG: PATCFG, AMD_ALERT_CONFIG: AMDCFG, DUSDT_ALERT_CONFIG: DUSDTCFG, POSITION_CONFIG: POSCFG } = require("../../config/indicatorConfig");
 
 const BINANCE = (process.env.BINANCE_BASE || "https://data-api.binance.vision").replace(/\/+$/, "");
 const POLL_MS = Math.max(10_000, Number(process.env.ALERT_POLL_MS) || 30_000);
@@ -107,6 +109,7 @@ let dailyBusy = false;
 let divBusy = false;
 let advBusy = false;
 let snrBusy = false;
+let mstructBusy = false;
 let signalBusy = false;
 let farleyBusy = false;
 let fibbBusy = false;
@@ -632,6 +635,19 @@ const snrEngine = createSnrEngine({
 /** Pemeriksaan alarm S/R (konfirmasi). Dipanggil timer; aman dipanggil manual untuk uji. */
 const checkSnrAlerts = (now) => (sockRef ? snrEngine.tick(now) : undefined);
 
+// ---------- alarm market structure (!alertmstruct) ----------
+// Kripto (candle Binance) dan forex (candle Yahoo, lewat fetchCandlesAny); hanya candle closed.
+const mstructEngine = createMstructEngine({
+  store,
+  fetchCandles: fetchCandlesAny,
+  notify,
+  langFor,
+  isUnsupported: (err) => err instanceof UnsupportedCoinError,
+});
+
+/** Pemeriksaan alarm market structure (BOS / CHoCH / MSS / sweep). Dipanggil timer; aman dipanggil manual untuk uji. */
+const checkMstructAlerts = (now) => (sockRef ? mstructEngine.tick(now) : undefined);
+
 // ---------- alarm skenario sinyal (!alertsignal) ----------
 const signalEngine = createSignalEngine({
   store,
@@ -809,6 +825,18 @@ function setAlertSocket(sock) {
   }, SNR.CHECK_MS).unref?.();
 
   setInterval(async () => {
+    if (mstructBusy) return;
+    mstructBusy = true;
+    try {
+      await checkMstructAlerts();
+    } catch (err) {
+      console.log("[mstructalert] pengecekan gagal:", err.message);
+    } finally {
+      mstructBusy = false;
+    }
+  }, MSTRUCTCFG.CHECK_MS).unref?.();
+
+  setInterval(async () => {
     if (signalBusy) return;
     signalBusy = true;
     try {
@@ -905,4 +933,4 @@ function setAlertSocket(sock) {
   }, DUSDTCFG.CHECK_MS).unref?.();
 }
 
-module.exports = { setAlertSocket, notifyImage, checkPriceAlerts, checkDaily, checkDivergence, checkAdvAlerts, checkSnrAlerts, checkSignalAlerts, checkFarleyAlerts, checkFibbAlerts, checkPositions, checkHhllAlerts, checkPatternAlerts, checkAmdAlerts, checkDusdtAlerts, localNow, fetchPrices };
+module.exports = { setAlertSocket, notifyImage, checkPriceAlerts, checkDaily, checkDivergence, checkAdvAlerts, checkSnrAlerts, checkMstructAlerts, checkSignalAlerts, checkFarleyAlerts, checkFibbAlerts, checkPositions, checkHhllAlerts, checkPatternAlerts, checkAmdAlerts, checkDusdtAlerts, localNow, fetchPrices };

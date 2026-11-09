@@ -34,6 +34,7 @@
  *   !alertind <koin|watchlist> [tf] [bias|cross] [live] | list | off | hapus <id|semua>  (alarm bias berubah / crossover baru, advAlertCommand.js)
  *   !posisi buka <koin> [tf] <long|short> entry <harga> sl <harga> [tp <harga>] | list | sl <id> <harga> | tutup <id|semua>  (posisi + peringatan WASPADA/CUT, positionCommand.js)
  *   !alertsnr <koin|watchlist> [tf] [reject|tembus|wick|sweep] [kuat] | list | off | hapus <id|semua>  (alarm titik balik S/R, snrAlertCommand.js)
+ *   !alertmstruct <koin|pair|watchlist> [tf] [bos] [choch] [mss] [bsl] [ssl] [sweep] | list | off | hapus <id|semua>  (alarm market structure: BOS, CHoCH, MSS, sweep BSL/SSL di candle closed, mstructAlertCommand.js). FOREX: !alertmstruct eurusd 1h (alias !alertfxmstruct)
  *   !alertsignal <koin|watchlist> [tf] [long|short] [tunggu] | list | off | hapus <id|semua>  (alarm skenario sinyal seperti !signal, signalAlertCommand.js). Alias: !alertsinyal
  *   !alertamd <koin|watchlist> [tf] [naik|turun] [dini|konfirmasi] [rr<tp1>:<tp2>] [sl <harga>] [tp <harga>] | list | off | hapus <id|semua>  (alarm AMD, amdAlertCommand.js)
  *   !alertfarley <koin|pair|watchlist> [tf] [buy|sell] | list | off | hapus <id|semua>  (alarm skenario Farley BUY / SELL baru, farleyAlertCommand.js). FOREX: !alertfarley eurusd 1h (alias !alertfxfarley); KATEGORI forex: !alertfarley major|cross|exotic|logam|forex 1h (semua pair kategori itu); watchlist tetap kripto saja
@@ -78,6 +79,7 @@ const { normalizePairText } = require("../forex/forexPairs");
 const { DIVALERT_COMMANDS, DIVALERT_RUNNERS, parseDivAlertArgs } = require("./divAlertCommand");
 const { ADVALERT_COMMANDS, ADVALERT_RUNNERS, parseAdvAlertArgs } = require("./advAlertCommand");
 const { SNRALERT_COMMANDS, SNRALERT_RUNNERS, parseSnrAlertArgs } = require("./snrAlertCommand");
+const { MSTRUCTALERT_COMMANDS, MSTRUCTALERT_RUNNERS, parseMstructAlertArgs } = require("./mstructAlertCommand");
 const { SIGNALALERT_COMMANDS, SIGNALALERT_RUNNERS, parseSignalAlertArgs } = require("./signalAlertCommand");
 const { POSITION_COMMANDS, POSITION_RUNNERS, parsePositionCommandArgs } = require("./positionCommand");
 const { FARLEYALERT_COMMANDS, FARLEYALERT_RUNNERS, parseFarleyAlertArgs } = require("./farleyAlertCommand");
@@ -531,6 +533,19 @@ async function handleKriptoCommand(sock, msg, { jid, text, lang }) {
       }
     }
   }
+  // Alarm market structure (!alertmstruct: BOS / CHoCH / MSS / sweep BSL-SSL, konfirmasi) -> lihat mstructAlertCommand.js
+  let isMstructAlert = false;
+  if (!name) {
+    for (const [key, def] of Object.entries(MSTRUCTALERT_COMMANDS)) {
+      const m = text.match(def.re);
+      if (m) {
+        name = key;
+        match = m;
+        isMstructAlert = true;
+        break;
+      }
+    }
+  }
   // Alarm skenario sinyal (!alertsignal: LONG / SHORT baru seperti !signal, konfirmasi) -> lihat signalAlertCommand.js
   let isSignalAlert = false;
   if (!name) {
@@ -685,6 +700,7 @@ async function handleKriptoCommand(sock, msg, { jid, text, lang }) {
   else if (isDivAlert) args = parseDivAlertArgs(name, match[1] || "", getDefaultTf(senderId));
   else if (isAdvAlert) args = parseAdvAlertArgs(name, match[1] || "", getDefaultTf(senderId));
   else if (isSnrAlert) args = parseSnrAlertArgs(name, match[1] || "", getDefaultTf(senderId));
+  else if (isMstructAlert) args = parseMstructAlertArgs(name, match[1] || "", getDefaultTf(senderId));
   else if (isSignalAlert) args = parseSignalAlertArgs(name, match[1] || "", getDefaultTf(senderId));
   else if (isFarleyAlert) args = parseFarleyAlertArgs(name, match[1] || "", getDefaultTf(senderId));
   else if (isFibbAlert) args = parseFibbAlertArgs(name, match[1] || "", getDefaultTf(senderId));
@@ -749,6 +765,10 @@ async function handleKriptoCommand(sock, msg, { jid, text, lang }) {
     }
     if (isSnrAlert) {
       await SNRALERT_RUNNERS[name](sock, msg, { jid, lang, senderId }, args);
+      return true;
+    }
+    if (isMstructAlert) {
+      await MSTRUCTALERT_RUNNERS[name](sock, msg, { jid, lang, senderId }, args);
       return true;
     }
     if (isSignalAlert) {
