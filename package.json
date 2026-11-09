@@ -7,7 +7,9 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "check:i18n": "node scripts/check-i18n.js",
     "test:mstrut": "node --test src/test/mstrut-prob.test.js",
-    "backtest:mstrut": "node scripts/backtest-mstrut.js --out data/mstrut-stats.json"
+    "backtest:mstrut": "node scripts/backtest-mstrut.js --out data/mstrut-stats.json",
+    "test:mstrut-plan": "node --test src/test/mstrut-plan-backtest.test.js",
+    "backtest:mstrut-plan": "node scripts/backtest-mstrut-plan.js --out data/mstrut-plan-stats.json --csv data/mstrut-plan-trades.csv"
   },
   "keywords": [],
   "author": "",
