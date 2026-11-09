@@ -15,7 +15,7 @@
  *   !pola <koin> [tf|semua] [detail] -> pola candlestick (engulfing, pin bar, doji, star, inside bar, tweezer, harami, piercing/dark cloud, marubozu, three soldiers/crows, three methods) di ekstrem swing / zona SNR, bukti bersyarat dengan level konfirmasi + batal (candlePatterns.js, patternCommand.js). Alias: !pattern. FOREX: pair dikenali otomatis (!pola eurusd 4h, !pola eur/usd, !pola xauusd semua; alias !fxpola), chart + teks seperti kripto; tanpa volume, ada catatan pasar tutup dan gap pembukaan
  *   !fibb <koin> [tf]    -> Fibonacci + Bollinger Bands (20,2): level fib, pita BB, konfluens keduanya, status BUY / SELL area + chart (fibb.js, fibbCore.js)
  *   !hhll <koin|pair> [tf] -> market structure Higher High / Higher Low / Lower High / Lower Low + status tren + chart (hhll.js). Alias: !struktur. Forex: !hhll eurusd 4h (alias !fxhhll)
- *   !mstrut <koin|pair> [M15|H1|H4|D1] [long|short] -> Market Structure SMC/ICT: tren HH/HL/LH/LL, swing, BSL/SSL/EQH/EQL, liquidity sweep, BOS, CHoCH, MSS + status Unconfirmed untuk candle berjalan + chart (mstrut.js, mstrutCore.js, mstrutChart.js). Alias: !marketstructure (!mstruct sekarang = backtest skenario, lihat di bawah). Boleh ditulis BTCUSDT (!mstrut BTCUSDT H1); forex ikut: !mstrut eurusd 4h
+ *   !mstrut <koin|pair> [M15|H1|H4|D1] [long|short] -> Market Structure SMC/ICT: tren HH/HL/LH/LL, swing, BSL/SSL/EQH/EQL, liquidity sweep, BOS, CHoCH, MSS + status Unconfirmed untuk candle berjalan + chart (mstrut.js, mstrutCore.js, mstrutChart.js). Alias: !marketstructure (!mstruct = !mstrut + backtest PDF, lihat di bawah). Boleh ditulis BTCUSDT (!mstrut BTCUSDT H1); forex ikut: !mstrut eurusd 4h
  *   !farley <koin|pair> [tf]  -> pendekatan Alan S. Farley: ribbon SMA 5-8-13 + Bollinger 13,2 + Stochastic + MACD TF besar -> BUY / SELL / TUNGGU / RANGE + entry, SL, TP1, TP2 + alasan (farley.js, farleyCore.js). FOREX: pair dikenali otomatis (!farley eurusd 4h, !farley eur/usd, !farley xauusd; alias !fxfarley), SL/TP juga dalam pip, tanpa volume, pasar tutup = BUY/SELL jadi TUNGGU
  *   !ema <koin> [tf]     -> EMA 20/50/200 + posisi harga (di atas / di bawah)
  *   !movave <koin> [tf] [sma|ema] -> Moving Average SMA & EMA 20/50/200 + posisi harga + golden/death cross (movave.js). Alias: !ma, !movingaverage
@@ -34,7 +34,7 @@
  *   !alertind <koin|watchlist> [tf] [bias|cross] [live] | list | off | hapus <id|semua>  (alarm bias berubah / crossover baru, advAlertCommand.js)
  *   !posisi buka <koin> [tf] <long|short> entry <harga> sl <harga> [tp <harga>] | list | sl <id> <harga> | tutup <id|semua>  (posisi + peringatan WASPADA/CUT, positionCommand.js)
  *   !alertsnr <koin|watchlist> [tf] [reject|tembus|wick|sweep] [kuat] | list | off | hapus <id|semua>  (alarm titik balik S/R, snrAlertCommand.js)
- *   !mstruct [koin ...] [M15|H1|H4|D1 ...] [bars N] [nocost] [overlap] [nobe] -> backtest SKENARIO !mstrut (Entry/SL/TP), laporan dikirim sebagai PDF (mstrutPlanBtCommand.js, mstrutPlanBtPdf.js). Alias: !mstrutbt, !mstructbt
+ *   !mstruct <koin> [tf] [long|short] [bars N] [nocost] [overlap] [nobe] -> analisis !mstrut (chart + laporan) DITAMBAH backtest SKENARIO (Entry/SL/TP) sebagai PDF (mstrutPlanBtCommand.js, mstrutPlanBtPdf.js). Alias: !mstrutbt, !mstructbt
  *   !alertmstruct <koin|pair|watchlist> [tf] [bos] [choch] [mss] [bsl] [ssl] [sweep] | list | off | hapus <id|semua>  (alarm market structure: BOS, CHoCH, MSS, sweep BSL/SSL di candle closed, mstructAlertCommand.js). FOREX: !alertmstruct eurusd 1h (alias !alertfxmstruct)
  *   !alertsignal <koin|watchlist> [tf] [long|short] [tunggu] | list | off | hapus <id|semua>  (alarm skenario sinyal seperti !signal, signalAlertCommand.js). Alias: !alertsinyal
  *   !alertamd <koin|watchlist> [tf] [naik|turun] [dini|konfirmasi] [rr<tp1>:<tp2>] [sl <harga>] [tp <harga>] | list | off | hapus <id|semua>  (alarm AMD, amdAlertCommand.js)
@@ -716,7 +716,7 @@ async function handleKriptoCommand(sock, msg, { jid, text, lang }) {
   else if (isAdvAlert) args = parseAdvAlertArgs(name, match[1] || "", getDefaultTf(senderId));
   else if (isSnrAlert) args = parseSnrAlertArgs(name, match[1] || "", getDefaultTf(senderId));
   else if (isMstructAlert) args = parseMstructAlertArgs(name, match[1] || "", getDefaultTf(senderId));
-  else if (isMstructBt) args = parseMstructBtArgs(name, match[1] || "");
+  else if (isMstructBt) args = parseMstructBtArgs(name, match[1] || "", getDefaultTf(senderId));
   else if (isSignalAlert) args = parseSignalAlertArgs(name, match[1] || "", getDefaultTf(senderId));
   else if (isFarleyAlert) args = parseFarleyAlertArgs(name, match[1] || "", getDefaultTf(senderId));
   else if (isFibbAlert) args = parseFibbAlertArgs(name, match[1] || "", getDefaultTf(senderId));

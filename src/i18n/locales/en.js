@@ -1885,4 +1885,5 @@ module.exports = {
   "mstructbt.v.no_edge": "not proven",
   "mstructbt.v.insufficient": "not enough data",
   "mstructbt.skipped": "⚠️ Coins skipped (not on Binance): {list}",
+  "mstructbt.fxSkip": "ℹ️ The scenario backtest is only available for crypto (Binance data), so for forex only the analysis above is sent.",
 };

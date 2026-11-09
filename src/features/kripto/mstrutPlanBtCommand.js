@@ -3,8 +3,11 @@
 /**
  * features/kripto/mstrutPlanBtCommand.js
  * ------------------------------------------------------------------
- * !mstruct [koin ...] [M15|H1|H4|D1 ...] [bars N] [nocost] [overlap] [nobe]
- *   -> backtest SKENARIO !mstrut (Entry Zone / SL / TP1 / TP2), laporan dikirim sebagai PDF (bukan teks panjang).
+ * !mstruct <koin> [M15|H1|H4|D1] [long|short] [bars N] [nocost] [overlap] [nobe]
+ *   -> (1) analisis market structure seperti !mstrut (chart + laporan teks, TIDAK dihapus), lalu
+ *      (2) backtest SKENARIO !mstrut (Entry Zone / SL / TP1 / TP2) dikirim sebagai PDF.
+ *   Tanpa koin / lebih dari satu koin = hanya PDF backtest (analisis hanya untuk satu koin).
+ *   Forex = hanya analisis (data backtest Binance-only).
  *
  * Logika backtest ada di mstrutPlanBacktest.js (murni); PDF di mstrutPlanBtPdf.js. File ini hanya:
  *   parse argumen -> ambil candle (market.fetchCandlesHistory) -> runPlanBacktest per koin+TF -> buildPlanStatsFile
@@ -14,12 +17,13 @@
  * seluruh bot, hasil di-cache 15 menit, dan tiap job memberi jeda ke event loop (setImmediate) agar koneksi WhatsApp
  * tidak tersendat.
  *
- * Catatan nama: !mstruct dulu alias !mstrut (analisis). Sekarang !mstruct = backtest; analisis tetap lewat
- * !mstrut / !marketstructure / !mstuct.
+ * Catatan nama: !mstruct = !mstrut + backtest PDF. !mstrut / !marketstructure / !mstuct tetap analisis saja.
  */
 
 const { t } = require("../../i18n");
 const { fetchCandlesHistory, UnsupportedCoinError } = require("./market");
+const { runMstrut, DIR_ALIASES } = require("./mstrut");
+const { resolvePair } = require("../forex/forexPairs");
 const { runPlanBacktest, buildPlanStatsFile } = require("./mstrutPlanBacktest");
 const { buildMstrutPlanBtPdf } = require("./mstrutPlanBtPdf");
 
@@ -42,19 +46,22 @@ const MSTRUCTBT_COMMANDS = {
 };
 
 /**
- * "btc eth 1h 4h bars 2000 nocost" -> { coins, tfs, bars, sim }. null kalau format salah / melebihi batas
- * (pemanggil lalu mengirim penjelasan cmd.mstruct).
+ * "wld" | "btc eth 1h 4h bars 2000 nocost" | "btc 1h long" -> {
+ *   coins, tfs (untuk backtest), bars, sim, analysis: {coin, tf, dir} | null, skipBacktest }.
+ * Analisis (chart + laporan !mstrut) hanya kalau tepat SATU koin. null kalau format salah / melebihi batas
+ * (pemanggil lalu mengirim penjelasan cmd.mstruct). defaultTf = timeframe default pengguna (!tf).
  */
-function parseMstructBtArgs(name, raw) {
+function parseMstructBtArgs(name, raw, defaultTf = "4H") {
   const tokens = String(raw || "").trim().split(/\s+/).filter(Boolean);
   const coins = [];
   const tfs = [];
+  let dir = null;
+  let fx = false;
   let bars = LIMITS.DEFAULT_BARS;
   let barsSet = false;
   const sim = { feeBps: 10, slipBps: 5, nonOverlap: true, beAfterTp1: true };
   for (let i = 0; i < tokens.length; i++) {
-    const raw1 = tokens[i];
-    const up = raw1.toUpperCase();
+    const up = tokens[i].toUpperCase();
     const eq = up.match(/^(BARS|CANDLE)=(\d+)$/); // "bars=2000"
     if (eq) {
       if (barsSet) return null;
@@ -71,10 +78,19 @@ function parseMstructBtArgs(name, raw) {
       sim.slipBps = 0;
     } else if (FLAG_OVERLAP.has(up)) sim.nonOverlap = false;
     else if (FLAG_NOBE.has(up)) sim.beAfterTp1 = false;
-    else if (TF_INPUT[up]) {
+    else if (DIR_ALIASES[up]) {
+      if (dir) return null;
+      dir = DIR_ALIASES[up];
+    } else if (TF_INPUT[up]) {
       if (!tfs.includes(TF_INPUT[up])) tfs.push(TF_INPUT[up]);
     } else {
       const s = up.replace(/[/\-_]/g, "");
+      const pair = resolvePair(s);
+      if (pair) {
+        fx = true;
+        if (!coins.includes(pair)) coins.push(pair);
+        continue;
+      }
       const base = s.length > 4 && s.endsWith("USDT") ? s.slice(0, -4) : s; // "BTCUSDT" -> "BTC"
       if (!/^[A-Z0-9]{1,15}$/.test(base)) return null;
       if (!coins.includes(base)) coins.push(base);
@@ -82,10 +98,15 @@ function parseMstructBtArgs(name, raw) {
   }
   if (coins.length > LIMITS.MAX_COINS) return null;
   if (bars < LIMITS.MIN_BARS || bars > LIMITS.MAX_BARS) return null;
+  if (fx && coins.length > 1) return null; // forex hanya satu pair (analisis saja)
+  if (dir && coins.length !== 1) return null; // long/short hanya untuk analisis satu koin
+  const single = coins.length === 1;
+  const dTf = TF_INPUT[String(defaultTf).toUpperCase()] || null;
+  const btTfs = tfs.length ? tfs : single && dTf ? [dTf] : DEFAULT_TFS;
   const outCoins = coins.length ? coins : DEFAULT_COINS;
-  const outTfs = (tfs.length ? tfs : DEFAULT_TFS).filter((x) => ALLOWED_TFS.includes(x));
-  if (outCoins.length * outTfs.length * bars > LIMITS.MAX_TOTAL_BARS) return null;
-  return { coins: outCoins, tfs: ALLOWED_TFS.filter((x) => outTfs.includes(x)), bars, sim };
+  if (!fx && outCoins.length * btTfs.length * bars > LIMITS.MAX_TOTAL_BARS) return null;
+  const analysis = single ? { coin: coins[0], tf: tfs[0] || String(defaultTf || "4H").toUpperCase(), dir } : null;
+  return { coins: outCoins, tfs: ALLOWED_TFS.filter((x) => btTfs.includes(x)), bars, sim, analysis, skipBacktest: fx };
 }
 
 const tick = () => new Promise((r) => setImmediate(r));
@@ -95,7 +116,7 @@ const tick = () => new Promise((r) => setImmediate(r));
  * Koin yang tidak ada di Binance dilewati (dicatat di `skipped`); kalau SEMUA dilewati, UnsupportedCoinError dilempar.
  * @returns {Promise<{samples: object[], stats: object, skipped: string[], params: object}>}
  */
-const deps = { fetchHistory: fetchCandlesHistory }; // bisa diganti saat uji (tanpa jaringan)
+const deps = { fetchHistory: fetchCandlesHistory, runAnalysis: runMstrut }; // bisa diganti saat uji (tanpa jaringan)
 
 async function collectBacktest({ coins, tfs, bars, sim }, { fetchHistory = deps.fetchHistory } = {}) {
   const samples = [];
@@ -165,7 +186,15 @@ function buildCaption(lang, a, stats, skipped) {
   return cap.slice(0, CAPTION_MAX);
 }
 
-async function runMstructBacktest(sock, msg, { jid, lang }, args) {
+async function runMstructBacktest(sock, msg, ctx, args) {
+  const { jid, lang } = ctx;
+  // 1) Analisis market structure (chart + laporan teks) seperti !mstrut: tetap dikirim, tidak dihapus.
+  if (args.analysis) await deps.runAnalysis(sock, msg, ctx, args.analysis);
+  if (args.skipBacktest) {
+    await sock.sendMessage(jid, { text: t(lang, "mstructbt.fxSkip") }, { quoted: msg });
+    return;
+  }
+  // 2) Backtest skenario -> PDF.
   if (running) {
     await sock.sendMessage(jid, { text: t(lang, "mstructbt.busy") }, { quoted: msg });
     return;

@@ -1885,4 +1885,5 @@ module.exports = {
   "mstructbt.v.no_edge": "tidak terbukti",
   "mstructbt.v.insufficient": "data kurang",
   "mstructbt.skipped": "⚠️ Koin dilewati (tidak ada di Binance): {list}",
+  "mstructbt.fxSkip": "ℹ️ Backtest skenario hanya tersedia untuk kripto (data Binance), jadi untuk forex hanya analisis di atas yang dikirim.",
 };
