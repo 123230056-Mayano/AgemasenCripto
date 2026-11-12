@@ -449,6 +449,16 @@ const HHLL_CONFIG = Object.freeze({
   CHART_BARS: 120, // jumlah candle yang digambar di chart !hhll
 });
 
+// Volume Profile (volumeProfile.js) di !hhll: histogram volume per level harga dari leg swing high <-> low terbaru.
+// POC = level volume terbesar, Value Area = area yang memuat VA_PCT% volume (batas atas VAH, batas bawah VAL).
+const VOLUME_PROFILE_CONFIG = Object.freeze({
+  ENABLED: _bool(process.env.VP_ENABLED, true), // false = !hhll tampil seperti sebelum fitur ini
+  BINS: Math.max(8, _posInt(process.env.VP_BINS, 48)), // jumlah bin harga
+  VA_PCT: _num(process.env.VP_VA_PCT, 70), // persen volume yang dimasukkan ke Value Area
+  MIN_CANDLES: _posInt(process.env.VP_MIN_CANDLES, 5), // candle minimal di dalam leg supaya profile layak
+  CHART_WIDTH: _num(process.env.VP_CHART_WIDTH, 0.2), // lebar histogram maksimum = porsi lebar area chart
+});
+
 // Market Structure lengkap (!mstrut): swing, HH/HL/LH/LL, BSL/SSL, EQH/EQL, sweep, BOS, CHoCH, MSS.
 // Swing memakai pivot yang SAMA dengan !hhll (hhllCore.js) supaya label HH/HL/LH/LL kedua command cocok, tetapi
 // tanpa filter sideways (swing di dalam range tetap dihitung karena di situlah likuiditas BSL/SSL berada).
@@ -834,4 +844,4 @@ const FIBB_ALERT_CONFIG = Object.freeze({
   CONCURRENCY: _posInt(process.env.FIBB_ALERT_CONCURRENCY, 8),
 });
 
-module.exports = { PATTERN_ALERT_CONFIG, INDICATOR_CONFIG, BIAS_CONFIG, SIGNAL_CONFIG, PROB_CONFIG, SUDDEN_CONFIG, POSITION_CONFIG, ADV_ALERT_CONFIG, SNR_ALERT_CONFIG, MSTRUCT_ALERT_CONFIG, SIGNAL_ALERT_CONFIG, HHLL_CONFIG, MSTRUT_CONFIG, MSTRUT_PROB_CONFIG, HHLL_CONTEXT_CONFIG, HHLL_BACKTEST_CONFIG, HHLL_ALERT_CONFIG, TRENSTATE_CONFIG, STRENGTH_CONFIG, GAUSSIAN_CONFIG, PATTERN_CONFIG, AMD_CONFIG, AMD_ALERT_CONFIG, DUSDT_ALERT_CONFIG, FARLEY_CONFIG, FARLEY_ALERT_CONFIG, FIBB_CONFIG, FIBB_ALERT_CONFIG };
+module.exports = { PATTERN_ALERT_CONFIG, INDICATOR_CONFIG, BIAS_CONFIG, SIGNAL_CONFIG, PROB_CONFIG, SUDDEN_CONFIG, POSITION_CONFIG, ADV_ALERT_CONFIG, SNR_ALERT_CONFIG, MSTRUCT_ALERT_CONFIG, SIGNAL_ALERT_CONFIG, HHLL_CONFIG, VOLUME_PROFILE_CONFIG, MSTRUT_CONFIG, MSTRUT_PROB_CONFIG, HHLL_CONTEXT_CONFIG, HHLL_BACKTEST_CONFIG, HHLL_ALERT_CONFIG, TRENSTATE_CONFIG, STRENGTH_CONFIG, GAUSSIAN_CONFIG, PATTERN_CONFIG, AMD_CONFIG, AMD_ALERT_CONFIG, DUSDT_ALERT_CONFIG, FARLEY_CONFIG, FARLEY_ALERT_CONFIG, FIBB_CONFIG, FIBB_ALERT_CONFIG };
