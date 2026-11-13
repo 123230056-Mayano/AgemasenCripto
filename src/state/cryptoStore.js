@@ -840,7 +840,7 @@ function allSnrAlerts() {
 
 // ---------- alarm market structure (!alertmstruct) ----------
 /**
- * mstructAlerts: [{ id: "m1", chat, coin: "BTC"|"EURUSD"|"WATCHLIST", tf, kinds: ["bos","choch","mss","bsl","ssl"],
+ * mstructAlerts: [{ id: "m1", chat, coin: "BTC"|"EURUSD"|"WATCHLIST", tf, kinds: ["bos","choch","mss","bsl","ssl","zlong","zshort"],
  *                   createdAt, active: true }]
  * Hanya konfirmasi (candle closed). Penanda kejadian terkirim memakai kunci dedupe yang sama dengan alarm lain (wasSent / markSent).
  */

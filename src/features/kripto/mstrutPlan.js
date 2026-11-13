@@ -19,7 +19,8 @@
  *   Leg         : impuls terakhir searah arah (SHORT: swing high -> swing low terakhir; LONG sebaliknya).
  *                 Ujung leg memakai ekstrem candle closed sejak swing itu (low/high baru ikut dihitung).
  *   Entry Zone  : retrace 50% - 79% dari leg (premium untuk SHORT, discount untuk LONG). Kalau harga sudah
- *                 berada di dalam / melewati batas bawah zona, zona dimulai dari harga sekarang.
+ *                 berada di dalam / melewati batas bawah zona, zona dimulai dari harga sekarang (`entry`).
+ *                 `zone` = zona retrace PENUH yang tidak digeser (stabil selama legnya sama; dipakai !alertmstruct).
  *   Stop Loss   : di luar likuiditas sisi stop TERJAUH yang masih dalam jangkauan SL_MAX_ATR dari zona (termasuk
  *                 EQH/EQL yang berdempetan) dan di luar swing asal leg, + 0,5 ATR. Jadi SL tidak berhenti di
  *                 tengah kolam likuiditas yang mudah kena stop hunt.
@@ -171,6 +172,7 @@ function buildPlan(res, candles, opts = {}) {
   // ---- Entry Zone ----
   let zLo = legLow + C.FIB_LO * leg;
   let zHi = legLow + C.FIB_HI * leg;
+  const zoneFull = [zLo, zHi]; // zona retrace penuh (belum digeser ke harga sekarang); stabil selama leg yang sama, dipakai alarm zona
   let state = "pending";
   if (P >= zLo - 0.1 * A) {
     state = "inzone";
@@ -237,6 +239,7 @@ function buildPlan(res, candles, opts = {}) {
     sideStop,
     sideTarget,
     entry: { ...range(zLo, zHi), mid: f(entry) },
+    zone: range(zoneFull[0], zoneFull[1]),
     sl: f(sl),
     tp1: f(tp1),
     tp2: f(tp2),

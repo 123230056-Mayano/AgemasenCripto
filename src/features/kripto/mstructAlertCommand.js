@@ -5,10 +5,11 @@
  * ------------------------------------------------------------------
  * !alertmstruct: alarm market structure: BOS, CHoCH, MSS, dan sweep BSL / SSL, hanya konfirmasi (candle closed).
  *
- *   !alertmstruct btc 4h                -> semua jenis: BOS, CHoCH, MSS, sweep BSL, sweep SSL (default)
+ *   !alertmstruct btc 4h                -> semua jenis: BOS, CHoCH, MSS, sweep BSL, sweep SSL, zona LONG, zona SHORT (default)
  *   !alertmstruct btc 1h choch mss      -> hanya CHoCH dan MSS
  *   !alertmstruct eth 15m bos           -> hanya BOS
  *   !alertmstruct sol 1h sweep          -> hanya sweep (BSL + SSL); boleh juga bsl / ssl saja
+ *   !alertmstruct btc 1h zone           -> hanya masuk Entry Zone LONG / SHORT; `long` / `short` saja = satu arah
  *   !alertmstruct watchlist 1h
  *   !alertmstruct list | off | hapus <id|semua>
  *

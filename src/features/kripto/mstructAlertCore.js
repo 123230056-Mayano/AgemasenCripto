@@ -6,12 +6,15 @@
  * Logika MURNI alarm market structure (!alertmstruct). Tanpa fetch, tanpa membaca store, tanpa kirim pesan,
  * jadi bisa diuji unit.
  *
- * Lima jenis kejadian, semuanya dari candle CLOSED dan memakai engine yang sama dengan !mstrut (mstrutCore.js):
+ * Tujuh jenis kejadian, semuanya dari candle CLOSED dan memakai engine yang sama dengan !mstrut (mstrutCore.js):
  *   bos   : close pertama melewati swing high/low terakhir SEARAH tren (kelanjutan)
  *   choch : close pertama melewati swing high/low terakhir BERLAWANAN tren (tren berbalik)
  *   mss   : CHoCH yang didahului sweep likuiditas sisi yang sesuai + ditembus candle displacement
  *   bsl   : sweep Buy-Side Liquidity  (wick menembus swing high / EQH, close kembali di bawahnya)
  *   ssl   : sweep Sell-Side Liquidity (wick menembus swing low  / EQL, close kembali di atasnya)
+ *   zlong / zshort : harga (close) MASUK Entry Zone skenario LONG / SHORT !mstrut (mstrutPlan.js, retrace 50% - 79% dari
+ *                    leg impuls). Hanya saat close baru masuk zona (candle sebelumnya masih di luar) dan skenario aktif
+ *                    (bukan WAIT). Zona dibaca dari `plan.zone` (zona penuh), bukan `plan.entry` yang bergeser ke harga.
  *
  * Kejadian dikabari hanya bila terjadi di candle closed TERAKHIR (k === n-1). Hasil analyzeStructure pada candle ke-k
  * tidak berubah ketika candle sesudahnya masuk (tanpa lookahead), jadi kejadian yang sama selalu bernilai sama
@@ -27,9 +30,10 @@ const { t } = require("../../i18n");
 const { MSTRUCT_ALERT_CONFIG: MA } = require("../../config/indicatorConfig");
 const { TF_MS, TF_ORDER, TF_LABEL, COIN_WATCHLIST, fmtCandleTime } = require("./divAlertCore");
 const { analyzeStructure } = require("./mstrutCore");
+const { buildPlan } = require("./mstrutPlan");
 
 // Urutan tetap untuk menampilkan jenis. Tanpa kata kunci = semuanya.
-const KINDS = ["bos", "choch", "mss", "bsl", "ssl"];
+const KINDS = ["bos", "choch", "mss", "bsl", "ssl", "zlong", "zshort"];
 const DEFAULT_KINDS = [...KINDS];
 
 // =====================================================================
@@ -42,7 +46,7 @@ const DEFAULT_KINDS = [...KINDS];
  * @returns {{type:"bos"|"choch"|"mss"|"bsl"|"ssl", dir?:"bull"|"bear", side?:"BSL"|"SSL", level:number, close:number,
  *            refT?:number, bodyAtr?:number|null, sweepLevel?:number|null, wick?:number, eq?:boolean, canMss?:boolean}[]}
  */
-function detectMstruct(closed, opts = {}) {
+function detectMstruct(closed, opts = {}, ctx = {}) {
   if (!closed || !closed.length) return [];
   const a = analyzeStructure(closed, opts);
   if (!a) return [];
@@ -57,7 +61,33 @@ function detectMstruct(closed, opts = {}) {
     if (s.k !== last) continue;
     out.push({ type: s.side === "BSL" ? "bsl" : "ssl", side: s.side, level: s.level, close: s.close, wick: s.wick, eq: !!s.eq });
   }
+  if (ctx.tf) {
+    const z = detectZoneEntry(a, closed, ctx.tf);
+    if (z) out.push(z);
+  }
   return out;
+}
+
+/**
+ * Close terakhir baru MASUK Entry Zone skenario !mstrut? (LONG: close <= batas atas zona + 0,1 ATR; SHORT: close >=
+ * batas bawah zona - 0,1 ATR; sama dengan definisi status "inzone" di buildPlan).
+ * "Baru" = close candle sebelumnya (terhadap zona yang sama) belum berada di zona, jadi duduk di dalam zona tidak
+ * mengirim pesan berulang-ulang. Skenario WAIT (arah tidak jelas, zona jauh, R:R rendah, dst.) tidak dikabari.
+ * @param {object} a hasil analyzeStructure
+ * @param {object[]} closed candle closed
+ * @param {string} tf kunci TF internal (mis. "1H")
+ * @returns {{type:"zone", dir:"long"|"short", level:number, close:number, lo:number, hi:number, sl:number, tp1:number, tp2:number, rr1:number, grade:string}|null}
+ */
+function detectZoneEntry(a, closed, tf) {
+  const X = closed[closed.length - 1];
+  const plan = buildPlan(a, closed, { tf, price: X.c });
+  if (!plan || (plan.dir !== "long" && plan.dir !== "short") || !plan.zone) return null;
+  const tol = 0.1 * plan.atr;
+  const inZone = (price) => (plan.dir === "long" ? price <= plan.zone.hi + tol : price >= plan.zone.lo - tol);
+  if (!inZone(X.c)) return null;
+  const prev = closed[closed.length - 2];
+  if (prev && inZone(prev.c)) return null; // sudah di dalam zona sejak candle sebelumnya
+  return { type: "zone", dir: plan.dir, level: plan.zone.lo, close: X.c, lo: plan.zone.lo, hi: plan.zone.hi, sl: plan.sl, tp1: plan.tp1, tp2: plan.tp2, rr1: plan.rr1, grade: plan.grade };
 }
 
 /**
@@ -72,6 +102,8 @@ function filterByKinds(events, kinds) {
   for (const ev of events) {
     if (ev.type === "bos" || ev.type === "bsl" || ev.type === "ssl") {
       if (want.has(ev.type)) out.push(ev);
+    } else if (ev.type === "zone") {
+      if (want.has(ev.dir === "long" ? "zlong" : "zshort")) out.push(ev);
     } else if (ev.type === "mss") {
       if (want.has("mss")) out.push(ev);
       else if (want.has("choch")) out.push({ ...ev, type: "choch" });
@@ -83,7 +115,7 @@ function filterByKinds(events, kinds) {
 // =====================================================================
 // 2. Kunci dedupe
 // =====================================================================
-/** candleT = waktu BUKA candle yang dinilai. `which` = arah (bull/bear) untuk BOS/CHoCH/MSS, sisi (BSL/SSL) untuk sweep. */
+/** candleT = waktu BUKA candle yang dinilai. `which` = arah (bull/bear) untuk BOS/CHoCH/MSS, sisi (BSL/SSL) untuk sweep, arah (long/short) untuk zona. */
 const mstructKey = (chat, userJid, coin, tf, type, which, candleT) => ["mstruct", chat, userJid, coin, tf, type, which, candleT].join("|");
 
 // =====================================================================
@@ -100,6 +132,11 @@ const KIND_TOKENS = {
   sapu: ["bsl", "ssl"],
   liquidity: ["bsl", "ssl"],
   likuiditas: ["bsl", "ssl"],
+  zone: ["zlong", "zshort"],
+  zona: ["zlong", "zshort"],
+  entry: ["zlong", "zshort"],
+  long: ["zlong"],
+  short: ["zshort"],
 };
 const WATCH_TOKENS = new Set(["watchlist", "wl"]);
 const LIST_TOKENS = new Set(["list", "daftar", "ls"]);
@@ -108,7 +145,7 @@ const OFF_TOKENS = new Set(["off", "mati", "matikan"]);
 const ALL_TOKENS = new Set(["semua", "all"]);
 
 /**
- * !alertmstruct <koin|pair|watchlist> [tf] [bos] [choch] [mss] [bsl] [ssl] [sweep]
+ * !alertmstruct <koin|pair|watchlist> [tf] [bos] [choch] [mss] [bsl] [ssl] [sweep] [zone] [long] [short]
  * !alertmstruct list | off | hapus <id|semua>
  * @returns {object|null} null = format salah (-> tampilkan penjelasan command)
  */
@@ -165,10 +202,14 @@ function buildLine(lang, ev) {
     sweep: Number.isFinite(ev.sweepLevel) ? fmtLevel(ev.sweepLevel) : "-",
     eq: ev.eq ? t(lang, ev.side === "BSL" ? "mstructalert.eqh" : "mstructalert.eql") : "",
   };
+  if (ev.type === "zone") {
+    const x = (v) => (Number.isFinite(v) ? (lang === "id" ? v.toFixed(1).replace(".", ",") : v.toFixed(1)) : "-");
+    Object.assign(vars, { lo: fmtLevel(ev.lo), hi: fmtLevel(ev.hi), sl: fmtLevel(ev.sl), tp1: fmtLevel(ev.tp1), tp2: fmtLevel(ev.tp2), rr: x(ev.rr1) });
+  }
   return t(lang, `mstructalert.line.${ev.type}.${which}`, vars);
 }
 
-const TYPE_ORDER = { mss: 0, choch: 1, bos: 2, bsl: 3, ssl: 4 };
+const TYPE_ORDER = { mss: 0, choch: 1, bos: 2, bsl: 3, ssl: 4, zone: 5 };
 
 /** TF besar dulu, lalu koin, lalu MSS > CHoCH > BOS > sweep. */
 function sortEvents(events) {
@@ -202,6 +243,7 @@ module.exports = {
   KINDS,
   DEFAULT_KINDS,
   detectMstruct,
+  detectZoneEntry,
   filterByKinds,
   mstructKey,
   parseMstructArgs,

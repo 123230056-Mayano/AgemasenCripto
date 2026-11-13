@@ -3,7 +3,8 @@
 /**
  * features/kripto/mstructAlertEngine.js
  * ------------------------------------------------------------------
- * Mesin alarm market structure (!alertmstruct): BOS, CHoCH, MSS, sweep BSL / SSL. Hanya KONFIRMASI (candle closed).
+ * Mesin alarm market structure (!alertmstruct): BOS, CHoCH, MSS, sweep BSL / SSL, dan masuk Entry Zone LONG / SHORT.
+ * Hanya KONFIRMASI (candle closed).
  * Semua ketergantungan (store, fetch candle, kirim pesan, bahasa) disuntik lewat createMstructEngine(), jadi seluruh
  * alur bisa diuji dengan data palsu tanpa jaringan. alertMonitor.js membuat satu engine dan memanggil tick()
  * tiap MSTRUCT_ALERT_CONFIG.CHECK_MS.
@@ -68,7 +69,7 @@ function createMstructEngine(deps) {
     if (!finalReady || X.t + tfMs <= sub.createdAt) return out;
 
     const base = { chat: sub.chat, userJid, coin, tf, subId: sub.id };
-    const detected = shared || detectMstruct(closed);
+    const detected = shared || detectMstruct(closed, {}, { tf });
     for (const ev of filterByKinds(detected, sub.kinds)) {
       const key = mstructKey(sub.chat, userJid, coin, tf, ev.type, ev.dir || ev.side, X.t);
       if (store.wasSent(key)) continue;
@@ -190,7 +191,7 @@ function createMstructEngine(deps) {
       let shared = null; // analisis struktur dihitung sekali per koin+TF, dipakai semua langganan
       try {
         const closed = (candles || []).filter((c) => c.closed !== false);
-        if (closed.length >= MSTRUT_CONFIG.MIN_CANDLES) shared = detectMstruct(closed);
+        if (closed.length >= MSTRUT_CONFIG.MIN_CANDLES) shared = detectMstruct(closed, {}, { tf });
       } catch (err) {
         log(`[mstructalert] gagal menganalisis ${coin} ${tf}:`, err.message);
         return;
