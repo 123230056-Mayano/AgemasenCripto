@@ -28,7 +28,7 @@ const { DAILY_TZ } = require("./divAlertCore");
 const { computeStructure, CFG } = require("./hhllCore");
 const { htfOf, assessEvent, scanStatus, CX } = require("./hhllContext");
 const { lookupStats } = require("./hhllBacktest");
-const { volumeProfileForStructure, pricePosition, CFG: VP_CFG } = require("./volumeProfile");
+const { volumeProfileForStructure, dualVolumeProfiles, pricePosition, CFG: VP_CFG } = require("./volumeProfile");
 const { TF_LABEL: TF_NAMES } = require("./divAlertCore");
 
 const CAPTION_MAX = 1000; // batas aman caption gambar WhatsApp (1024)
@@ -46,7 +46,7 @@ function fmtWhen(lang, ms, tf) {
 
 // ---------- chart ----------
 /** @returns {Buffer} PNG */
-function renderHhllChart({ candles, coin, tf, st, title: titleOverride = null, minPct = CFG.MIN_SWING_PCT, scenario = null, digits = null, vp = null }) {
+function renderHhllChart({ candles, coin, tf, st, title: titleOverride = null, minPct = CFG.MIN_SWING_PCT, scenario = null, digits = null, vp = null, vp2 = null }) {
   if (!candles || candles.length < 10) throw new Error("CANDLES_TOO_FEW");
   const fmtPrice = (p) => fmtPriceKit(p, digits); // digits = presisi tetap pair forex; null = format bertingkat kripto (perilaku lama)
   const family = fontFamily();
@@ -86,6 +86,13 @@ function renderHhllChart({ candles, coin, tf, st, title: titleOverride = null, m
         .map(([price, label, color]) => ({ price, label, color }))
     : [];
 
+  // level profile LH terbaru (VAH / POC / VAL): warna biru-hijau supaya beda dari profile utama
+  const vp2Levels = vp2
+    ? [[vp2.vah, "LH-VAH", "#38bdf8"], [vp2.poc.price, "LH-POC", "#a78bfa"], [vp2.val, "LH-VAL", "#fb7185"]]
+        .filter(([price]) => price >= lo && price <= hi)
+        .map(([price, label, color]) => ({ price, label, color }))
+    : [];
+
   const W = 1600;
   const Lm = 20;
   const Rm = 190;
@@ -113,7 +120,7 @@ function renderHhllChart({ candles, coin, tf, st, title: titleOverride = null, m
   g.textAlign = "left";
   g.lineWidth = 1;
   const step = niceStep(hi - lo, 8);
-  const tagYs = [...keyLevels.map((k) => Yp(k.price)), ...scnLevels.map((k) => Yp(k.price)), ...vpLevels.map((k) => Yp(k.price)), Yp(last.c)];
+  const tagYs = [...keyLevels.map((k) => Yp(k.price)), ...scnLevels.map((k) => Yp(k.price)), ...vpLevels.map((k) => Yp(k.price)), ...vp2Levels.map((k) => Yp(k.price)), Yp(last.c)];
   for (let p = Math.ceil(lo / step) * step; p <= hi; p += step) {
     const yy = Math.round(Yp(p)) + 0.5;
     g.strokeStyle = C.grid;
@@ -159,6 +166,25 @@ function renderHhllChart({ candles, coin, tf, st, title: titleOverride = null, m
     g.restore();
   }
 
+  // volume profile ke-2 (dari Lower High terbaru): histogram mulai dari candle LH, memanjang ke kanan.
+  if (vp2) {
+    const maxW = cw * VP_CFG.CHART_WIDTH;
+    const x0 = Math.max(pPrice.x, X(Math.max(vp2.from, from)) - slot / 2);
+    g.save();
+    g.beginPath();
+    g.rect(pPrice.x, pPrice.y, pPrice.w, pPrice.h);
+    g.clip();
+    for (const b of vp2.bins) {
+      if (!(b.vol > 0) || b.hi < lo || b.lo > hi) continue;
+      const yTop = Yp(b.hi);
+      const yBot = Yp(b.lo);
+      const w = (b.vol / vp2.maxVol) * maxW;
+      g.fillStyle = b.inVA ? "rgba(56,189,248,0.50)" : "rgba(139,147,161,0.28)";
+      g.fillRect(x0, yTop + 0.5, w, Math.max(1, yBot - yTop - 1));
+    }
+    g.restore();
+  }
+
   // garis swing high / low terakhir: dari pivotnya sampai tepi kanan (ini level yang dipantau alarm)
   for (const k of keyLevels) {
     const sw = k.label === "High" ? st.lastHigh : st.lastLow;
@@ -200,6 +226,22 @@ function renderHhllChart({ candles, coin, tf, st, title: titleOverride = null, m
     g.globalAlpha = 0.85;
     g.beginPath();
     g.moveTo(pPrice.x, yy);
+    g.lineTo(pPrice.x + pPrice.w, yy);
+    g.stroke();
+    g.restore();
+  }
+
+  // garis VAH / POC / VAL profile LH: dari candle LH sampai tepi kanan, putus-putus
+  for (const k of vp2Levels) {
+    const x0 = Math.max(pPrice.x, X(Math.max(vp2.from, from)));
+    const yy = Math.round(Yp(k.price)) + 0.5;
+    g.save();
+    g.strokeStyle = k.color;
+    g.lineWidth = k.label === "LH-POC" ? 1.8 : 1.4;
+    g.setLineDash([6, 5]);
+    g.globalAlpha = 0.9;
+    g.beginPath();
+    g.moveTo(x0, yy);
     g.lineTo(pPrice.x + pPrice.w, yy);
     g.stroke();
     g.restore();
@@ -294,7 +336,7 @@ function renderHhllChart({ candles, coin, tf, st, title: titleOverride = null, m
       g.restore();
     };
     const lastColor = last.c >= last.o ? C.up : C.down;
-    const tags = [...keyLevels.map((k) => ({ txt: `${k.label} ${fmtPrice(k.price)}`, y: Yp(k.price), color: k.color })), ...scnLevels.map((k) => ({ txt: `${k.label} ${fmtPrice(k.price)}`, y: Yp(k.price), color: k.color })), ...vpLevels.map((k) => ({ txt: `${k.label} ${fmtPrice(k.price)}`, y: Yp(k.price), color: k.color })), { txt: fmtPrice(last.c), y: Yp(last.c), color: lastColor }].sort((a, b) => a.y - b.y);
+    const tags = [...keyLevels.map((k) => ({ txt: `${k.label} ${fmtPrice(k.price)}`, y: Yp(k.price), color: k.color })), ...scnLevels.map((k) => ({ txt: `${k.label} ${fmtPrice(k.price)}`, y: Yp(k.price), color: k.color })), ...vpLevels.map((k) => ({ txt: `${k.label} ${fmtPrice(k.price)}`, y: Yp(k.price), color: k.color })), ...vp2Levels.map((k) => ({ txt: `${k.label} ${fmtPrice(k.price)}`, y: Yp(k.price), color: k.color })), { txt: fmtPrice(last.c), y: Yp(last.c), color: lastColor }].sort((a, b) => a.y - b.y);
     const gapY = 28;
     for (let i = 1; i < tags.length; i++) tags[i].ty = Math.max(tags[i].y, (tags[i - 1].ty ?? tags[i - 1].y) + gapY);
     if (tags.length) tags[0].ty = tags[0].y;
@@ -347,6 +389,16 @@ function buildLevels(lang, st, price, mk = null) {
   if (st.lastHigh) rows.push(t(lang, "hhll.levels.high", { price: fl(st.lastHigh.price), pct: fp(pctFrom(price, st.lastHigh.price)) }) + pipTxt(st.lastHigh.price));
   if (st.lastLow) rows.push(t(lang, "hhll.levels.low", { price: fl(st.lastLow.price), pct: fp(pctFrom(price, st.lastLow.price)) }) + pipTxt(st.lastLow.price));
   return rows.join("\n");
+}
+
+/** Baris teks profile ke-2 (dari LH terbaru): POC / VAH / VAL + arti posisi harga. "" kalau tidak ada. */
+function buildLhProfileLines(lang, vp2, price, mk = null) {
+  if (!vp2) return "";
+  const fl = mk ? mk.fmtLevel : fmtLevel;
+  return [
+    t(lang, "hhll.vp2.line", { poc: fl(vp2.poc.price), vah: fl(vp2.vah), val: fl(vp2.val) }),
+    t(lang, `hhll.vp2.pos.${pricePosition(vp2, price)}`, { vah: fl(vp2.vah), val: fl(vp2.val) }),
+  ].join("\n");
 }
 
 /** Baris teks volume profile (POC / VAH / VAL + posisi harga). "" kalau profile tidak ada. */
@@ -469,14 +521,18 @@ async function runHhll(sock, msg, { jid, lang }, { coin, tf }) {
 
   // volume profile dari leg swing high <-> low terakhir (kripto saja: forex Yahoo tanpa volume). Gagal -> !hhll jalan seperti biasa.
   let vp = null;
+  let vp2 = null;
   if (!isFx && VP_CFG.ENABLED) {
     try {
-      vp = volumeProfileForStructure(candles, st);
+      // 2 profile: macro (high acuan -> low terakhir) + LH terbaru (-> candle terakhir). Tanpa LH: perilaku lama (1 profile).
+      const dual = dualVolumeProfiles(candles, st);
+      vp = dual.macro || volumeProfileForStructure(candles, st);
+      vp2 = dual.lh;
     } catch (err) {
       console.log("[kripto] !hhll volume profile gagal, lanjut tanpa:", err.message);
     }
   }
-  const vpText = buildVolumeProfileLines(lang, vp, tick.price, fx);
+  const vpText = [buildVolumeProfileLines(lang, vp, tick.price, fx), buildLhProfileLines(lang, vp2, tick.price, fx)].filter(Boolean).join("\n");
 
   let caption = t(lang, "hhll.body", {
     coin: isFx ? mk.symbol : `${coin}/USDT`,
@@ -504,7 +560,7 @@ async function runHhll(sock, msg, { jid, lang }, { coin, tf }) {
   // Kalau render gagal (mis. font/canvas bermasalah) tetap kirim versi teks supaya fitur tidak mati total.
   let png = null;
   try {
-    png = renderHhllChart({ candles, coin, tf: TF_LABEL[tf], st, scenario: scn.chart, vp, title: isFx ? `${mk.symbol}  ${TF_LABEL[tf]}  Higher High / Lower Low` : null, digits: isFx ? mk.digits : null });
+    png = renderHhllChart({ candles, coin, tf: TF_LABEL[tf], st, scenario: scn.chart, vp, vp2, title: isFx ? `${mk.symbol}  ${TF_LABEL[tf]}  Higher High / Lower Low` : null, digits: isFx ? mk.digits : null });
   } catch (err) {
     console.log("[kripto] !hhll chart gagal, kirim teks saja:", err.message);
   }
@@ -520,4 +576,4 @@ async function runHhll(sock, msg, { jid, lang }, { coin, tf }) {
   }
 }
 
-module.exports = { runHhll, renderHhllChart, buildSwingLines, buildLevels, buildVolumeProfileLines, buildScenario, loadStats, fmtWhen };
+module.exports = { runHhll, renderHhllChart, buildSwingLines, buildLevels, buildVolumeProfileLines, buildLhProfileLines, buildScenario, loadStats, fmtWhen };

@@ -151,6 +151,57 @@ function volumeProfileForStructure(candles, st, opts = {}) {
   return { ...vp, from: leg.from, to: leg.to };
 }
 
+/**
+ * Dua profile sekaligus (cara baca: "sampai mana koreksinya"):
+ *   macro : dari swing high acuan (swing high lebih tinggi tepat sebelum LH terbaru) sampai swing low terakhir.
+ *           Ini profile besar seluruh turunan.
+ *   lh    : dari Lower High (LH) terbaru sampai candle terakhir. Ini profile koreksi terbaru.
+ * Harga tembus VAH profile LH -> peluang breakout / lanjut naik. Gagal tembus dan jatuh di bawah VAL -> balik ke dasar.
+ * Syarat: ada swing high berlabel "LH" dan swing high acuan sebelumnya. Kalau tidak ada, macro = null dan
+ * pemanggil memakai volumeProfileForStructure biasa; lh = null.
+ * @param {object[]} candles
+ * @param {{swings:object[], lastLow:object|null}} st hasil computeStructure
+ * @returns {{macro:object|null, lh:object|null}}
+ */
+function dualVolumeProfiles(candles, st, opts = {}) {
+  const none = { macro: null, lh: null };
+  if (!candles || !candles.length || !st || !Array.isArray(st.swings)) return none;
+  const highs = st.swings.filter((s) => s.type === "H");
+  let lhIdx = -1;
+  for (let k = highs.length - 1; k >= 0; k--) {
+    if (highs[k].label === "LH") {
+      lhIdx = k;
+      break;
+    }
+  }
+  if (lhIdx < 0) return none;
+  const lhSwing = highs[lhIdx];
+
+  // profile LH: dari pivot LH sampai candle terakhir
+  let lh = null;
+  const lhCandles = candles.slice(lhSwing.i);
+  if (lhCandles.length >= CFG.MIN_CANDLES) {
+    const p = buildProfile(lhCandles, opts);
+    if (p) lh = { ...p, from: lhSwing.i, to: candles.length - 1, anchor: lhSwing.price };
+  }
+
+  // profile macro: swing high acuan (lebih tinggi dari LH, terdekat sebelum LH) -> swing low terakhir
+  let ref = null;
+  for (let k = lhIdx - 1; k >= 0; k--) {
+    if (highs[k].price > lhSwing.price) {
+      ref = highs[k];
+      break;
+    }
+  }
+  let macro = null;
+  if (ref && st.lastLow && st.lastLow.i > ref.i) {
+    const leg = legRange(candles, ref, st.lastLow);
+    const p = leg && buildProfile(leg.candles, opts);
+    if (p) macro = { ...p, from: leg.from, to: leg.to };
+  }
+  return { macro, lh };
+}
+
 /** "above" | "inside" | "below": posisi harga terhadap value area. */
 function pricePosition(vp, price) {
   if (price > vp.vah) return "above";
@@ -158,4 +209,4 @@ function pricePosition(vp, price) {
   return "inside";
 }
 
-module.exports = { CFG, legRange, buildProfile, volumeProfileForStructure, pricePosition };
+module.exports = { CFG, legRange, buildProfile, volumeProfileForStructure, dualVolumeProfiles, pricePosition };
